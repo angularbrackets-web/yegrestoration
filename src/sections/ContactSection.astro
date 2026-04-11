@@ -1,0 +1,251 @@
+---
+import ContactForm from '../components/ContactForm.svelte';
+---
+
+<section
+  id="contact"
+  class="relative bg-yeg-bg min-h-screen py-20 lg:py-0"
+  style="z-index: 60;"
+>
+  <!-- Background Word -->
+  <div
+    class="absolute bg-word opacity-[0.06]"
+    style="left: 4vw; top: 8vh;"
+  >
+    RESPONSE
+  </div>
+
+  <div class="relative w-full min-h-screen flex items-center">
+    <div
+      class="w-full flex flex-col lg:flex-row items-start lg:items-center gap-12 lg:gap-0 px-6 lg:px-[8vw] py-12 lg:py-0"
+    >
+      <!-- Left Column — Info -->
+      <div data-contact-left class="w-full lg:w-[40%] opacity-0">
+        <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+          Get a Free Quote
+        </h2>
+        <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-md mb-10">
+          Tell us what happened. We'll respond within 15 minutes.
+        </p>
+
+        <!-- Contact Details -->
+        <div class="space-y-5 mb-10">
+          <a
+            href="tel:7805550199"
+            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber transition-colors group"
+          >
+            <div
+              class="w-10 h-10 rounded-full bg-yeg-bg-light border border-white/10 flex items-center justify-center group-hover:border-yeg-amber/50 transition-colors"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+                ></path>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs text-yeg-text-secondary uppercase tracking-wider mb-0.5">
+                Emergency Line
+              </p>
+              <p class="font-semibold">(780) 555-0199</p>
+              <p class="text-xs text-yeg-text-secondary/70 mt-0.5">
+                We answer every call live — no voicemail.
+              </p>
+            </div>
+          </a>
+
+          <a
+            href="mailto:help@yegrestoration.ca"
+            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber transition-colors group"
+          >
+            <div
+              class="w-10 h-10 rounded-full bg-yeg-bg-light border border-white/10 flex items-center justify-center group-hover:border-yeg-amber/50 transition-colors"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs text-yeg-text-secondary uppercase tracking-wider mb-0.5">Email</p>
+              <p class="font-semibold">help@yegrestoration.ca</p>
+            </div>
+          </a>
+
+          <div class="flex items-center gap-4 text-yeg-text">
+            <div
+              class="w-10 h-10 rounded-full bg-yeg-bg-light border border-white/10 flex items-center justify-center"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs text-yeg-text-secondary uppercase tracking-wider mb-0.5">Hours</p>
+              <p class="font-semibold">Open 24/7 — including holidays</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-4 text-yeg-text">
+            <div
+              class="w-10 h-10 rounded-full bg-yeg-bg-light border border-white/10 flex items-center justify-center"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs text-yeg-text-secondary uppercase tracking-wider mb-0.5">
+                Service Area
+              </p>
+              <p class="font-semibold">Edmonton &amp; Surrounding Areas</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trust Line -->
+        <div class="flex items-center gap-4 text-xs text-yeg-text-secondary">
+          <div class="flex items-center gap-1.5">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-yeg-amber"
+              aria-hidden="true"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>IICRC certified</span>
+          </div>
+          <span>&bull;</span>
+          <div class="flex items-center gap-1.5">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="currentColor"
+              stroke-width="1"
+              class="text-yeg-amber"
+              aria-hidden="true"
+            >
+              <polygon
+                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+              ></polygon>
+            </svg>
+            <span>Local</span>
+          </div>
+          <span>&bull;</span>
+          <div class="flex items-center gap-1.5">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-yeg-amber"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>24/7</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column — Form -->
+      <div
+        data-contact-form
+        class="w-full lg:w-[50%] lg:ml-auto opacity-0"
+        style="perspective: 1000px;"
+      >
+        <ContactForm client:visible />
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import gsap from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+  gsap.registerPlugin(ScrollTrigger);
+
+  const section = document.querySelector('#contact');
+  if (section) {
+    const leftCol = section.querySelector('[data-contact-left]');
+    const formCard = section.querySelector('[data-contact-form]');
+    const formFields = section.querySelectorAll('.form-field');
+
+    const trigger = { trigger: section, start: 'top 85%', once: true };
+
+    if (leftCol) {
+      gsap.fromTo(leftCol, { x: '-8vw', opacity: 0 }, { x: 0, opacity: 1, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+    }
+
+    if (formCard) {
+      gsap.fromTo(formCard, { x: '8vw', opacity: 0, rotateY: 6 }, { x: 0, opacity: 1, rotateY: 0, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+    }
+
+    if (formFields.length) {
+      gsap.fromTo(formFields, { y: 16, opacity: 0 }, { y: 0, opacity: 1, stagger: 0.06, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+    }
+  }
+</script>

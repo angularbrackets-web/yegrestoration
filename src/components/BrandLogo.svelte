@@ -1,0 +1,31 @@
+<script lang="ts">
+  interface Props {
+    variant?: 'nav' | 'drawer' | 'footer';
+  }
+  let { variant = 'nav' }: Props = $props();
+
+  const shell =
+    variant === 'nav'
+      ? 'h-[48px] w-[130px] sm:h-[52px] sm:w-[145px] lg:h-[56px] lg:w-[160px]'
+      : variant === 'drawer'
+        ? 'h-[52px] w-[150px]'
+        : 'h-[60px] w-[160px] sm:h-[64px] sm:w-[175px]';
+
+  const img =
+    variant === 'nav'
+      ? 'h-[5rem] w-[5rem] sm:h-[5.5rem] sm:w-[5.5rem] lg:h-[6rem] lg:w-[6rem] scale-[1.35] sm:scale-[1.4] lg:scale-[1.45]'
+      : variant === 'drawer'
+        ? 'h-[6rem] w-[6rem] scale-[1.45]'
+        : 'h-[6.5rem] w-[6.5rem] sm:h-[7rem] sm:w-[7rem] scale-[1.35] sm:scale-[1.4]';
+</script>
+
+<span class="bg-yeg-amber inline-flex items-center justify-center overflow-hidden shrink-0 {shell}">
+  <img
+    src="/images/YEG_Restoration_Logo_RBG.png"
+    alt="YEG Restoration — Restore, Recover, Rebuild"
+    width="500"
+    height="500"
+    decoding="async"
+    class="{img} object-contain object-center [transform-origin:center] max-w-none"
+  />
+</span>

@@ -1,0 +1,168 @@
+---
+const testimonials = [
+  {
+    quote:
+      'They showed up within 45 minutes of my call — at 2am on a Sunday. My basement had 4 inches of water and I didn\'t know where to start. The team was calm, professional, and had equipment running within the hour. Back to normal in under two weeks.',
+    name: 'Sandra M.',
+    location: 'Edmonton',
+    service: 'Water damage',
+  },
+  {
+    quote:
+      "As a property manager, I've dealt with plenty of restoration companies. This is the only one I trust completely. Their documentation is thorough, their communication is excellent, and they always deliver on time. My adjusters love working with them.",
+    name: 'David K.',
+    location: 'Sherwood Park',
+    service: 'Property manager',
+  },
+  {
+    quote:
+      "The fire left a smell throughout the whole house that I thought would never go away. Their team spent three days on odour elimination alone. Six months later, you'd never know anything happened.",
+    name: 'Priya T.',
+    location: 'St. Albert',
+    service: 'Fire & smoke',
+  },
+];
+---
+
+<section
+  id="testimonials"
+  class="bg-yeg-bg-light py-20 lg:py-28"
+  style="border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04);"
+>
+  <div class="px-6 lg:px-[8vw]">
+    <!-- Header -->
+    <div
+      data-testimonials-header
+      class="flex flex-col lg:flex-row lg:items-end justify-between mb-12 lg:mb-16 gap-6 opacity-0"
+    >
+      <div>
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+          Client Stories
+        </p>
+        <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-3">
+          Real Stories, Real Results
+        </h2>
+        <p class="text-yeg-text-secondary text-lg">
+          From families and property managers across the Edmonton area.
+        </p>
+      </div>
+
+      <!-- Rating badge -->
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <div class="flex gap-0.5">
+          {
+            Array.from({ length: 5 }).map(() => (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                stroke-width="1"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-yeg-amber"
+                aria-hidden="true"
+              >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            ))
+          }
+        </div>
+        <div class="text-sm text-yeg-text">
+          <span class="font-semibold text-yeg-amber">4.9</span>
+          <span class="text-yeg-text-secondary ml-1">&middot; 287+ Google Reviews</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Review cards -->
+    <div data-testimonials-cards class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {
+        testimonials.map((t) => (
+          <div
+            class="testimonial-card rounded-xl p-px opacity-0"
+            style="background: linear-gradient(135deg, rgba(242,201,76,0.18) 0%, rgba(242,201,76,0.06) 40%, rgba(255,255,255,0.04) 100%);"
+          >
+            <div class="bg-yeg-bg rounded-[11px] p-6 lg:p-8 flex flex-col h-full">
+              <!-- Stars -->
+              <div class="flex gap-0.5 mb-5">
+                {Array.from({ length: 5 }).map(() => (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    class="text-yeg-amber"
+                    aria-hidden="true"
+                  >
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                ))}
+              </div>
+
+              <!-- Quote -->
+              <blockquote class="text-yeg-text text-sm lg:text-base leading-relaxed flex-1 mb-6 font-light">
+                "{t.quote}"
+              </blockquote>
+
+              <!-- Attribution -->
+              <div class="border-t border-white/[0.06] pt-5">
+                <div class="font-semibold text-yeg-text text-sm">{t.name}</div>
+                <div class="text-xs text-yeg-text-secondary mt-0.5">
+                  {t.location} &middot; {t.service}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<script>
+  import gsap from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+  gsap.registerPlugin(ScrollTrigger);
+
+  const section = document.querySelector('#testimonials');
+  if (section) {
+    const header = section.querySelector('[data-testimonials-header]');
+    const cardsContainer = section.querySelector('[data-testimonials-cards]');
+    const cards = section.querySelectorAll('.testimonial-card');
+
+    if (header) {
+      gsap.fromTo(
+        header,
+        { y: 24, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 0.7,
+          ease: 'power2.out',
+          scrollTrigger: { trigger: section, start: 'top 80%', once: true },
+        }
+      );
+    }
+
+    if (cards.length) {
+      gsap.fromTo(
+        cards,
+        { y: 36, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 0.7,
+          stagger: 0.12,
+          ease: 'power2.out',
+          scrollTrigger: { trigger: cardsContainer, start: 'top 85%', once: true },
+        }
+      );
+    }
+  }
+</script>

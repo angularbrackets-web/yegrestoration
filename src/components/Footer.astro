@@ -1,0 +1,233 @@
+---
+import BrandLogo from './BrandLogo.astro';
+
+const footerServices = [
+  { label: 'Water Damage Restoration', href: '#water' },
+  { label: 'Fire Damage Restoration', href: '#fire' },
+  { label: 'Mold Removal', href: '#mold' },
+  { label: 'Storm Damage Repair', href: '#storm' },
+  { label: 'Construction Services', href: '#contact' },
+  { label: 'Contents Restoration', href: '#contact' },
+  { label: 'Biohazard Cleaning', href: '#contact' },
+  { label: 'Asbestos Abatement', href: '#contact' },
+];
+
+const year = new Date().getFullYear();
+---
+
+<footer class="bg-[#080b12] border-t border-white/[0.05]">
+  <div class="px-6 lg:px-[8vw] pt-16 pb-8">
+    <!-- Main Grid -->
+    <div
+      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 lg:gap-8 pb-12 border-b border-white/[0.05]"
+    >
+      <!-- Column 1 — Brand -->
+      <div class="md:col-span-2 lg:col-span-1">
+        <a href="/" class="inline-block mb-5">
+          <BrandLogo variant="footer" />
+        </a>
+
+        <p class="text-sm text-yeg-text-secondary leading-relaxed mb-6 max-w-xs">
+          Edmonton's most trusted emergency restoration team. Available 24/7, 365 days a year —
+          water, fire, mold, storm, and beyond.
+        </p>
+
+        <!-- Certification badges -->
+        <div class="flex flex-wrap gap-2">
+          {
+            ['IICRC Certified', 'Licensed & Insured', 'BBB Accredited'].map((badge) => (
+              <span class="inline-flex items-center gap-1.5 border border-white/10 rounded px-2.5 py-1 text-xs text-yeg-text-secondary">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="text-yeg-amber/60"
+                  aria-hidden="true"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                {badge}
+              </span>
+            ))
+          }
+        </div>
+      </div>
+
+      <!-- Column 2 — Services -->
+      <div>
+        <p class="text-xs font-medium text-yeg-amber/50 uppercase tracking-widest mb-5">
+          Services
+        </p>
+        <ul class="space-y-2.5">
+          {
+            footerServices.map(({ label, href }) => (
+              <li>
+                <a
+                  href={href}
+                  class="text-sm text-yeg-text-secondary hover:text-yeg-text transition-colors duration-200"
+                >
+                  {label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <!-- Column 3 — Contact -->
+      <div>
+        <p class="text-xs font-medium text-yeg-amber/50 uppercase tracking-widest mb-5">
+          Contact
+        </p>
+        <ul class="space-y-4">
+          <li>
+            <a href="tel:7805550199" class="flex items-start gap-3 text-sm group">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-yeg-amber/60 mt-0.5 shrink-0"
+                aria-hidden="true"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+                ></path>
+              </svg>
+              <div>
+                <span
+                  class="text-yeg-text group-hover:text-yeg-amber transition-colors font-medium"
+                >
+                  (780) 555-0199
+                </span>
+                <p class="text-xs text-yeg-text-secondary mt-0.5">Emergency line — live answer</p>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a
+              href="mailto:help@yegrestoration.ca"
+              class="flex items-start gap-3 text-sm group"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-yeg-amber/60 mt-0.5 shrink-0"
+                aria-hidden="true"
+              >
+                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+              <span class="text-yeg-text-secondary group-hover:text-yeg-text transition-colors">
+                help@yegrestoration.ca
+              </span>
+            </a>
+          </li>
+          <li class="flex items-start gap-3 text-sm">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-yeg-amber/60 mt-0.5 shrink-0"
+              aria-hidden="true"
+            >
+              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            <span class="text-yeg-text-secondary">Edmonton, Alberta</span>
+          </li>
+          <li class="flex items-start gap-3 text-sm">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-yeg-amber/60 mt-0.5 shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span class="text-yeg-text-secondary">24/7 Emergency Response</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Column 4 — Emergency CTA -->
+      <div class="md:col-span-2 lg:col-span-1">
+        <p class="text-xs font-medium text-yeg-amber/50 uppercase tracking-widest mb-5">
+          Emergency?
+        </p>
+        <p class="text-sm text-yeg-text-secondary mb-5 leading-relaxed">
+          Specialists answer every call — no voicemail, no hold music, no call centres.
+        </p>
+        <a href="tel:7805550199" class="cta-primary inline-flex">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+            ></path>
+          </svg>
+          <span>(780) 555-0199</span>
+        </a>
+        <p class="text-xs text-yeg-text-secondary/60 mt-3">
+          Or <a
+            href="#contact"
+            class="text-yeg-amber/70 hover:text-yeg-amber transition-colors underline underline-offset-2"
+          >
+            request a callback
+          </a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="flex flex-col sm:flex-row justify-between items-center gap-3 pt-6">
+      <p class="text-xs text-yeg-text-secondary/60">
+        &copy; {year} YEG Restoration. All rights reserved.
+      </p>
+      <p class="text-xs text-yeg-text-secondary/60">
+        Edmonton, Alberta &middot; IICRC Certified &middot; Licensed &amp; Insured
+      </p>
+    </div>
+  </div>
+</footer>

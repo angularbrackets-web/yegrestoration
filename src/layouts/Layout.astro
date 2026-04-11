@@ -1,0 +1,79 @@
+---
+import '../styles/global.css';
+import { localBusinessSchema } from '../lib/seo';
+
+interface Props {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+}
+
+const {
+  title = "YEG Restoration — Edmonton's 24/7 Emergency Restoration Team",
+  description = "Edmonton's #1 emergency restoration team. Water damage, fire & smoke, mold removal, storm repair. 60-minute response, 24/7. IICRC certified. Call us now.",
+  ogImage = '/og-cover.jpg',
+} = Astro.props;
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+const ogImageURL = new URL(ogImage, Astro.site);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Title & Description -->
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalURL} />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImageURL} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_CA" />
+    <meta property="og:site_name" content="YEG Restoration" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
+
+    <!-- Robots + Geo -->
+    <meta
+      name="robots"
+      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+    />
+    <meta name="geo.region" content="CA-AB" />
+    <meta name="geo.placename" content="Edmonton, Alberta" />
+    <meta name="geo.position" content="53.5461;-113.4938" />
+    <meta name="ICBM" content="53.5461, -113.4938" />
+
+    <!-- Favicon -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    <!-- Fonts: preconnect first so DNS resolves early, then stylesheet -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=Inter:wght@400;500;600&family=Source+Serif+4:wght@400;600&display=swap"
+    />
+
+    <!-- LCP Preloads -->
+    <link rel="preload" as="image" href="/before-damage.png" fetchpriority="high" />
+    <link rel="preload" as="image" href="/after-restored.png" fetchpriority="high" />
+    <!-- Structured Data -->
+    <script type="application/ld+json" set:html={JSON.stringify(localBusinessSchema)} />
+  </head>
+  <body class="bg-yeg-bg text-yeg-text antialiased">
+    <slot />
+  </body>
+</html>

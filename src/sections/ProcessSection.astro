@@ -1,0 +1,169 @@
+---
+const steps = [
+  {
+    step: '01',
+    iconPath: `<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"/>`,
+    timing: 'Within 60 min',
+    title: 'Emergency Call',
+    copy: 'Day or night, our emergency line is answered by a restoration specialist — not a call centre. We dispatch a crew immediately.',
+  },
+  {
+    step: '02',
+    iconPath: `<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>`,
+    timing: 'Same day',
+    title: 'Rapid Assessment',
+    copy: 'Our technicians arrive, assess the full scope of damage, and walk you through a clear restoration plan. No surprises.',
+  },
+  {
+    step: '03',
+    iconPath: `<path d="m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14l3-3z"/>`,
+    timing: '1–3 days',
+    title: 'Restoration Begins',
+    copy: 'We get to work immediately — stopping ongoing damage first, then systematically restoring with IICRC-certified methods and industrial equipment.',
+  },
+  {
+    step: '04',
+    iconPath: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>`,
+    timing: 'Complete',
+    title: 'Final Walkthrough',
+    copy: "We don't leave until you're completely satisfied. A final inspection ensures everything meets our quality standard — and yours.",
+  },
+];
+---
+
+<section id="process" class="yeg-surface-paper py-24 lg:py-32 relative overflow-hidden">
+  <div class="relative z-10 px-6 lg:px-[8vw] max-w-7xl mx-auto">
+    <!-- Header -->
+    <div data-process-header class="mb-16 opacity-0">
+      <p class="text-xs font-semibold text-yeg-signal uppercase tracking-[0.2em] mb-4">
+        Our Process
+      </p>
+      <h2
+        class="font-display font-extrabold text-4xl md:text-5xl lg:text-display-lg text-yeg-on-surface mb-5 leading-[1.1]"
+      >
+        From First Call <br class="hidden sm:block" /> to Fully Restored
+      </h2>
+      <p class="text-yeg-on-surface-muted text-lg max-w-xl font-light leading-relaxed">
+        A clear, predictable process — so you always know exactly what happens next.
+      </p>
+    </div>
+
+    <!-- Steps Grid -->
+    <div data-process-steps class="relative mt-8">
+      <!-- Timeline (Desktop) -->
+      <div
+        class="hidden lg:block absolute top-[2.75rem] left-[15%] right-[15%] h-[2px] bg-yeg-signal/10"
+        aria-hidden="true"
+      >
+        <div data-process-progress class="absolute inset-0 bg-yeg-signal origin-left scale-x-0">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
+        {
+          steps.map((item) => (
+            <div class="process-step group flex flex-col opacity-0">
+              <div class="bg-white/40 backdrop-blur-sm rounded-2xl p-8 border border-white/60 shadow-[0_4px_24px_rgba(0,0,0,0.03)] h-full transition-all duration-500 hover:-translate-y-2 hover:bg-white/60 hover:shadow-[0_20px_48px_rgba(0,0,0,0.06)] hover:border-yeg-signal/20">
+                <!-- Step Header -->
+                <div class="flex items-center justify-between mb-8">
+                  <div class="w-14 h-14 rounded-xl bg-yeg-signal/5 border border-yeg-signal/15 flex items-center justify-center relative z-10 group-hover:bg-yeg-signal group-hover:border-yeg-signal transition-all duration-500">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="text-yeg-signal group-hover:text-white transition-colors duration-500"
+                      aria-hidden="true"
+                      set:html={item.iconPath}
+                    />
+                  </div>
+                  <span class="font-display font-black text-yeg-signal/10 text-4xl transition-colors duration-500 group-hover:text-yeg-signal/20">
+                    {item.step}
+                  </span>
+                </div>
+
+                <!-- Timing Badge -->
+                <div class="inline-block text-[10px] font-bold text-yeg-signal uppercase tracking-widest px-2.5 py-1 bg-yeg-signal/10 rounded-md mb-4 border border-yeg-signal/10">
+                  {item.timing}
+                </div>
+
+                <!-- Copy -->
+                <h3 class="font-display font-bold text-xl text-yeg-on-surface mb-3 group-hover:text-yeg-signal transition-colors duration-300">
+                  {item.title}
+                </h3>
+                <p class="text-yeg-on-surface-muted text-[15px] leading-relaxed font-light">
+                  {item.copy}
+                </p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import gsap from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+  gsap.registerPlugin(ScrollTrigger);
+
+  const section = document.querySelector('#process');
+  if (section) {
+    const header = section.querySelector('[data-process-header]');
+    const stepsEl = section.querySelector('[data-process-steps]');
+    const progressBar = section.querySelector('[data-process-progress]');
+    const steps = section.querySelectorAll('.process-step');
+
+    if (header) {
+      gsap.fromTo(
+        header,
+        { y: 24, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 0.8,
+          ease: 'power3.out',
+          scrollTrigger: { trigger: section, start: 'top 80%', once: true },
+        }
+      );
+    }
+
+    if (progressBar) {
+      gsap.fromTo(
+        progressBar,
+        { scaleX: 0 },
+        {
+          scaleX: 1,
+          ease: 'none',
+          scrollTrigger: {
+            trigger: stepsEl,
+            start: 'top 70%',
+            end: 'bottom 60%',
+            scrub: 1,
+          },
+        }
+      );
+    }
+
+    if (steps.length) {
+      gsap.fromTo(
+        steps,
+        { y: 40, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 0.8,
+          stagger: 0.15,
+          ease: 'power3.out',
+          scrollTrigger: { trigger: stepsEl, start: 'top 80%', once: true },
+        }
+      );
+    }
+  }
+</script>

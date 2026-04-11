@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yegrestoration.ca/sitemap-index.xml

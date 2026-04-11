@@ -1,0 +1,264 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 30% 5%;
+    --foreground: 40 20% 95%;
+    --card: 220 25% 8%;
+    --card-foreground: 40 20% 95%;
+    --popover: 220 25% 8%;
+    --popover-foreground: 40 20% 95%;
+    --primary: 43 95% 55%;
+    --primary-foreground: 220 30% 5%;
+    --secondary: 220 20% 12%;
+    --secondary-foreground: 40 20% 95%;
+    --muted: 220 20% 15%;
+    --muted-foreground: 215 15% 65%;
+    --accent: 43 95% 55%;
+    --accent-foreground: 220 30% 5%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 43 95% 55%;
+    --radius: 0.625rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #0b0f17;
+    overflow-x: hidden;
+  }
+}
+
+/* Typography */
+.font-display {
+  font-family: 'Sora', system-ui, sans-serif;
+}
+
+.font-body {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.font-serif {
+  font-family: 'Source Serif 4', Georgia, serif;
+}
+
+/* Film Grain Overlay */
+.grain-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Concrete Texture Overlay */
+.concrete-texture {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='concrete'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='5' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23concrete)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+/* Brand logo: gold container with overflow-clipped image */
+.yeg-logo-gold-blob {
+  @apply bg-yeg-amber;
+  border-radius: 58% 42% 62% 38% / 48% 45% 55% 52%;
+  box-shadow:
+    0 2px 16px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(11, 15, 23, 0.12);
+}
+
+/* Light sections (StatsBar, Process): paper grain */
+.yeg-surface-paper {
+  position: relative;
+  background-color: #f7f5f2;
+  isolation: isolate;
+}
+
+.yeg-surface-paper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.055;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='paper'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23paper)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+/* Background Word Style */
+.bg-word {
+  font-family: 'Sora', system-ui, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  line-height: 0.85;
+  color: rgba(244, 242, 237, 0.06);
+  user-select: none;
+  pointer-events: none;
+  font-size: clamp(96px, 18vw, 280px);
+}
+
+/* Command Strip */
+.command-strip {
+  background: rgba(11, 15, 23, 0.92);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Image Frame */
+.image-frame {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.image-frame img {
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.image-frame:hover img {
+  transform: scale(1.03);
+}
+
+/* CTA Button Styles */
+.cta-primary {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full font-semibold text-sm transition-all duration-200;
+  background-color: #f2c94c;
+  color: #0b0f17;
+}
+
+.cta-primary:hover {
+  transform: scale(1.05);
+  background-color: #f5d56a;
+}
+
+.cta-primary:active {
+  transform: scale(0.98);
+}
+
+.cta-secondary {
+  @apply inline-flex items-center gap-2 text-sm font-medium transition-all duration-200;
+  color: #a9b3c1;
+}
+
+.cta-secondary:hover {
+  color: #f4f2ed;
+}
+
+/* Trust Badge */
+.trust-badge {
+  @apply inline-flex items-center gap-1.5 text-xs font-medium;
+  color: #a9b3c1;
+}
+
+/* 24/7 Badge */
+.badge-24-7 {
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold;
+  background-color: rgba(242, 201, 76, 0.15);
+  color: #f2c94c;
+  border: 1px solid rgba(242, 201, 76, 0.25);
+}
+
+/* Form select arrow */
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23A9B3C1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 40px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0f17;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Selection */
+::selection {
+  background-color: rgba(242, 201, 76, 0.3);
+  color: #f4f2ed;
+}
+
+/* Focus states */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #f2c94c;
+  outline-offset: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-beacon-pulse {
+    animation: none;
+    box-shadow: none;
+  }
+}
+
+/* Mobile command-strip */
+@media (max-width: 1024px) {
+  .command-strip {
+    height: auto;
+    min-height: 60px;
+    padding: 12px 16px;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  .cta-primary {
+    border: 2px solid currentColor;
+  }
+
+  .image-frame {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+}

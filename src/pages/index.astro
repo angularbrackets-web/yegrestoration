@@ -1,0 +1,109 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import CommandStrip from '../components/CommandStrip.astro';
+import Footer from '../components/Footer.astro';
+import HeroSection from '../sections/HeroSection.astro';
+import VideoReel from '../components/VideoReel.svelte';
+import StatsBar from '../components/StatsBar.astro';
+import ServiceSection from '../sections/ServiceSection.astro';
+import AdditionalServices from '../sections/AdditionalServices.astro';
+import ProcessSection from '../sections/ProcessSection.astro';
+import TestimonialsSection from '../sections/TestimonialsSection.astro';
+import ContactSection from '../sections/ContactSection.astro';
+
+const services = [
+  {
+    id: 'water',
+    bgWord: 'FLOOD',
+    tagline: 'Stop the damage before it spreads.',
+    title: 'Water Damage',
+    description:
+      'Rapid extraction, drying, and structural protection. We stop the spread and prevent secondary damage.',
+    features: [
+      "24/7 extraction — we're on-site within 60 minutes",
+      'Industrial drying & dehumidification',
+      'Complete moisture mapping for your insurance claim',
+    ],
+    ctaText: 'Get Free Assessment',
+    imageSrc: '/hero-water.jpg',
+    imageAlt: 'Water damage restoration in Edmonton',
+  },
+  {
+    id: 'fire',
+    bgWord: 'BURN',
+    tagline: 'Every trace of the fire, gone.',
+    title: 'Fire & Smoke Damage',
+    description:
+      'Soot removal, odor neutralization, and structural cleanup—fast, safe, and thorough.',
+    features: [
+      'Emergency board-up & securing',
+      'Soot & residue cleaning',
+      'Thermal fogging & deodorization',
+    ],
+    ctaText: 'Get Free Assessment',
+    imageSrc: '/hero-fire.jpg',
+    imageAlt: 'Fire damage restoration in Edmonton',
+  },
+  {
+    id: 'mold',
+    bgWord: 'MOLD',
+    tagline: 'Safely removed. Not just masked.',
+    title: 'Mold Remediation',
+    description:
+      'Containment, removal, and prevention—built around safety and air quality.',
+    features: [
+      'Containment & negative air setup',
+      'HEPA filtration & removal',
+      'Prevention plan & moisture control',
+    ],
+    ctaText: 'Get Free Assessment',
+    imageSrc: '/hero-mold.jpg',
+    imageAlt: 'Mold remediation in Edmonton',
+  },
+  {
+    id: 'storm',
+    bgWord: 'STORM',
+    tagline: 'Emergency response, same day.',
+    title: 'Storm Damage',
+    description:
+      'Roof tarps, debris removal, and structural stabilization when the weather strikes.',
+    features: [
+      'Emergency roof tarps & patching',
+      'Debris removal & tree impact',
+      'Structural stabilization',
+    ],
+    ctaText: 'Get Free Assessment',
+    imageSrc: '/hero-storm.jpg',
+    imageAlt: 'Storm damage repair in Edmonton',
+  },
+];
+---
+
+<Layout>
+  <!-- Texture overlays -->
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <!-- Navbar island (hydrates immediately for scroll detection) -->
+  <Navbar client:load />
+
+  <!-- Main content -->
+  <main id="main-content" class="relative">
+    <HeroSection />
+    <VideoReel client:visible />
+    <StatsBar />
+    {
+      services.map((service, i) => (
+        <ServiceSection {...service} reversed={i % 2 !== 0} />
+      ))
+    }
+    <AdditionalServices />
+    <ProcessSection />
+    <TestimonialsSection />
+    <ContactSection />
+  </main>
+
+  <Footer />
+  <CommandStrip />
+</Layout>

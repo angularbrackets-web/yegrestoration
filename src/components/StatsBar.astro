@@ -1,0 +1,41 @@
+---
+const stats = [
+  { value: '60', unit: 'min', label: 'Average arrival time' },
+  { value: '4,200+', unit: '', label: 'Edmonton properties restored' },
+  { value: '16+', unit: 'yrs', label: 'Serving Alberta since 2008' },
+  { value: '100%', unit: '', label: 'Written guarantee on every job' },
+];
+---
+
+<div class="yeg-surface-paper border-y border-black/[0.08]">
+  <div class="relative z-10 grid grid-cols-2 lg:grid-cols-4">
+    {
+      stats.map((stat, i) => (
+        <div
+          class={[
+            'py-10 px-4 lg:px-8 text-center border-black/[0.08]',
+            i < 2 ? 'border-b lg:border-b-0' : '',
+            i === 0 || i === 2 ? 'border-r' : '',
+            i === 1 ? 'lg:border-r' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <div class="flex items-baseline justify-center gap-1 mb-2">
+            <span class="font-display font-black text-4xl lg:text-5xl text-yeg-signal-bright leading-none">
+              {stat.value}
+            </span>
+            {stat.unit && (
+              <span class="font-display font-bold text-lg lg:text-xl text-yeg-signal leading-none">
+                {stat.unit}
+              </span>
+            )}
+          </div>
+          <div class="text-yeg-on-surface-muted text-xs lg:text-sm font-light leading-snug max-w-[140px] mx-auto">
+            {stat.label}
+          </div>
+        </div>
+      ))
+    }
+  </div>
+</div>

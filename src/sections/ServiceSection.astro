@@ -1,0 +1,151 @@
+---
+interface Props {
+  id: string;
+  bgWord: string;
+  tagline: string;
+  title: string;
+  description: string;
+  features: string[];
+  ctaText: string;
+  imageSrc: string;
+  imageAlt: string;
+  reversed?: boolean;
+}
+
+const {
+  id,
+  bgWord,
+  tagline,
+  title,
+  description,
+  features,
+  ctaText,
+  imageSrc,
+  imageAlt,
+  reversed = false,
+} = Astro.props;
+---
+
+<section
+  id={id}
+  class={`relative min-h-screen overflow-hidden flex items-center ${reversed ? 'bg-[#0d1220]' : 'bg-yeg-bg'}`}
+>
+  <!-- Ambient glow -->
+  <div
+    class="absolute inset-0 pointer-events-none"
+    style={reversed
+      ? 'background: radial-gradient(ellipse 60% 50% at 15% 60%, rgba(251,146,60,0.07) 0%, transparent 70%)'
+      : 'background: radial-gradient(ellipse 60% 50% at 85% 60%, rgba(251,146,60,0.07) 0%, transparent 70%)'}
+  >
+  </div>
+
+  <!-- Background Word -->
+  <div
+    class="absolute bg-word opacity-[0.07]"
+    style={reversed ? 'right: 4vw; top: 8vh' : 'left: 4vw; top: 8vh'}
+  >
+    {bgWord}
+  </div>
+
+  <!-- Mobile Image -->
+  <div class="lg:hidden w-full h-52 overflow-hidden relative mt-20">
+    <img
+      src={imageSrc}
+      alt={imageAlt}
+      class="w-full h-full object-cover"
+      loading="lazy"
+      decoding="async"
+    />
+    <div class="absolute inset-0 bg-gradient-to-t from-yeg-bg via-transparent to-transparent">
+    </div>
+  </div>
+
+  <!-- Text Content -->
+  <div
+    class={`relative z-10 w-full lg:w-[45%] px-6 py-10 lg:py-0 ${reversed ? 'lg:ml-auto lg:pr-[8vw] lg:pl-8' : 'lg:px-[8vw]'}`}
+  >
+    <!-- Tagline -->
+    <p class="text-yeg-signal-on-dark text-xs font-medium uppercase tracking-widest mb-3">
+      {tagline}
+    </p>
+
+    <!-- Title -->
+    <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
+      {title}
+    </h2>
+
+    <!-- Description -->
+    <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-md mb-8">
+      {description}
+    </p>
+
+    <!-- Features -->
+    <ul class="space-y-3 mb-10">
+      {
+        features.map((feature) => (
+          <li class="flex items-center gap-3 text-yeg-text">
+            <div class="w-5 h-5 rounded-full bg-yeg-signal-on-dark/20 flex items-center justify-center flex-shrink-0">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-yeg-signal-on-dark"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <span class="text-sm">{feature}</span>
+          </li>
+        ))
+      }
+    </ul>
+
+    <!-- CTA -->
+    <a href="#contact" class="cta-primary">
+      <span>{ctaText}</span>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M5 12h14"></path>
+        <path d="m12 5 7 7-7 7"></path>
+      </svg>
+    </a>
+  </div>
+
+  <!-- Desktop Image -->
+  <div
+    class={`hidden lg:block absolute ${reversed ? 'left-[6vw]' : 'right-[6vw]'} top-[18vh] w-[46vw] h-[56vh]`}
+  >
+    <div class="image-frame w-full h-full rounded-lg">
+      <img
+        src={imageSrc}
+        alt={imageAlt}
+        class="w-full h-full object-cover"
+        loading="lazy"
+        decoding="async"
+      />
+      <div
+        class={`absolute inset-0 ${reversed ? 'bg-gradient-to-r from-transparent via-transparent to-[#0d1220]/50' : 'bg-gradient-to-l from-transparent via-transparent to-yeg-bg/50'}`}
+      >
+      </div>
+      <div class="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent">
+      </div>
+    </div>
+  </div>
+</section>
