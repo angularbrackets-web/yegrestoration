@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YEG Restoration — Edmonton's 24/7 Emergency Restoration Team</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23F2C94C'/><text x='50%25' y='62%25' text-anchor='middle' font-family='sans-serif' font-weight='900' font-size='18' fill='%230B0F17'>Y</text></svg>" />
+
+    <!-- Font connections — preconnect before the stylesheet so DNS resolves early -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Fonts as <link> not @import — browsers can parallelise this with CSS parsing -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=Inter:wght@400;500;600&family=Source+Serif+4:wght@400;600&display=swap" />
+
+    <!-- Preload LCP candidates -->
+    <link rel="preload" as="image" href="/before-damage.png" />
+    <link rel="preload" as="image" href="/after-restored.png" />
+    <!-- Preload first video so autoplay starts without delay -->
+    <link rel="preload" as="video" href="/videos/hero1.mp4" type="video/mp4" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
