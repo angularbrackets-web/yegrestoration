@@ -28,7 +28,7 @@ const {
 
 <section
   id={id}
-  class={`relative min-h-screen overflow-hidden flex items-center ${reversed ? 'bg-[#0d1220]' : 'bg-yeg-bg'}`}
+  class="relative overflow-hidden flex flex-col lg:flex-row lg:items-center lg:min-h-screen bg-yeg-bg"
 >
   <!-- Ambient glow -->
   <div
@@ -141,7 +141,7 @@ const {
         decoding="async"
       />
       <div
-        class={`absolute inset-0 ${reversed ? 'bg-gradient-to-r from-transparent via-transparent to-[#0d1220]/50' : 'bg-gradient-to-l from-transparent via-transparent to-yeg-bg/50'}`}
+        class={`absolute inset-0 ${reversed ? 'bg-gradient-to-r from-transparent via-transparent to-yeg-bg/50' : 'bg-gradient-to-l from-transparent via-transparent to-yeg-bg/50'}`}
       >
       </div>
       <div class="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent">

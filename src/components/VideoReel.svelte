@@ -15,8 +15,8 @@
     { src: '/videos/hero7.mp4', label: 'Guaranteed Restoration' },
   ];
 
-  let sectionRef: HTMLElement;
-  let videoRefs: HTMLVideoElement[] = [];
+  let sectionRef: HTMLElement | undefined = $state();
+  let videoRefs: HTMLVideoElement[] = $state([]);
 
   let activeIndex = $state(0);
   let fading = $state(false);

@@ -1,0 +1,97 @@
+---
+import { getCollection } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.svelte';
+import Footer from '../../components/Footer.astro';
+import { getReadingTime } from '../../lib/utils';
+
+const posts = await getCollection('blog', ({ data }) => !data.draft);
+const sorted = posts.sort((a, b) => b.data.publishDate.getTime() - a.data.publishDate.getTime());
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+---
+
+<Layout
+  title="Restoration Insights — YEG Restoration Blog"
+  description="Expert guides for Edmonton homeowners dealing with water damage, fire, mold, and storm damage. Practical advice from IICRC-certified restoration professionals."
+>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main id="main-content" class="relative pt-28 pb-24 px-6">
+    <div class="max-w-5xl mx-auto">
+
+      <!-- Header -->
+      <header class="mb-14">
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3 font-serif">
+          Restoration Insights
+        </p>
+        <h1 class="font-display font-bold text-yeg-text mb-4"
+          style="font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -0.03em; line-height: 1.1;">
+          From Our Blog
+        </h1>
+        <p class="text-yeg-text-secondary max-w-xl leading-relaxed">
+          Practical guides for Edmonton homeowners — what to do when disaster strikes, how to prepare before it does, and how to work through the recovery process.
+        </p>
+      </header>
+
+      <!-- Post Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {sorted.map(post => {
+          const readingTime = getReadingTime(post.body ?? '');
+          return (
+            <a
+              href={`/blog/${post.id}/`}
+              class="group block rounded-2xl border border-black/[0.07] bg-white hover:border-yeg-amber/25 transition-all duration-300 overflow-hidden"
+            >
+              {/* Gradient border wrapper */}
+              <div class="p-6 flex flex-col h-full">
+                {/* Tags */}
+                {post.data.tags.length > 0 && (
+                  <div class="flex flex-wrap gap-1.5 mb-4">
+                    {post.data.tags.slice(0, 2).map(tag => (
+                      <span class="text-[10px] font-medium text-yeg-amber/60 uppercase tracking-widest border border-yeg-amber/15 rounded-full px-2 py-0.5">
+                        {tag.replace(/-/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Title */}
+                <h2 class="font-display font-bold text-yeg-text text-lg leading-snug mb-3 group-hover:text-yeg-amber transition-colors duration-200"
+                  style="letter-spacing: -0.02em;">
+                  {post.data.title}
+                </h2>
+
+                {/* Description */}
+                <p class="text-sm text-yeg-text-secondary leading-relaxed mb-5 flex-1">
+                  {post.data.description}
+                </p>
+
+                {/* Footer row */}
+                <div class="flex items-center justify-between pt-4 border-t border-black/[0.06]">
+                  <div class="flex items-center gap-3 text-xs text-yeg-text-secondary/70">
+                    <time datetime={post.data.publishDate.toISOString()}>
+                      {formatDate(post.data.publishDate)}
+                    </time>
+                    <span>·</span>
+                    <span>{readingTime} min read</span>
+                  </div>
+                  <span class="text-xs text-yeg-amber/60 group-hover:text-yeg-amber font-medium transition-colors duration-200">
+                    Read →
+                  </span>
+                </div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

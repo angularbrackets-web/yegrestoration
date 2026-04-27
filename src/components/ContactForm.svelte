@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Send } from 'lucide-svelte';
   import { z } from 'zod';
 
   const schema = z.object({
@@ -40,13 +39,13 @@
   }
 </script>
 
-<div class="bg-yeg-bg-light border border-white/10 rounded-xl p-6 lg:p-10">
+<div class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
   {#if submitted}
     <div class="text-center py-12">
       <div
         class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6"
       >
-        <Send size={32} class="text-yeg-amber" />
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
       </div>
       <h3 class="font-display font-bold text-2xl text-yeg-text mb-2">Request Sent!</h3>
       <p class="text-yeg-text-secondary">We'll call you within 15 minutes.</p>
@@ -64,7 +63,7 @@
             name="name"
             bind:value={formData.name}
             required
-            class="w-full bg-yeg-bg border border-white/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
+            class="w-full bg-yeg-bg border border-black/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
             class:border-red-500={errors.name}
             placeholder="Your name"
           />
@@ -84,9 +83,9 @@
               name="phone"
               bind:value={formData.phone}
               required
-              class="w-full bg-yeg-bg border border-white/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
+              class="w-full bg-yeg-bg border border-black/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
               class:border-red-500={errors.phone}
-              placeholder="(780) 555-0199"
+              placeholder="(780) 479-3285"
             />
             {#if errors.phone}
               <p class="text-red-400 text-xs mt-1">{errors.phone}</p>
@@ -101,7 +100,7 @@
               type="email"
               name="email"
               bind:value={formData.email}
-              class="w-full bg-yeg-bg border border-white/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
+              class="w-full bg-yeg-bg border border-black/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors"
               class:border-red-500={errors.email}
               placeholder="you@email.com"
             />
@@ -120,7 +119,7 @@
             name="service"
             bind:value={formData.service}
             required
-            class="w-full bg-yeg-bg border border-white/10 rounded-lg px-4 py-3 text-yeg-text focus:outline-none focus:border-yeg-amber/50 transition-colors appearance-none cursor-pointer"
+            class="w-full bg-yeg-bg border border-black/10 rounded-lg px-4 py-3 text-yeg-text focus:outline-none focus:border-yeg-amber/50 transition-colors appearance-none cursor-pointer"
             class:border-red-500={errors.service}
           >
             <option value="">Select a service</option>
@@ -148,7 +147,7 @@
             name="message"
             bind:value={formData.message}
             rows={4}
-            class="w-full bg-yeg-bg border border-white/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors resize-none"
+            class="w-full bg-yeg-bg border border-black/10 rounded-lg px-4 py-3 text-yeg-text placeholder-yeg-text-secondary/50 focus:outline-none focus:border-yeg-amber/50 transition-colors resize-none"
             placeholder="Describe the emergency..."
           ></textarea>
         </div>
@@ -156,7 +155,7 @@
         <!-- Submit -->
         <div class="form-field opacity-0 pt-2">
           <button type="submit" class="cta-primary w-full justify-center">
-            <Send size={16} />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             <span>Send Request</span>
           </button>
         </div>

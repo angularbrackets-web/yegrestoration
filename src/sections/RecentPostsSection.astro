@@ -1,0 +1,116 @@
+---
+import { getCollection } from 'astro:content';
+import { getReadingTime } from '../lib/utils';
+
+const allPosts = await getCollection('blog', ({ data }) => !data.draft);
+const posts = allPosts
+  .sort((a, b) => b.data.publishDate.getTime() - a.data.publishDate.getTime())
+  .slice(0, 3);
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+---
+
+<section id="blog" class="py-24 px-6">
+  <div class="max-w-6xl mx-auto">
+
+    <!-- Section Header -->
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-12">
+      <div>
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3 font-serif">
+          From Our Blog
+        </p>
+        <h2 class="font-display font-bold text-yeg-text"
+          style="font-size: clamp(1.75rem, 4vw, 2.75rem); letter-spacing: -0.03em; line-height: 1.15;">
+          Restoration Insights
+        </h2>
+      </div>
+      <a
+        href="/blog/"
+        class="shrink-0 inline-flex items-center gap-2 text-sm text-yeg-text-secondary hover:text-yeg-amber transition-colors duration-200 font-medium"
+      >
+        View all articles
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14"></path>
+          <path d="m12 5 7 7-7 7"></path>
+        </svg>
+      </a>
+    </div>
+
+    <!-- Post Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 js-blog-cards">
+      {posts.map(post => {
+        const readingTime = getReadingTime(post.body ?? '');
+        return (
+          <a
+            href={`/blog/${post.id}/`}
+            class="group block rounded-2xl border border-black/[0.07] bg-white hover:border-yeg-amber/25 transition-all duration-300 overflow-hidden opacity-0 translate-y-6"
+          >
+            <div class="p-6 flex flex-col h-full">
+              {/* Tags */}
+              {post.data.tags.length > 0 && (
+                <div class="flex flex-wrap gap-1.5 mb-4">
+                  {post.data.tags.slice(0, 2).map(tag => (
+                    <span class="text-[10px] font-medium text-yeg-amber/60 uppercase tracking-widest border border-yeg-amber/15 rounded-full px-2 py-0.5">
+                      {tag.replace(/-/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Title */}
+              <h3 class="font-display font-bold text-yeg-text text-lg leading-snug mb-3 group-hover:text-yeg-amber transition-colors duration-200 flex-1"
+                style="letter-spacing: -0.02em;">
+                {post.data.title}
+              </h3>
+
+              {/* Description */}
+              <p class="text-sm text-yeg-text-secondary leading-relaxed mb-5 line-clamp-3">
+                {post.data.description}
+              </p>
+
+              {/* Footer row */}
+              <div class="flex items-center justify-between pt-4 border-t border-black/[0.06]">
+                <div class="flex items-center gap-3 text-xs text-yeg-text-secondary/70">
+                  <time datetime={post.data.publishDate.toISOString()}>
+                    {formatDate(post.data.publishDate)}
+                  </time>
+                  <span>·</span>
+                  <span>{readingTime} min read</span>
+                </div>
+                <span class="text-xs text-yeg-amber/60 group-hover:text-yeg-amber font-medium transition-colors duration-200">
+                  Read →
+                </span>
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  </div>
+</section>
+
+<script>
+  import { gsap } from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  const cards = document.querySelectorAll('.js-blog-cards > a');
+  if (cards.length > 0) {
+    gsap.to(cards, {
+      opacity: 1,
+      y: 0,
+      duration: 0.6,
+      stagger: 0.12,
+      ease: 'power2.out',
+      scrollTrigger: {
+        trigger: '.js-blog-cards',
+        start: 'top 85%',
+        once: true,
+      },
+    });
+  }
+</script>

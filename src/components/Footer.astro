@@ -33,7 +33,7 @@ const year = new Date().getFullYear();
         </p>
 
         <!-- Certification badges -->
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2 mb-6">
           {
             ['IICRC Certified', 'Licensed & Insured', 'BBB Accredited'].map((badge) => (
               <span class="inline-flex items-center gap-1.5 border border-white/10 rounded px-2.5 py-1 text-xs text-yeg-text-secondary">
@@ -57,14 +57,58 @@ const year = new Date().getFullYear();
             ))
           }
         </div>
+
+        <!-- Social Links -->
+        <div class="flex items-center gap-2">
+          <!-- Facebook — PLACEHOLDER URL -->
+          <a
+            href="https://www.facebook.com/yegrestoration"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YEG Restoration on Facebook"
+            class="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center text-yeg-text-secondary hover:text-yeg-amber hover:border-yeg-amber/30 transition-all duration-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
+            </svg>
+          </a>
+
+          <!-- Instagram — PLACEHOLDER URL -->
+          <a
+            href="https://www.instagram.com/yegrestoration"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YEG Restoration on Instagram"
+            class="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center text-yeg-text-secondary hover:text-yeg-amber hover:border-yeg-amber/30 transition-all duration-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+              <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+            </svg>
+          </a>
+
+          <!-- Google Business Profile — PLACEHOLDER URL -->
+          <a
+            href="https://maps.app.goo.gl/yegrestoration"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YEG Restoration on Google Business"
+            class="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center text-yeg-text-secondary hover:text-yeg-amber hover:border-yeg-amber/30 transition-all duration-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+          </a>
+        </div>
       </div>
 
-      <!-- Column 2 — Services -->
+      <!-- Column 2 — Services + Resources -->
       <div>
         <p class="text-xs font-medium text-yeg-amber/50 uppercase tracking-widest mb-5">
           Services
         </p>
-        <ul class="space-y-2.5">
+        <ul class="space-y-2.5 mb-7">
           {
             footerServices.map(({ label, href }) => (
               <li>
@@ -78,6 +122,21 @@ const year = new Date().getFullYear();
             ))
           }
         </ul>
+        <p class="text-xs font-medium text-yeg-amber/50 uppercase tracking-widest mb-4">
+          Resources
+        </p>
+        <ul class="space-y-2.5">
+          <li>
+            <a href="/blog/" class="text-sm text-yeg-text-secondary hover:text-yeg-text transition-colors duration-200">
+              Blog
+            </a>
+          </li>
+          <li>
+            <a href="/rss.xml" class="text-sm text-yeg-text-secondary hover:text-yeg-text transition-colors duration-200">
+              RSS Feed
+            </a>
+          </li>
+        </ul>
       </div>
 
       <!-- Column 3 — Contact -->
@@ -87,7 +146,7 @@ const year = new Date().getFullYear();
         </p>
         <ul class="space-y-4">
           <li>
-            <a href="tel:7805550199" class="flex items-start gap-3 text-sm group">
+            <a href="tel:7804793285" class="flex items-start gap-3 text-sm group">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
@@ -109,7 +168,7 @@ const year = new Date().getFullYear();
                 <span
                   class="text-yeg-text group-hover:text-yeg-amber transition-colors font-medium"
                 >
-                  (780) 555-0199
+                  (780) 479-3285
                 </span>
                 <p class="text-xs text-yeg-text-secondary mt-0.5">Emergency line — live answer</p>
               </div>
@@ -117,7 +176,7 @@ const year = new Date().getFullYear();
           </li>
           <li>
             <a
-              href="mailto:help@yegrestoration.ca"
+              href="mailto:info@yegrestoration.ca"
               class="flex items-start gap-3 text-sm group"
             >
               <svg
@@ -137,7 +196,7 @@ const year = new Date().getFullYear();
                 <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
               </svg>
               <span class="text-yeg-text-secondary group-hover:text-yeg-text transition-colors">
-                help@yegrestoration.ca
+                info@yegrestoration.ca
               </span>
             </a>
           </li>
@@ -190,7 +249,7 @@ const year = new Date().getFullYear();
         <p class="text-sm text-yeg-text-secondary mb-5 leading-relaxed">
           Specialists answer every call — no voicemail, no hold music, no call centres.
         </p>
-        <a href="tel:7805550199" class="cta-primary inline-flex">
+        <a href="tel:7804793285" class="cta-primary inline-flex">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -207,7 +266,7 @@ const year = new Date().getFullYear();
               d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
             ></path>
           </svg>
-          <span>(780) 555-0199</span>
+          <span>(780) 479-3285</span>
         </a>
         <p class="text-xs text-yeg-text-secondary/60 mt-3">
           Or <a

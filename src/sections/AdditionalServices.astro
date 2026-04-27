@@ -1,26 +1,21 @@
 ---
-// Icon SVG paths keyed by service
 const services = [
   {
-    iconPath: `<path d="m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14l3-3z"/>`,
     title: 'Construction Services',
     description:
       'Full rebuild and repair after damage. From structural work to finishing — one team, start to finish.',
   },
   {
-    iconPath: `<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`,
     title: 'Contents Restoration',
     description:
       'Salvaging and restoring furniture, documents, electronics, and belongings that matter to you.',
   },
   {
-    iconPath: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/>`,
     title: 'Biohazard Cleaning',
     description:
       'Safe, discreet decontamination and disposal for trauma, sewage, and hazardous material events.',
   },
   {
-    iconPath: `<path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>`,
     title: 'Asbestos Abatement',
     description:
       'Certified identification, containment, and full removal of asbestos-containing materials.',
@@ -29,7 +24,7 @@ const services = [
 ---
 
 <section
-  class="relative bg-[#0B0F17] border-y border-white/[0.06] py-24 px-6 lg:px-[8vw] overflow-hidden"
+  class="relative bg-yeg-bg border-y border-black/[0.06] py-24 px-6 lg:px-[8vw] overflow-hidden"
 >
   <!-- Ambient glow -->
   <div
@@ -54,40 +49,21 @@ const services = [
     <!-- Bento Grid -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
       {
-        services.map(({ iconPath, title, description }, index) => {
+        services.map(({ title, description }, index) => {
           const isLarge = index === 0 || index === 3;
           return (
             <div
-              class={`relative group bg-[#0F141E] rounded-2xl p-8 border border-white/[0.04] flex flex-col gap-6 overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:border-white/[0.08] hover:shadow-[0_16px_40px_rgba(0,0,0,0.5)] ${isLarge ? 'md:col-span-2' : 'md:col-span-1'}`}
+              class={`relative group bg-white rounded-2xl p-8 border border-black/[0.06] flex flex-col gap-6 overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:border-yeg-amber/30 hover:shadow-[0_16px_40px_rgba(0,0,0,0.08)] ${isLarge ? 'md:col-span-2' : 'md:col-span-1'}`}
             >
               <!-- Hover glow -->
               <div class="absolute inset-0 bg-gradient-to-br from-yeg-amber/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
               <!-- Top edge gloss -->
-              <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.1] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-yeg-amber/[0.2] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
               <div class="relative z-10 flex flex-col h-full">
-                <!-- Icon -->
-                <div class="w-14 h-14 rounded-xl bg-[#151B28] border border-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] flex items-center justify-center relative overflow-hidden mb-4 group-hover:border-white/[0.12] transition-colors duration-500">
-                  <div class="absolute inset-0 bg-yeg-amber/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-yeg-amber relative z-10"
-                    aria-hidden="true"
-                    set:html={iconPath}
-                  />
-                </div>
-
                 <!-- Text -->
                 <div class="flex-1">
-                  <h3 class="font-display font-bold text-2xl text-white mb-3 tracking-wide group-hover:text-yeg-amber transition-colors duration-500">
+                  <h3 class="font-display font-bold text-2xl text-yeg-text mb-3 tracking-wide group-hover:text-yeg-amber transition-colors duration-500">
                     {title}
                   </h3>
                   <p class="text-base text-yeg-text-secondary leading-relaxed sm:max-w-md">
@@ -96,7 +72,7 @@ const services = [
                 </div>
 
                 <!-- CTA -->
-                <div class="mt-8 pt-6 border-t border-white/[0.04]">
+                <div class="mt-8 pt-6 border-t border-black/[0.06]">
                   <a
                     href="#contact"
                     class="inline-flex items-center gap-2 text-sm text-yeg-amber/70 hover:text-yeg-amber transition-colors group/cta"

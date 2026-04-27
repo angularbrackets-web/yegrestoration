@@ -27,7 +27,7 @@ const testimonials = [
 <section
   id="testimonials"
   class="bg-yeg-bg-light py-20 lg:py-28"
-  style="border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04);"
+  style="border-top: 1px solid rgba(0,0,0,0.06); border-bottom: 1px solid rgba(0,0,0,0.06);"
 >
   <div class="px-6 lg:px-[8vw]">
     <!-- Header -->
@@ -83,7 +83,7 @@ const testimonials = [
         testimonials.map((t) => (
           <div
             class="testimonial-card rounded-xl p-px opacity-0"
-            style="background: linear-gradient(135deg, rgba(242,201,76,0.18) 0%, rgba(242,201,76,0.06) 40%, rgba(255,255,255,0.04) 100%);"
+            style="background: linear-gradient(135deg, rgba(242,201,76,0.25) 0%, rgba(242,201,76,0.10) 40%, rgba(0,0,0,0.03) 100%);"
           >
             <div class="bg-yeg-bg rounded-[11px] p-6 lg:p-8 flex flex-col h-full">
               <!-- Stars -->
@@ -111,7 +111,7 @@ const testimonials = [
               </blockquote>
 
               <!-- Attribution -->
-              <div class="border-t border-white/[0.06] pt-5">
+              <div class="border-t border-black/[0.06] pt-5">
                 <div class="font-semibold text-yeg-text text-sm">{t.name}</div>
                 <div class="text-xs text-yeg-text-secondary mt-0.5">
                   {t.location} &middot; {t.service}

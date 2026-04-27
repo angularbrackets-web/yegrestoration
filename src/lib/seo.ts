@@ -1,3 +1,49 @@
+export interface BlogArticleSchemaProps {
+  title: string;
+  description: string;
+  publishDate: Date;
+  updatedDate?: Date;
+  slug: string;
+  heroImage?: string;
+}
+
+export function blogArticleSchema({
+  title,
+  description,
+  publishDate,
+  updatedDate,
+  slug,
+  heroImage,
+}: BlogArticleSchemaProps) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: title,
+    description,
+    datePublished: publishDate.toISOString(),
+    dateModified: (updatedDate ?? publishDate).toISOString(),
+    image: heroImage ?? 'https://yegrestoration.ca/og-cover.jpg',
+    url: `https://yegrestoration.ca/blog/${slug}/`,
+    mainEntityOfPage: {
+      '@type': 'WebPage',
+      '@id': `https://yegrestoration.ca/blog/${slug}/`,
+    },
+    author: {
+      '@type': 'Organization',
+      name: 'YEG Restoration',
+      url: 'https://yegrestoration.ca',
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'YEG Restoration',
+      logo: {
+        '@type': 'ImageObject',
+        url: 'https://yegrestoration.ca/images/YEG_Restoration_Logo_RBG.png',
+      },
+    },
+  };
+}
+
 export const localBusinessSchema = {
   '@context': 'https://schema.org',
   '@graph': [
@@ -5,8 +51,8 @@ export const localBusinessSchema = {
       '@type': 'EmergencyService',
       name: 'YEG Restoration',
       url: 'https://yegrestoration.ca',
-      telephone: '+1-780-000-0000', // PLACEHOLDER — replace before launch
-      email: 'help@yegrestoration.ca',
+      telephone: '+1-780-479-3285',
+      email: 'info@yegrestoration.ca',
       description:
         "Edmonton's 24/7 emergency restoration team. Water damage, fire & smoke, mold removal, storm repair. IICRC certified.",
       image: 'https://yegrestoration.ca/og-cover.jpg',
@@ -59,7 +105,9 @@ export const localBusinessSchema = {
         bestRating: '5',
       },
       sameAs: [
-        // PLACEHOLDER — add Google Business Profile URL, Facebook, etc.
+        'https://www.facebook.com/yegrestoration', // PLACEHOLDER — update with real URL
+        'https://www.instagram.com/yegrestoration', // PLACEHOLDER — update with real URL
+        'https://maps.app.goo.gl/yegrestoration', // PLACEHOLDER — update with real Google Business Profile URL
       ],
     },
     {

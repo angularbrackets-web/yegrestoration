@@ -1,0 +1,34 @@
+---
+import { getCollection, render } from 'astro:content';
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import { getReadingTime } from '../../lib/utils';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content, remarkPluginFrontmatter } = await render(post);
+
+// Get raw body for reading time (fall back to rendered text estimate)
+const rawContent = post.body ?? '';
+---
+
+<BlogLayout
+  title={post.data.title}
+  description={post.data.description}
+  publishDate={post.data.publishDate}
+  updatedDate={post.data.updatedDate}
+  author={post.data.author}
+  tags={post.data.tags}
+  slug={post.id}
+  heroImage={post.data.heroImage}
+  heroImageAlt={post.data.heroImageAlt}
+  rawContent={rawContent}
+>
+  <Content />
+</BlogLayout>

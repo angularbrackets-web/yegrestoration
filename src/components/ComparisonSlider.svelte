@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ChevronLeft, ChevronRight } from 'lucide-svelte';
   import gsap from 'gsap';
 
   interface Props {
@@ -17,7 +16,7 @@
     afterAlt = 'After image showing restoration',
   }: Props = $props();
 
-  let containerRef: HTMLDivElement;
+  let containerRef: HTMLDivElement | undefined = $state();
   let teaserTl: gsap.core.Timeline | null = null;
 
   let position = $state(50);
@@ -214,8 +213,8 @@
     tabindex={0}
   >
     <div class="flex items-center">
-      <ChevronLeft size={16} class="text-yeg-bg" />
-      <ChevronRight size={16} class="text-yeg-bg" />
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-bg" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-bg" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
     </div>
   </button>
 
