@@ -1,14 +1,5 @@
 ---
-const featured = 'Edmonton';
-const cities = [
-  'St. Albert', 'Sherwood Park', 'Spruce Grove', 'Stony Plain',
-  'Leduc', 'Beaumont', 'Fort Saskatchewan', 'Devon', 'Morinville',
-  'Bon Accord', 'Gibbons', 'Legal', 'Redwater', 'Lamont',
-  'Tofield', 'Vegreville', 'Camrose', 'Wetaskiwin', 'Ponoka',
-  'Lacombe', 'Red Deer', 'Barrhead', 'Westlock', 'Athabasca',
-  'Smoky Lake', 'Mundare', 'Viking', 'Vermilion', 'Whitecourt',
-  'Drayton Valley', 'Rocky Mountain House',
-];
+import LocationMap from '../components/LocationMap.svelte';
 ---
 
 <section
@@ -36,38 +27,11 @@ const cities = [
       </p>
     </div>
 
-    <!-- Pills -->
-    <div data-locations-pills class="flex flex-wrap gap-2 lg:gap-3 mb-8">
-      <!-- Edmonton: featured -->
-      <span
-        class="location-pill inline-flex items-center gap-1.5 bg-yeg-amber/10 border border-yeg-amber/40 text-yeg-text font-semibold px-4 py-2 rounded-full text-sm"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          class="text-yeg-amber flex-shrink-0"
-          aria-hidden="true"
-        >
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-        </svg>
-        {featured}
-      </span>
-
-      <!-- Surrounding cities -->
-      {cities.map((city) => (
-        <span
-          class="location-pill inline-flex items-center bg-white border border-black/[0.07] text-yeg-text-secondary px-4 py-2 rounded-full text-sm hover:border-yeg-amber/30 hover:text-yeg-text transition-colors duration-200"
-        >
-          {city}
-        </span>
-      ))}
-    </div>
+    <!-- Interactive map + pills island -->
+    <LocationMap client:visible />
 
     <!-- Footer note -->
-    <p data-locations-footer class="text-sm text-yeg-text-secondary">
+    <p data-locations-footer class="text-sm text-yeg-text-secondary mt-8">
       Outside this list? We still respond —{' '}
       <a href="tel:+17804793285" class="text-yeg-amber hover:underline font-medium">
         call us
@@ -85,8 +49,6 @@ const cities = [
   const section = document.querySelector('#locations');
   if (section) {
     const header = section.querySelector('[data-locations-header]');
-    const pillsContainer = section.querySelector('[data-locations-pills]');
-    const pills = section.querySelectorAll('.location-pill');
     const footer = section.querySelector('[data-locations-footer]');
 
     if (header) {
@@ -97,18 +59,6 @@ const cities = [
         duration: 0.7,
         ease: 'power2.out',
         scrollTrigger: { trigger: section, start: 'top 80%', once: true },
-      });
-    }
-
-    if (pills.length) {
-      gsap.set(pills, { y: 12, opacity: 0 });
-      gsap.to(pills, {
-        y: 0,
-        opacity: 1,
-        duration: 0.45,
-        stagger: 0.04,
-        ease: 'power2.out',
-        scrollTrigger: { trigger: pillsContainer, start: 'top 85%', once: true },
       });
     }
 
