@@ -33,7 +33,7 @@ const testimonials = [
     <!-- Header -->
     <div
       data-testimonials-header
-      class="flex flex-col lg:flex-row lg:items-end justify-between mb-12 lg:mb-16 gap-6 opacity-0"
+      class="flex flex-col lg:flex-row lg:items-end justify-between mb-12 lg:mb-16 gap-6"
     >
       <div>
         <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
@@ -82,7 +82,7 @@ const testimonials = [
       {
         testimonials.map((t) => (
           <div
-            class="testimonial-card rounded-xl p-px opacity-0"
+            class="testimonial-card rounded-xl p-px"
             style="background: linear-gradient(135deg, rgba(242,201,76,0.25) 0%, rgba(242,201,76,0.10) 40%, rgba(0,0,0,0.03) 100%);"
           >
             <div class="bg-yeg-bg rounded-[11px] p-6 lg:p-8 flex flex-col h-full">
@@ -137,32 +137,26 @@ const testimonials = [
     const cards = section.querySelectorAll('.testimonial-card');
 
     if (header) {
-      gsap.fromTo(
-        header,
-        { y: 24, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.7,
-          ease: 'power2.out',
-          scrollTrigger: { trigger: section, start: 'top 80%', once: true },
-        }
-      );
+      gsap.set(header, { y: 24, opacity: 0 });
+      gsap.to(header, {
+        y: 0,
+        opacity: 1,
+        duration: 0.7,
+        ease: 'power2.out',
+        scrollTrigger: { trigger: section, start: 'top 80%', once: true },
+      });
     }
 
     if (cards.length) {
-      gsap.fromTo(
-        cards,
-        { y: 36, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.7,
-          stagger: 0.12,
-          ease: 'power2.out',
-          scrollTrigger: { trigger: cardsContainer, start: 'top 85%', once: true },
-        }
-      );
+      gsap.set(cards, { y: 36, opacity: 0 });
+      gsap.to(cards, {
+        y: 0,
+        opacity: 1,
+        duration: 0.7,
+        stagger: 0.12,
+        ease: 'power2.out',
+        scrollTrigger: { trigger: cardsContainer, start: 'top 85%', once: true },
+      });
     }
   }
 </script>

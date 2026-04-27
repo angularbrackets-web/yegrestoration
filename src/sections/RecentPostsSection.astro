@@ -46,7 +46,7 @@ function formatDate(date: Date) {
         return (
           <a
             href={`/blog/${post.id}/`}
-            class="group block rounded-2xl border border-black/[0.07] bg-white hover:border-yeg-amber/25 transition-all duration-300 overflow-hidden opacity-0 translate-y-6"
+            class="group block rounded-2xl border border-black/[0.07] bg-white hover:border-yeg-amber/25 transition-all duration-300 overflow-hidden"
           >
             <div class="p-6 flex flex-col h-full">
               {/* Tags */}
@@ -100,6 +100,7 @@ function formatDate(date: Date) {
 
   const cards = document.querySelectorAll('.js-blog-cards > a');
   if (cards.length > 0) {
+    gsap.set(cards, { opacity: 0, y: 24 });
     gsap.to(cards, {
       opacity: 1,
       y: 0,
