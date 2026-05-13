@@ -19,10 +19,13 @@
 
   let errors = $state<Record<string, string>>({});
   let submitted = $state(false);
+  let submitting = $state(false);
+  let serverError = $state('');
 
-  function handleSubmit(e: SubmitEvent) {
+  async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     errors = {};
+    serverError = '';
 
     const result = schema.safeParse(formData);
     if (!result.success) {
@@ -33,15 +36,30 @@
       return;
     }
 
-    // TODO: wire up actual form submission (email service, webhook, etc.)
-    submitted = true;
-    setTimeout(() => (submitted = false), 4000);
+    submitting = true;
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      if (res.ok) {
+        submitted = true;
+      } else {
+        const data = await res.json().catch(() => ({}));
+        serverError = data.error ?? 'Something went wrong. Please try again.';
+      }
+    } catch {
+      serverError = 'Network error. Please check your connection and try again.';
+    } finally {
+      submitting = false;
+    }
   }
 </script>
 
 <div class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
   {#if submitted}
-    <div class="text-center py-12">
+    <div class="text-center py-12 animate-fade-in">
       <div
         class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6"
       >
@@ -153,10 +171,17 @@
         </div>
 
         <!-- Submit -->
+        {#if serverError}
+          <p class="text-red-400 text-sm text-center">{serverError}</p>
+        {/if}
         <div class="form-field opacity-0 pt-2">
-          <button type="submit" class="cta-primary w-full justify-center">
+          <button
+            type="submit"
+            disabled={submitting}
+            class="cta-primary w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
-            <span>Send Request</span>
+            <span>{submitting ? 'Sending…' : 'Send Request'}</span>
           </button>
         </div>
 
