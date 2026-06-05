@@ -23,7 +23,7 @@ function statusClasses(status: Lead['status']) {
 }
 ---
 
-<AdminLayout title="Leads">
+<AdminLayout title="Leads" refresh={30}>
   {dbError ? (
     <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">
       {dbError}
