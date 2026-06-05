@@ -3,6 +3,7 @@ import type { APIRoute } from 'astro';
 export const prerender = false;
 import { Resend } from 'resend';
 import { z } from 'zod';
+import { getDb, SERVICE_LABELS } from '../../lib/db';
 
 const schema = z.object({
   name: z.string().min(2),
@@ -11,18 +12,6 @@ const schema = z.object({
   service: z.string().min(1),
   message: z.string().optional(),
 });
-
-const serviceLabels: Record<string, string> = {
-  water: 'Water Damage Restoration',
-  fire: 'Fire Damage Restoration',
-  mold: 'Mold Removal',
-  storm: 'Storm Damage Repair',
-  construction: 'Construction Services',
-  contents: 'Contents Restoration',
-  biohazard: 'Biohazard Cleaning',
-  asbestos: 'Asbestos Abatement',
-  other: 'Other Emergency',
-};
 
 function escapeHtml(s: string) {
   return s
@@ -51,7 +40,18 @@ export const POST: APIRoute = async ({ request }) => {
   if (!result.success) return json({ error: 'Validation failed' }, 422);
 
   const { name, phone, email, service, message } = result.data;
-  const serviceLabel = serviceLabels[service] ?? service;
+  const serviceLabel = SERVICE_LABELS[service] ?? service;
+
+  // Write to DB first — if email fails, the lead is still captured
+  try {
+    const sql = getDb();
+    await sql`
+      INSERT INTO leads (name, phone, email, service, message)
+      VALUES (${name}, ${phone}, ${email || null}, ${service}, ${message || null})
+    `;
+  } catch (err) {
+    console.error('DB write failed:', err);
+  }
 
   const apiKey = import.meta.env.RESEND_API_KEY;
   if (!apiKey) return json({ error: 'Server configuration error' }, 500);

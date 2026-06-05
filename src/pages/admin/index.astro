@@ -1,0 +1,92 @@
+---
+export const prerender = false;
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { getDb, SERVICE_LABELS, type Lead } from '../../lib/db';
+
+let leads: Lead[] = [];
+let dbError: string | null = null;
+
+try {
+  const sql = getDb();
+  leads = (await sql`SELECT * FROM leads ORDER BY created_at DESC`) as Lead[];
+} catch (e) {
+  dbError = 'Could not connect to database. Is DATABASE_URL configured?';
+  console.error(e);
+}
+
+const newCount = leads.filter(l => l.status === 'new').length;
+
+function statusClasses(status: Lead['status']) {
+  if (status === 'replied') return 'bg-green-900/40 text-green-300 border-green-800';
+  if (status === 'read') return 'bg-zinc-800 text-zinc-400 border-zinc-700';
+  return 'bg-blue-900/40 text-blue-300 border-blue-800';
+}
+---
+
+<AdminLayout title="Leads">
+  {dbError ? (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">
+      {dbError}
+    </div>
+  ) : (
+    <>
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-white text-xl font-bold">Leads</h1>
+          {newCount > 0 && (
+            <p class="text-amber-400 text-sm mt-0.5">{newCount} new</p>
+          )}
+        </div>
+        <span class="text-zinc-600 text-sm">{leads.length} total</span>
+      </div>
+
+      {leads.length === 0 ? (
+        <div class="text-center py-20 text-zinc-600">No leads yet.</div>
+      ) : (
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-zinc-500 text-left border-b border-zinc-800 text-xs uppercase tracking-wide">
+                <th class="pb-3 pr-6 font-medium">Name</th>
+                <th class="pb-3 pr-6 font-medium">Phone</th>
+                <th class="pb-3 pr-6 font-medium">Service</th>
+                <th class="pb-3 pr-6 font-medium">Date</th>
+                <th class="pb-3 pr-6 font-medium">Status</th>
+                <th class="pb-3 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-800/60">
+              {leads.map(lead => (
+                <tr class={`hover:bg-zinc-900/60 transition-colors ${lead.status === 'new' ? 'text-white' : 'text-zinc-400'}`}>
+                  <td class="py-3.5 pr-6 font-medium text-white">{lead.name}</td>
+                  <td class="py-3.5 pr-6">{lead.phone}</td>
+                  <td class="py-3.5 pr-6">{SERVICE_LABELS[lead.service] ?? lead.service}</td>
+                  <td class="py-3.5 pr-6 text-zinc-600 text-xs">
+                    {new Date(lead.created_at).toLocaleDateString('en-CA', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </td>
+                  <td class="py-3.5 pr-6">
+                    <span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${statusClasses(lead.status)}`}>
+                      {lead.status}
+                    </span>
+                  </td>
+                  <td class="py-3.5">
+                    <a
+                      href={`/admin/leads/${lead.id}`}
+                      class="text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors"
+                    >
+                      View →
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )}
+</AdminLayout>
