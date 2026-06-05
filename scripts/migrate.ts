@@ -1,27 +1,35 @@
-// Run once after pulling env vars: npx tsx scripts/migrate.ts
+// Run once: npx tsx scripts/migrate.ts
+// (requires DATABASE_URL in .env.local — run `vercel env pull --environment=production .env.local` first)
 import { neon } from '@neondatabase/serverless';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 
-function loadEnv(path: string) {
-  try {
-    readFileSync(path, 'utf-8')
-      .split('\n')
-      .forEach(line => {
-        const eq = line.indexOf('=');
-        if (eq < 1 || line.trimStart().startsWith('#')) return;
-        const key = line.slice(0, eq).trim();
-        const val = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-        if (key && !(key in process.env)) process.env[key] = val;
-      });
-  } catch {}
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function loadEnv(file: string) {
+  if (!existsSync(file)) return;
+  for (const raw of readFileSync(file, 'utf-8').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 1) continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (key && !(key in process.env)) process.env[key] = val;
+  }
 }
 
-loadEnv('.env.local');
-loadEnv('.env');
+loadEnv(resolve(root, '.env.local'));
+loadEnv(resolve(root, '.env'));
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
-  console.error('DATABASE_URL not set. Run: vercel env pull .env.local');
+  console.error('DATABASE_URL not set.');
+  console.error('Run: vercel env pull --environment=production .env.local');
   process.exit(1);
 }
 
