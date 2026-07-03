@@ -1,3 +1,5 @@
+import { BUSINESS } from '../data/services';
+
 export interface BlogArticleSchemaProps {
   title: string;
   description: string;
@@ -44,17 +46,19 @@ export function blogArticleSchema({
   };
 }
 
+export const BUSINESS_ID = 'https://yegrestoration.ca/#business';
+
 export const localBusinessSchema = {
   '@context': 'https://schema.org',
   '@graph': [
     {
       '@type': 'EmergencyService',
-      name: 'YEG Restoration',
-      url: 'https://yegrestoration.ca',
-      telephone: '+1-780-479-3285',
-      email: 'info@yegrestoration.ca',
-      description:
-        "Edmonton's 24/7 emergency restoration team. Water damage, fire & smoke, mold removal, storm repair. IICRC certified.",
+      '@id': BUSINESS_ID,
+      name: BUSINESS.name,
+      url: BUSINESS.url,
+      telephone: BUSINESS.phoneE164,
+      email: BUSINESS.email,
+      description: BUSINESS.description,
       image: 'https://yegrestoration.ca/og-cover.jpg',
       logo: 'https://yegrestoration.ca/images/YEG_Restoration_Logo_RBG.png',
       foundingDate: '2008',
@@ -124,17 +128,9 @@ export const localBusinessSchema = {
           { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Asbestos Abatement' } },
         ],
       },
-      aggregateRating: {
-        '@type': 'AggregateRating',
-        ratingValue: '4.9',
-        reviewCount: '287', // PLACEHOLDER — update with real Google review count before launch
-        bestRating: '5',
-      },
-      sameAs: [
-        'https://www.facebook.com/yegrestoration', // PLACEHOLDER — update with real URL
-        'https://www.instagram.com/yegrestoration', // PLACEHOLDER — update with real URL
-        'https://maps.app.goo.gl/yegrestoration', // PLACEHOLDER — update with real Google Business Profile URL
-      ],
+      // NOTE: no aggregateRating until real Google reviews exist — fabricated
+      // review markup risks a manual action. Re-add with real values later.
+      // TODO: add sameAs (Facebook/Instagram/GBP) when real profile URLs are provided.
     },
     {
       '@type': 'WebSite',

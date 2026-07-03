@@ -23,6 +23,7 @@ export const SERVICE_LABELS: Record<string, string> = {
   fire: 'Fire Damage Restoration',
   mold: 'Mold Removal',
   storm: 'Storm Damage Repair',
+  sewage: 'Sewage Cleanup',
   construction: 'Construction Services',
   contents: 'Contents Restoration',
   biohazard: 'Biohazard Cleaning',
