@@ -1,0 +1,48 @@
+---
+// Google tag (GA4 + Google Ads) — renders nothing unless env vars are set,
+// so dev/preview builds stay script-free by default.
+// Setup runbook: docs/google-ads-tracking-setup.md
+import { BUSINESS } from '../data/services';
+
+const GA4_ID = import.meta.env.PUBLIC_GA4_ID;
+const AW_ID = import.meta.env.PUBLIC_AW_ID;
+const AW_CALL_LABEL = import.meta.env.PUBLIC_AW_CALL_LABEL;
+
+const enabled = Boolean(GA4_ID || AW_ID);
+const loaderId = GA4_ID || AW_ID;
+const displayPhone = BUSINESS.phone;
+---
+
+{
+  enabled && (
+    <Fragment>
+      <script async src={`https://www.googletagmanager.com/gtag/js?id=${loaderId}`} />
+      <script is:inline define:vars={{ GA4_ID, AW_ID, AW_CALL_LABEL, displayPhone }}>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() {
+          dataLayer.push(arguments);
+        }
+        window.gtag = gtag;
+        gtag('js', new Date());
+        if (GA4_ID) gtag('config', GA4_ID);
+        if (AW_ID) gtag('config', AW_ID);
+        // Google Ads call tracking: swaps the visible number for ad-click visitors.
+        // The display number must appear as plain text on the page (it does).
+        if (AW_ID && AW_CALL_LABEL) {
+          gtag('config', AW_ID + '/' + AW_CALL_LABEL, {
+            phone_conversion_number: displayPhone,
+          });
+        }
+        // GA4 engagement event for any tel: click (delegated — works for
+        // links rendered later by islands too).
+        document.addEventListener('click', function (e) {
+          var el = e.target instanceof Element ? e.target.closest('a[href^="tel:"]') : null;
+          if (!el) return;
+          gtag('event', 'click_to_call', {
+            phone_number: el.getAttribute('href').replace('tel:', ''),
+          });
+        });
+      </script>
+    </Fragment>
+  )
+}

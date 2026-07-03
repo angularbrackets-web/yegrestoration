@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import { localBusinessSchema } from '../lib/seo';
+import Analytics from '../components/Analytics.astro';
 
 interface Props {
   title?: string;
@@ -75,6 +76,9 @@ const ogImageURL = new URL(ogImage, Astro.site);
     <link rel="preload" as="image" href="/after-restored.png" fetchpriority="high" />
     <!-- Structured Data -->
     <script type="application/ld+json" set:html={JSON.stringify(localBusinessSchema)} />
+
+    <!-- GA4 + Google Ads (no-op unless PUBLIC_GA4_ID / PUBLIC_AW_ID are set) -->
+    <Analytics />
   </head>
   <body class="bg-yeg-bg text-yeg-text antialiased">
     <slot />

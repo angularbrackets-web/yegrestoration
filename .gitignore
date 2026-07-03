@@ -3,6 +3,7 @@ node_modules/
 .npm-cache/
 
 # Build output
+.astro/
 dist/
 dist-ssr/
 *.local
@@ -40,4 +41,3 @@ test-results/
 .env.*
 !.env.example
 .vercel
-.env*

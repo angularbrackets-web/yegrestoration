@@ -45,6 +45,14 @@
       });
       if (res.ok) {
         submitted = true;
+        if (typeof window.gtag === 'function') {
+          const aw = import.meta.env.PUBLIC_AW_ID;
+          const formLabel = import.meta.env.PUBLIC_AW_FORM_LABEL;
+          if (aw && formLabel) {
+            window.gtag('event', 'conversion', { send_to: `${aw}/${formLabel}` });
+          }
+          window.gtag('event', 'generate_lead', { service: formData.service });
+        }
       } else {
         const data = await res.json().catch(() => ({}));
         serverError = data.error ?? 'Something went wrong. Please try again.';
