@@ -1,0 +1,68 @@
+---
+import type { ServiceFaq } from '../data/services';
+
+interface Props {
+  faqs: ServiceFaq[];
+  kicker?: string;
+  heading?: string;
+}
+
+const {
+  faqs,
+  kicker = 'FAQ',
+  heading = 'Questions Edmonton Homeowners Ask',
+} = Astro.props;
+---
+
+<section id="faq" class="bg-yeg-bg py-20 lg:py-28">
+  <div class="px-6 lg:px-[8vw]">
+    <div class="max-w-3xl mx-auto">
+      <!-- Header -->
+      <div class="mb-10 lg:mb-14">
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+          {kicker}
+        </p>
+        <h2 class="font-display font-extrabold text-display-lg text-yeg-text">
+          {heading}
+        </h2>
+      </div>
+
+      <!-- Accordion (zero-JS) -->
+      <div>
+        {
+          faqs.map((faq, i) => (
+            <details class={`group border-b border-black/[0.07] ${i === 0 ? 'border-t' : ''}`}>
+              <summary class="faq-summary flex items-center justify-between gap-4 py-5 lg:py-6 cursor-pointer list-none font-display font-semibold text-base lg:text-lg text-yeg-text">
+                <span>{faq.question}</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="flex-shrink-0 text-yeg-amber transition-transform duration-300 group-open:rotate-180"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </summary>
+              <p class="text-yeg-text-secondary leading-relaxed pb-5 lg:pb-6 pr-8">
+                {faq.answer}
+              </p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .faq-summary::-webkit-details-marker {
+    display: none;
+  }
+</style>

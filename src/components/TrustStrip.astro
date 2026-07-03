@@ -1,0 +1,52 @@
+---
+const credentials = [
+  'IICRC Certified Firm',
+  'BBB Accredited',
+  'Licensed & Insured',
+  'Serving Edmonton Since 2008',
+];
+---
+
+<section class="bg-yeg-bg-light border-y border-black/[0.06] py-12 lg:py-16">
+  <div class="px-6 lg:px-[8vw] max-w-7xl mx-auto">
+    <div class="flex flex-col lg:flex-row lg:items-center gap-8 lg:gap-16">
+      <!-- Credentials -->
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-3 lg:w-[45%]">
+        {
+          credentials.map((credential, i) => (
+            <>
+              {i > 0 && (
+                <span
+                  class="w-1 h-1 rounded-full bg-yeg-amber/50 flex-shrink-0 inline-block"
+                  aria-hidden="true"
+                />
+              )}
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-yeg-text-secondary">
+                {credential}
+              </span>
+            </>
+          ))
+        }
+      </div>
+
+      <!-- Direct billing line + link -->
+      <div class="lg:w-[55%] lg:border-l lg:border-black/[0.06] lg:pl-16">
+        <p class="font-display font-semibold text-yeg-text text-lg leading-snug mb-3">
+          We bill your insurance company directly — for covered claims, your out-of-pocket cost is
+          typically just your deductible.
+        </p>
+        <a
+          href="/insurance-claims/"
+          class="inline-flex items-center gap-2 text-sm text-yeg-amber/70 hover:text-yeg-amber transition-colors group"
+        >
+          <span class="font-semibold tracking-wider uppercase text-[11px]">
+            How direct insurance billing works
+          </span>
+          <span class="transition-transform duration-300 group-hover:translate-x-1.5" aria-hidden="true">
+            &rarr;
+          </span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,85 @@
+---
+import { getServiceBySlug } from '../data/services';
+
+interface Props {
+  slugs: string[];
+}
+
+const { slugs } = Astro.props;
+
+const related = slugs
+  .map((slug) => getServiceBySlug(slug))
+  .filter((s): s is NonNullable<typeof s> => Boolean(s));
+
+// Insurance Claims card is always appended — it's the cross-sell every
+// service page shares.
+const cards = [
+  ...related.map((s) => ({
+    title: s.shortName,
+    copy: s.cardDescription,
+    href: `/${s.page.slug}/`,
+    linkText: 'Learn more',
+  })),
+  {
+    title: 'Insurance Claims Help',
+    copy: 'We document everything and bill your insurer directly — you focus on your home, not the paperwork.',
+    href: '/insurance-claims/',
+    linkText: 'How it works',
+  },
+];
+---
+
+<section class="bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-24">
+  <div class="px-6 lg:px-[8vw]">
+    <div class="max-w-7xl mx-auto">
+      <!-- Header -->
+      <div class="mb-12 lg:mb-14">
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+          Related Services
+        </p>
+        <h2 class="font-display font-extrabold text-display-lg text-yeg-text">
+          Often Needed Together
+        </h2>
+      </div>
+
+      <!-- Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+        {
+          cards.map((card) => (
+            <div class="relative group bg-white rounded-2xl p-8 border border-black/[0.06] flex flex-col gap-6 overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:border-yeg-amber/30 hover:shadow-[0_16px_40px_rgba(0,0,0,0.08)]">
+              <!-- Hover glow -->
+              <div class="absolute inset-0 bg-gradient-to-br from-yeg-amber/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+              <!-- Top edge gloss -->
+              <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-yeg-amber/[0.2] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+              <div class="relative z-10 flex flex-col h-full">
+                <div class="flex-1">
+                  <h3 class="font-display font-bold text-2xl text-yeg-text mb-3 tracking-wide group-hover:text-yeg-amber transition-colors duration-500">
+                    {card.title}
+                  </h3>
+                  <p class="text-base text-yeg-text-secondary leading-relaxed">{card.copy}</p>
+                </div>
+
+                <div class="mt-8 pt-6 border-t border-black/[0.06]">
+                  <a
+                    href={card.href}
+                    class="inline-flex items-center gap-2 text-sm text-yeg-amber/70 hover:text-yeg-amber transition-colors group/cta"
+                  >
+                    <span class="absolute inset-0 z-10" aria-hidden="true" />
+                    <span class="sr-only">{card.title} — </span>
+                    <span class="font-semibold tracking-wider uppercase text-[11px]">
+                      {card.linkText}
+                    </span>
+                    <span class="transition-transform duration-300 group-hover/cta:translate-x-1.5">
+                      &rarr;
+                    </span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

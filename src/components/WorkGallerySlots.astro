@@ -1,0 +1,95 @@
+---
+interface Props {
+  serviceName: string;
+  imageSrc: string;
+  imageAlt: string;
+  photos?: { src: string; alt: string; caption: string }[];
+}
+
+const { serviceName, imageSrc, imageAlt, photos = [] } = Astro.props;
+
+// Grid always shows at least 3 cells: lead image + real photos, padded with
+// designed "coming soon" slots (honest placeholders, never fake content).
+const filledCount = 1 + photos.length;
+const placeholderCount = Math.max(3 - filledCount, 0);
+---
+
+<section class="bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28">
+  <div class="px-6 lg:px-[8vw]">
+    <div class="max-w-7xl mx-auto">
+      <!-- Header -->
+      <div class="mb-12 lg:mb-14">
+        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+          Our Work
+        </p>
+        <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+          Every Job, Documented
+        </h2>
+        <p class="text-yeg-text-secondary text-lg max-w-xl">
+          We photograph and moisture-map every project — it&rsquo;s how your insurance claim gets
+          built.
+        </p>
+      </div>
+
+      <!-- Gallery Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+        <!-- Lead image -->
+        <div class="image-frame rounded-xl">
+          <img
+            src={imageSrc}
+            alt={imageAlt}
+            loading="lazy"
+            decoding="async"
+            class="w-full aspect-[4/3] object-cover"
+          />
+        </div>
+
+        <!-- Real job photos (fed from services.ts when available) -->
+        {
+          photos.map((photo) => (
+            <figure class="image-frame rounded-xl relative">
+              <img
+                src={photo.src}
+                alt={photo.alt}
+                loading="lazy"
+                decoding="async"
+                class="w-full aspect-[4/3] object-cover"
+              />
+              <figcaption class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-4 pt-8 pb-3 text-xs font-medium text-white/90">
+                {photo.caption}
+              </figcaption>
+            </figure>
+          ))
+        }
+
+        <!-- Placeholder slots -->
+        {
+          Array.from({ length: placeholderCount }).map(() => (
+            <div class="rounded-xl border border-dashed border-black/15 aspect-[4/3] flex flex-col items-center justify-center gap-3 text-center px-6">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-yeg-text-secondary/40"
+                aria-hidden="true"
+              >
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path>
+                <circle cx="12" cy="13" r="3"></circle>
+              </svg>
+              <p class="text-sm font-medium text-yeg-text-secondary">Project photos coming soon</p>
+              <p class="text-xs text-yeg-text-secondary/60">
+                Recent {serviceName.toLowerCase()} jobs are being added.
+              </p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

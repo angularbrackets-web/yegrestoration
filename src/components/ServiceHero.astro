@@ -1,0 +1,120 @@
+---
+import type { Service, ServicePageContent } from '../data/services';
+import { BUSINESS } from '../data/services';
+
+interface Props {
+  service: Service & { page: ServicePageContent };
+}
+
+const { service } = Astro.props;
+const { page } = service;
+---
+
+<section class="relative overflow-hidden bg-yeg-bg pt-28 lg:pt-36 pb-14 lg:pb-20">
+  <!-- Background Word -->
+  <div class="absolute bg-word opacity-[0.07]" style="left: 4vw; top: 8vh;">
+    {service.bgWord}
+  </div>
+
+  <!-- Ambient amber glow -->
+  <div
+    class="absolute inset-0 pointer-events-none"
+    style="background: radial-gradient(ellipse 55% 45% at 10% 20%, rgba(242,201,76,0.05) 0%, transparent 65%);"
+  >
+  </div>
+
+  <div class="relative z-10 px-6 lg:px-[8vw]">
+    <div class="flex flex-col lg:flex-row lg:items-center gap-12 lg:gap-16">
+      <!-- Text Content -->
+      <div class="w-full lg:w-[55%]">
+        <!-- Breadcrumb -->
+        <nav aria-label="Breadcrumb" class="mb-6">
+          <ol class="flex items-center gap-2 text-xs text-yeg-text-secondary">
+            <li>
+              <a href="/" class="hover:text-yeg-amber transition-colors duration-200">Home</a>
+            </li>
+            <li aria-hidden="true" class="text-yeg-text-secondary/50">&rsaquo;</li>
+            <li>
+              <span aria-current="page" class="text-yeg-text">{service.shortName}</span>
+            </li>
+          </ol>
+        </nav>
+
+        <!-- Kicker -->
+        <p class="text-yeg-signal text-xs font-medium uppercase tracking-widest mb-3">
+          {page.heroTagline}
+        </p>
+
+        <!-- H1 -->
+        <h1 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
+          {page.h1}
+        </h1>
+
+        <!-- Copy -->
+        <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-xl mb-8">
+          {page.heroCopy}
+        </p>
+
+        <!-- CTAs -->
+        <div class="flex flex-wrap items-center gap-4 mb-8">
+          <a href={BUSINESS.phoneHref} class="cta-primary animate-beacon-pulse">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+              ></path>
+            </svg>
+            <span class="font-bold">Call {BUSINESS.phone}</span>
+          </a>
+          <a
+            href="#quote"
+            class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+          >
+            Get Free Assessment
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+
+        <!-- Trust Badges -->
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {
+            ['IICRC Certified', '60-Min Response', 'Direct Insurance Billing', 'Written Guarantee'].map(
+              (badge) => (
+                <span class="trust-badge">
+                  <span class="w-1 h-1 rounded-full bg-yeg-amber/50 flex-shrink-0 inline-block" />
+                  {badge}
+                </span>
+              )
+            )
+          }
+        </div>
+      </div>
+
+      <!-- Desktop Image -->
+      <div class="hidden lg:block w-full lg:w-[45%]">
+        <div class="image-frame relative rounded-lg aspect-[4/3]">
+          <img
+            src={service.imageSrc}
+            alt={service.imageAlt}
+            class="w-full h-full object-cover"
+            loading="eager"
+            fetchpriority="high"
+            decoding="async"
+          />
+          <div class="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

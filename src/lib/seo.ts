@@ -1,4 +1,5 @@
 import { BUSINESS } from '../data/services';
+import type { Service, ServicePageContent, ServiceFaq } from '../data/services';
 
 export interface BlogArticleSchemaProps {
   title: string;
@@ -139,3 +140,49 @@ export const localBusinessSchema = {
     },
   ],
 };
+
+/** Service schema for a service landing page. `provider` references the
+ *  EmergencyService node injected by Layout on every page. */
+export function serviceSchema(s: Service & { page: ServicePageContent }) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Service',
+    name: s.name,
+    serviceType: s.name,
+    description: s.page.metaDescription,
+    url: `${BUSINESS.url}/${s.page.slug}/`,
+    provider: { '@id': BUSINESS_ID },
+    areaServed: { '@type': 'City', name: 'Edmonton' },
+  };
+}
+
+export function faqPageSchema(faqs: ServiceFaq[]) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map((f) => ({
+      '@type': 'Question',
+      name: f.question,
+      acceptedAnswer: { '@type': 'Answer', text: f.answer },
+    })),
+  };
+}
+
+export interface BreadcrumbItem {
+  name: string;
+  /** Absolute URL. Omit on the final (current-page) item. */
+  url?: string;
+}
+
+export function breadcrumbSchema(items: BreadcrumbItem[]) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((item, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: item.name,
+      ...(item.url ? { item: item.url } : {}),
+    })),
+  };
+}

@@ -1,0 +1,94 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import StatsBar from '../components/StatsBar.astro';
+import ServiceHero from '../components/ServiceHero.astro';
+import ServiceProcess from '../components/ServiceProcess.astro';
+import WorkGallerySlots from '../components/WorkGallerySlots.astro';
+import TrustStrip from '../components/TrustStrip.astro';
+import FaqSection from '../components/FaqSection.astro';
+import RelatedServices from '../components/RelatedServices.astro';
+import ContactForm from '../components/ContactForm.svelte';
+import { pagedServices, BUSINESS } from '../data/services';
+import { serviceSchema, faqPageSchema, breadcrumbSchema } from '../lib/seo';
+
+export function getStaticPaths() {
+  return pagedServices.map((service) => ({
+    params: { service: service.page.slug },
+    props: { service },
+  }));
+}
+
+const { service } = Astro.props;
+const { page } = service;
+
+const schemas = [
+  serviceSchema(service),
+  faqPageSchema(page.faqs),
+  breadcrumbSchema([
+    { name: 'Home', url: `${BUSINESS.url}/` },
+    { name: service.shortName },
+  ]),
+];
+---
+
+<Layout
+  title={page.metaTitle}
+  description={page.metaDescription}
+  ogImage={service.imageSrc}
+>
+  <!-- Texture overlays -->
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <!-- Service + FAQ + Breadcrumb JSON-LD (valid anywhere in document per Google guidelines) -->
+  {schemas.map((schema) => (
+    <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  ))}
+
+  <main id="main-content" class="relative">
+    <ServiceHero service={service} />
+    <StatsBar />
+    <ServiceProcess steps={page.process} />
+    <WorkGallerySlots
+      serviceName={service.shortName}
+      imageSrc={service.imageSrc}
+      imageAlt={service.imageAlt}
+      photos={service.photos}
+    />
+    <TrustStrip />
+    <FaqSection faqs={page.faqs} />
+
+    <!-- Quote form -->
+    <section id="quote" class="relative bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28 overflow-hidden">
+      <div class="absolute bg-word opacity-[0.05]" style="left: 4vw; top: 6vh;">
+        RESPONSE
+      </div>
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-2xl mx-auto">
+          <div class="text-center mb-10">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Free Assessment
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+              Get Help With {service.shortName}
+            </h2>
+            <p class="text-yeg-text-secondary text-lg">
+              Tell us what happened — we'll call you back within 15 minutes. Or call
+              <a href={BUSINESS.phoneHref} class="font-semibold text-yeg-text hover:text-yeg-amber transition-colors whitespace-nowrap">{BUSINESS.phone}</a>
+              now and skip the form.
+            </p>
+          </div>
+          <ContactForm client:visible />
+        </div>
+      </div>
+    </section>
+
+    <RelatedServices slugs={page.related} />
+  </main>
+
+  <Footer />
+</Layout>

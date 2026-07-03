@@ -1,0 +1,67 @@
+---
+import type { ServiceStep } from '../data/services';
+
+interface Props {
+  steps: ServiceStep[];
+  kicker?: string;
+  heading?: string;
+  sub?: string;
+}
+
+const {
+  steps,
+  kicker = 'What Happens Next',
+  heading = 'From Your Call to Fully Restored',
+  sub = 'A clear, predictable process — you always know what happens next.',
+} = Astro.props;
+---
+
+<section class="yeg-surface-paper py-20 lg:py-28 relative overflow-hidden">
+  <div class="relative z-10 px-6 lg:px-[8vw] max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="mb-14">
+      <p class="text-xs font-semibold text-yeg-signal uppercase tracking-[0.2em] mb-4">
+        {kicker}
+      </p>
+      <h2
+        class="font-display font-extrabold text-4xl md:text-5xl text-yeg-on-surface mb-5 leading-[1.1]"
+      >
+        {heading}
+      </h2>
+      <p class="text-yeg-on-surface-muted text-lg max-w-xl font-light leading-relaxed">
+        {sub}
+      </p>
+    </div>
+
+    <!-- Steps Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
+      {
+        steps.map((item) => (
+          <div class="group flex flex-col">
+            <div class="bg-white/40 backdrop-blur-sm rounded-2xl p-8 border border-white/60 shadow-[0_4px_24px_rgba(0,0,0,0.03)] h-full transition-all duration-500 hover:-translate-y-2 hover:bg-white/60 hover:shadow-[0_20px_48px_rgba(0,0,0,0.06)] hover:border-yeg-signal/20">
+              <!-- Step Number -->
+              <div class="mb-8">
+                <span class="font-display font-black text-yeg-signal/15 text-5xl transition-colors duration-500 group-hover:text-yeg-signal/30">
+                  {item.step}
+                </span>
+              </div>
+
+              <!-- Timing Badge -->
+              <div class="inline-block text-[10px] font-bold text-yeg-signal uppercase tracking-widest px-2.5 py-1 bg-yeg-signal/10 rounded-md mb-4 border border-yeg-signal/10">
+                {item.timing}
+              </div>
+
+              <!-- Copy -->
+              <h3 class="font-display font-bold text-xl text-yeg-on-surface mb-3 group-hover:text-yeg-signal transition-colors duration-300">
+                {item.title}
+              </h3>
+              <p class="text-yeg-on-surface-muted text-[15px] leading-relaxed font-light">
+                {item.copy}
+              </p>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
