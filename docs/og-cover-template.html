@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Sora';
+    src: url('../public/fonts/sora-latin.woff2') format('woff2');
+    font-weight: 100 900;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('../public/fonts/inter-latin.woff2') format('woff2');
+    font-weight: 100 900;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1200px; height: 630px; overflow: hidden; background: #0F1419; position: relative; font-family: 'Inter', sans-serif; }
+
+  /* Right-side photo, treated dark like the site hero */
+  .photo {
+    position: absolute; right: 0; top: 0; width: 62%; height: 100%;
+    background: url('../src/assets/hero/after-restored.png') center right / cover no-repeat;
+  }
+  .photo::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(to right, #0F1419 0%, rgba(15,20,25,0.86) 34%, rgba(15,20,25,0.55) 68%, rgba(15,20,25,0.38) 100%);
+  }
+
+  /* Subtle amber glow, echoes homepage ambient glow */
+  .glow {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 55% 60% at 12% 18%, rgba(242,201,76,0.09) 0%, transparent 65%);
+  }
+
+  .content { position: absolute; inset: 0; padding: 64px 72px; display: flex; flex-direction: column; z-index: 2; }
+
+  .brand { display: flex; align-items: center; gap: 20px; }
+  .logo-blob {
+    width: 84px; height: 84px; background: #F2C94C;
+    border-radius: 58% 42% 62% 38% / 48% 45% 55% 52%;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.24);
+  }
+  .logo-blob img { width: 118px; height: 118px; object-fit: contain; }
+  .brand-name { font-family: 'Sora'; font-weight: 800; font-size: 30px; color: #FFFFFF; letter-spacing: -0.01em; }
+  .brand-sub { font-size: 14px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.55); margin-top: 4px; }
+
+  .headline { margin-top: auto; }
+  .headline h1 {
+    font-family: 'Sora'; font-weight: 800; font-size: 88px; line-height: 0.95;
+    letter-spacing: -0.03em; color: #FFFFFF; text-transform: uppercase;
+  }
+  .headline h1 .amber { color: #F2C94C; }
+  .tagline {
+    margin-top: 26px; font-size: 26px; font-weight: 400; color: rgba(255,255,255,0.78); letter-spacing: 0.005em;
+  }
+
+  .footer { margin-top: 44px; display: flex; align-items: center; gap: 18px; }
+  .phone-pill {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: #F2C94C; color: #0F1419; border-radius: 999px;
+    padding: 16px 30px; font-weight: 700; font-size: 26px; font-family: 'Inter';
+  }
+  .phone-pill svg { width: 26px; height: 26px; }
+  .badge { font-size: 19px; font-weight: 600; color: rgba(255,255,255,0.66); letter-spacing: 0.02em; }
+  .dot { width: 5px; height: 5px; border-radius: 999px; background: rgba(242,201,76,0.6); }
+</style>
+</head>
+<body>
+  <div class="photo"></div>
+  <div class="glow"></div>
+  <div class="content">
+    <div class="brand">
+      <div class="logo-blob">
+        <img src="../public/images/YEG_Restoration_Logo_RBG.png" alt="">
+      </div>
+      <div>
+        <div class="brand-name">YEG Restoration</div>
+        <div class="brand-sub">Restore · Recover · Rebuild</div>
+      </div>
+    </div>
+
+    <div class="headline">
+      <h1>Your emergency<br>ends <span class="amber">now</span></h1>
+      <div class="tagline">Edmonton&rsquo;s 24/7 emergency restoration — water, fire, mold &amp; storm</div>
+    </div>
+
+    <div class="footer">
+      <div class="phone-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"/></svg>
+        (780) 479-3285
+      </div>
+      <span class="badge">24/7 Live Answer</span>
+      <span class="dot"></span>
+      <span class="badge">60-Min Response</span>
+    </div>
+  </div>
+</body>
+</html>
