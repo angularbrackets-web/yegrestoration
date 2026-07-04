@@ -5,6 +5,7 @@ import Footer from '../components/Footer.astro';
 import StatsBar from '../components/StatsBar.astro';
 import FaqSection from '../components/FaqSection.astro';
 import ContactForm from '../components/ContactForm.svelte';
+import MobileCallBar from '../components/MobileCallBar.astro';
 import { pagedServices, BUSINESS } from '../data/services';
 import type { ServiceFaq } from '../data/services';
 import { faqPageSchema, breadcrumbSchema } from '../lib/seo';
@@ -371,4 +372,5 @@ const schemas = [
   </main>
 
   <Footer />
+  <MobileCallBar formAnchor="#quote" />
 </Layout>

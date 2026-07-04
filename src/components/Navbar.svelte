@@ -1,31 +1,89 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import BrandLogo from './BrandLogo.svelte';
+  import { pagedServices } from '../data/services';
 
   const navLinks = [
-    { label: 'Services', href: '#water' },
     { label: 'How It Works', href: '#process' },
     { label: 'Why Us', href: '#testimonials' },
+    { label: 'About', href: '/about/' },
     { label: 'Blog', href: '/blog/' },
     { label: 'Contact', href: '#contact' },
   ];
 
-  const mobileServices = [
-    { label: 'Water Damage', href: '#water' },
-    { label: 'Fire & Smoke', href: '#fire' },
-    { label: 'Mold Removal', href: '#mold' },
-    { label: 'Storm Damage', href: '#storm' },
+  // Dropdown + mobile quick links — generated from the data layer so nav
+  // never drifts from the pages that actually exist.
+  const serviceLinks = [
+    ...pagedServices.map((s) => ({ label: s.shortName, href: `/${s.page.slug}/` })),
+    { label: 'Insurance Claims', href: '/insurance-claims/' },
   ];
 
   let isScrolled = $state(false);
   let isMobileMenuOpen = $state(false);
   let activeLink = $state('');
+  let isServicesOpen = $state(false);
+  let isServicesActive = $state(false);
+
+  let servicesWrapRef: HTMLDivElement | undefined = $state();
+  let servicesTriggerRef: HTMLButtonElement | undefined = $state();
+  let servicesCloseTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  function openServices() {
+    clearTimeout(servicesCloseTimeout);
+    isServicesOpen = true;
+  }
+
+  function closeServices() {
+    clearTimeout(servicesCloseTimeout);
+    isServicesOpen = false;
+  }
+
+  // Delay hover-close so the pointer can travel from trigger to panel.
+  function scheduleCloseServices() {
+    clearTimeout(servicesCloseTimeout);
+    servicesCloseTimeout = setTimeout(() => (isServicesOpen = false), 150);
+  }
+
+  function handleServicesFocusOut(e: FocusEvent) {
+    if (!servicesWrapRef?.contains(e.relatedTarget as Node)) {
+      closeServices();
+    }
+  }
+
+  function handleServicesKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && isServicesOpen) {
+      e.stopPropagation();
+      closeServices();
+      servicesTriggerRef?.focus();
+    }
+  }
+
+  $effect(() => {
+    if (!isServicesOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (servicesWrapRef && !servicesWrapRef.contains(e.target as Node)) {
+        closeServices();
+      }
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  });
 
   let mobileMenuRef: HTMLDivElement | undefined = $state();
   let hamburgerRef: HTMLButtonElement | undefined = $state();
   let lastFocusedElement: HTMLElement | null = null;
 
   onMount(() => {
+    // Highlight the section of the site we're currently on.
+    const path = location.pathname.endsWith('/') ? location.pathname : `${location.pathname}/`;
+    if (serviceLinks.some((l) => l.href === path)) {
+      isServicesActive = true;
+    } else if (path === '/about/') {
+      activeLink = '/about/';
+    } else if (path.startsWith('/blog/')) {
+      activeLink = '/blog/';
+    }
+
     const handleScroll = () => {
       isScrolled = window.scrollY > 50;
     };
@@ -123,6 +181,65 @@
 
       <!-- Desktop Nav Links -->
       <div class="hidden xl:flex items-center gap-1">
+        <!-- Services dropdown -->
+        <div
+          bind:this={servicesWrapRef}
+          class="relative"
+          onmouseenter={openServices}
+          onmouseleave={scheduleCloseServices}
+          onfocusout={handleServicesFocusOut}
+          onkeydown={handleServicesKeyDown}
+          role="none"
+        >
+          <button
+            bind:this={servicesTriggerRef}
+            onclick={() => (isServicesOpen ? closeServices() : openServices())}
+            aria-expanded={isServicesOpen}
+            aria-haspopup="true"
+            class={`relative flex items-center gap-1.5 px-4 py-2 font-body text-sm font-medium tracking-wide rounded-full transition-all duration-200 ${
+              isServicesActive
+                ? 'text-yeg-amber bg-yeg-amber/5'
+                : 'text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04]'
+            }`}
+          >
+            Services
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class={`transition-transform duration-200 ${isServicesOpen ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            ><path d="m6 9 6 6 6-6" /></svg>
+            {#if isServicesActive}
+              <span class="absolute inset-x-4 -bottom-px h-px bg-yeg-amber/60"></span>
+            {/if}
+          </button>
+
+          {#if isServicesOpen}
+            <!-- pt-2 bridge keeps hover alive between trigger and panel -->
+            <div class="absolute left-0 top-full pt-2 w-60">
+              <div
+                class="bg-[#F8F6F3] border border-black/[0.07] rounded-xl shadow-[0_12px_32px_rgba(0,0,0,0.10)] py-2"
+              >
+                {#each serviceLinks as svc}
+                  <a
+                    href={svc.href}
+                    onclick={closeServices}
+                    class="block px-4 py-2.5 font-body text-sm font-medium tracking-wide text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04] transition-colors duration-200"
+                  >
+                    {svc.label}
+                  </a>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+
         {#each navLinks as link}
           <a
             href={link.href}
@@ -240,7 +357,7 @@
           Our Services
         </p>
         <div class="grid grid-cols-2 gap-2">
-          {#each mobileServices as svc}
+          {#each serviceLinks as svc}
             <a
               href={svc.href}
               onclick={(e) => handleLinkClick(e, svc.href)}

@@ -13,73 +13,8 @@ import TestimonialsSection from '../sections/TestimonialsSection.astro';
 import ContactSection from '../sections/ContactSection.astro';
 import RecentPostsSection from '../sections/RecentPostsSection.astro';
 import LocationsSection from '../sections/LocationsSection.astro';
-
-const services = [
-  {
-    id: 'water',
-    bgWord: 'FLOOD',
-    tagline: 'Stop the damage before it spreads.',
-    title: 'Water Damage',
-    description:
-      'Rapid extraction, drying, and structural protection. We stop the spread and prevent secondary damage.',
-    features: [
-      "24/7 extraction — we're on-site within 60 minutes",
-      'Industrial drying & dehumidification',
-      'Complete moisture mapping for your insurance claim',
-    ],
-    ctaText: 'Get Free Assessment',
-    imageSrc: '/hero-water.jpg',
-    imageAlt: 'Water damage restoration in Edmonton',
-  },
-  {
-    id: 'fire',
-    bgWord: 'BURN',
-    tagline: 'Every trace of the fire, gone.',
-    title: 'Fire & Smoke Damage',
-    description:
-      'Soot removal, odor neutralization, and structural cleanup—fast, safe, and thorough.',
-    features: [
-      'Emergency board-up & securing',
-      'Soot & residue cleaning',
-      'Thermal fogging & deodorization',
-    ],
-    ctaText: 'Get Free Assessment',
-    imageSrc: '/hero-fire.jpg',
-    imageAlt: 'Fire damage restoration in Edmonton',
-  },
-  {
-    id: 'mold',
-    bgWord: 'MOLD',
-    tagline: 'Safely removed. Not just masked.',
-    title: 'Mold Remediation',
-    description:
-      'Containment, removal, and prevention—built around safety and air quality.',
-    features: [
-      'Containment & negative air setup',
-      'HEPA filtration & removal',
-      'Prevention plan & moisture control',
-    ],
-    ctaText: 'Get Free Assessment',
-    imageSrc: '/hero-mold.jpg',
-    imageAlt: 'Mold remediation in Edmonton',
-  },
-  {
-    id: 'storm',
-    bgWord: 'STORM',
-    tagline: 'Emergency response, same day.',
-    title: 'Storm Damage',
-    description:
-      'Roof tarps, debris removal, and structural stabilization when the weather strikes.',
-    features: [
-      'Emergency roof tarps & patching',
-      'Debris removal & tree impact',
-      'Structural stabilization',
-    ],
-    ctaText: 'Get Free Assessment',
-    imageSrc: '/hero-storm.jpg',
-    imageAlt: 'Storm damage repair in Edmonton',
-  },
-];
+import MobileCallBar from '../components/MobileCallBar.astro';
+import { primaryServices } from '../data/services';
 ---
 
 <Layout preloadImages={['/before-damage.png', '/after-restored.png']}>
@@ -96,8 +31,20 @@ const services = [
     <VideoReel client:visible />
     <StatsBar />
     {
-      services.map((service, i) => (
-        <ServiceSection {...service} reversed={i % 2 !== 0} />
+      primaryServices.map((s, i) => (
+        <ServiceSection
+          id={s.id}
+          bgWord={s.bgWord}
+          tagline={s.cardTagline}
+          title={s.shortName}
+          description={s.cardDescription}
+          features={s.features}
+          ctaText="Get Free Assessment"
+          imageSrc={s.imageSrc}
+          imageAlt={s.imageAlt}
+          href={s.page ? `/${s.page.slug}/` : undefined}
+          reversed={i % 2 !== 0}
+        />
       ))
     }
     <AdditionalServices />
@@ -110,4 +57,5 @@ const services = [
 
   <Footer />
   <CommandStrip />
+  <MobileCallBar formAnchor="#contact" />
 </Layout>

@@ -10,6 +10,7 @@ import TrustStrip from '../components/TrustStrip.astro';
 import FaqSection from '../components/FaqSection.astro';
 import RelatedServices from '../components/RelatedServices.astro';
 import ContactForm from '../components/ContactForm.svelte';
+import MobileCallBar from '../components/MobileCallBar.astro';
 import { pagedServices, BUSINESS } from '../data/services';
 import { serviceSchema, faqPageSchema, breadcrumbSchema } from '../lib/seo';
 
@@ -91,4 +92,5 @@ const schemas = [
   </main>
 
   <Footer />
+  <MobileCallBar formAnchor="#quote" />
 </Layout>

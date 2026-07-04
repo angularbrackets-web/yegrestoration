@@ -1,4 +1,5 @@
 ---
+import '../styles/fonts.css';
 import '../styles/global.css';
 import { localBusinessSchema } from '../lib/seo';
 import Analytics from '../components/Analytics.astro';
@@ -66,13 +67,10 @@ const ogImageURL = new URL(ogImage, Astro.site);
     <!-- RSS autodiscovery -->
     <link rel="alternate" type="application/rss+xml" title="YEG Restoration — Restoration Insights" href="/rss.xml" />
 
-    <!-- Fonts: preconnect first so DNS resolves early, then stylesheet -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=Inter:wght@400;500;600&family=Source+Serif+4:wght@400;600&display=swap"
-    />
+    <!-- Fonts: self-hosted variable fonts (src/styles/fonts.css) — preload only
+         the latin files needed above the fold (Sora headings, Inter body) -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/sora-latin.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-latin.woff2" />
 
     <!-- LCP Preloads -->
     {preloadImages.map((href) => (

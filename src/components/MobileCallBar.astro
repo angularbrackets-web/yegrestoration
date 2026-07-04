@@ -1,0 +1,49 @@
+---
+import { BUSINESS } from '../data/services';
+
+interface Props {
+  /** Where "Get Help Now" points — #quote on service pages, #contact on homepage. */
+  formAnchor?: string;
+}
+
+const { formAnchor = '#quote' } = Astro.props;
+---
+
+<!-- Spacer so the fixed bar never covers the footer's last content -->
+<div class="h-14 lg:hidden" aria-hidden="true"></div>
+
+<div
+  class="fixed bottom-0 left-0 right-0 z-[300] lg:hidden bg-[#F8F6F3] border-t border-black/[0.08] shadow-[0_-4px_24px_rgba(0,0,0,0.10)] pb-[env(safe-area-inset-bottom)]"
+>
+  <div class="grid grid-cols-2">
+    <a
+      href={BUSINESS.phoneHref}
+      class="flex items-center justify-center gap-2 h-14 bg-yeg-amber text-yeg-bg font-bold text-sm"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path
+          d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+        ></path>
+      </svg>
+      <span>Call Now — 24/7</span>
+    </a>
+    <a
+      href={formAnchor}
+      class="flex items-center justify-center gap-2 h-14 bg-yeg-text text-yeg-bg font-bold text-sm"
+    >
+      <span>Get Help Now</span>
+      <span aria-hidden="true">&rarr;</span>
+    </a>
+  </div>
+</div>

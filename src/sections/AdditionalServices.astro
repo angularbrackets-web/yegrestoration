@@ -1,26 +1,5 @@
 ---
-const services = [
-  {
-    title: 'Construction Services',
-    description:
-      'Full rebuild and repair after damage. From structural work to finishing — one team, start to finish.',
-  },
-  {
-    title: 'Contents Restoration',
-    description:
-      'Salvaging and restoring furniture, documents, electronics, and belongings that matter to you.',
-  },
-  {
-    title: 'Biohazard Cleaning',
-    description:
-      'Safe, discreet decontamination and disposal for trauma, sewage, and hazardous material events.',
-  },
-  {
-    title: 'Asbestos Abatement',
-    description:
-      'Certified identification, containment, and full removal of asbestos-containing materials.',
-  },
-];
+import { additionalServices, servicePath } from '../data/services';
 ---
 
 <section
@@ -49,8 +28,9 @@ const services = [
     <!-- Bento Grid -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
       {
-        services.map(({ title, description }, index) => {
-          const isLarge = index === 0 || index === 3;
+        additionalServices.map((s, index) => {
+          // 5 cards on a 3-column grid: one 2-span + four 1-spans = two clean rows.
+          const isLarge = index === 0;
           return (
             <div
               class={`relative group bg-white rounded-2xl p-8 border border-black/[0.06] flex flex-col gap-6 overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:border-yeg-amber/30 hover:shadow-[0_16px_40px_rgba(0,0,0,0.08)] ${isLarge ? 'md:col-span-2' : 'md:col-span-1'}`}
@@ -64,21 +44,21 @@ const services = [
                 <!-- Text -->
                 <div class="flex-1">
                   <h3 class="font-display font-bold text-2xl text-yeg-text mb-3 tracking-wide group-hover:text-yeg-amber transition-colors duration-500">
-                    {title}
+                    {s.name}
                   </h3>
                   <p class="text-base text-yeg-text-secondary leading-relaxed sm:max-w-md">
-                    {description}
+                    {s.cardDescription}
                   </p>
                 </div>
 
                 <!-- CTA -->
                 <div class="mt-8 pt-6 border-t border-black/[0.06]">
                   <a
-                    href="#contact"
+                    href={servicePath(s)}
                     class="inline-flex items-center gap-2 text-sm text-yeg-amber/70 hover:text-yeg-amber transition-colors group/cta"
                   >
                     <span class="font-semibold tracking-wider uppercase text-[11px]">
-                      Get a quote
+                      {s.page ? 'Learn more' : 'Get a quote'}
                     </span>
                     <span class="transition-transform duration-300 group-hover/cta:translate-x-1.5">
                       &rarr;

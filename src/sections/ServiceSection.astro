@@ -10,6 +10,8 @@ interface Props {
   imageSrc: string;
   imageAlt: string;
   reversed?: boolean;
+  /** Landing page URL — when present, the title links there and a secondary CTA is added. */
+  href?: string;
 }
 
 const {
@@ -23,6 +25,7 @@ const {
   imageSrc,
   imageAlt,
   reversed = false,
+  href,
 } = Astro.props;
 ---
 
@@ -71,7 +74,15 @@ const {
 
     <!-- Title -->
     <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
-      {title}
+      {
+        href ? (
+          <a href={href} class="hover:text-yeg-amber transition-colors duration-300">
+            {title}
+          </a>
+        ) : (
+          title
+        )
+      }
     </h2>
 
     <!-- Description -->
@@ -108,24 +119,56 @@ const {
     </ul>
 
     <!-- CTA -->
-    <a href="#contact" class="cta-primary">
-      <span>{ctaText}</span>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M5 12h14"></path>
-        <path d="m12 5 7 7-7 7"></path>
-      </svg>
-    </a>
+    {
+      href ? (
+        <div class="flex flex-wrap items-center gap-4">
+          <a href="#contact" class="cta-primary">
+            <span>Get Free Assessment</span>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14" />
+              <path d="m12 5 7 7-7 7" />
+            </svg>
+          </a>
+          <a
+            href={href}
+            class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+          >
+            Learn About {title}
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      ) : (
+        <a href="#contact" class="cta-primary">
+          <span>{ctaText}</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 12h14" />
+            <path d="m12 5 7 7-7 7" />
+          </svg>
+        </a>
+      )
+    }
   </div>
 
   <!-- Desktop Image -->
