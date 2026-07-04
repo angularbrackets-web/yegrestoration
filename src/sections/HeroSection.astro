@@ -1,5 +1,8 @@
 ---
 import ComparisonSlider from '../components/ComparisonSlider.svelte';
+import { heroSliderImages } from '../lib/hero-images';
+
+const { desktopBefore, desktopAfter, mobileBefore, mobileAfter } = heroSliderImages;
 ---
 
 <section
@@ -90,8 +93,8 @@ import ComparisonSlider from '../components/ComparisonSlider.svelte';
     <div class="lg:hidden mt-6 w-full aspect-[4/3] max-h-[45vh]">
       <ComparisonSlider
         client:load
-        beforeImage="/before-damage.png"
-        afterImage="/after-restored.png"
+        beforeImage={mobileBefore.src}
+        afterImage={mobileAfter.src}
         beforeAlt="Before: Mold damage and deteriorated framing"
         afterAlt="After: Clean restored framing with new insulation"
       />
@@ -105,8 +108,8 @@ import ComparisonSlider from '../components/ComparisonSlider.svelte';
   >
     <ComparisonSlider
       client:load
-      beforeImage="/before-damage.png"
-      afterImage="/after-restored.png"
+      beforeImage={desktopBefore.src}
+      afterImage={desktopAfter.src}
       beforeAlt="Before: Mold damage and deteriorated framing with debris"
       afterAlt="After: Clean restored framing with new insulation and copper pipes"
     />

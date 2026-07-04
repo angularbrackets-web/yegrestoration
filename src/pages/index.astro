@@ -15,9 +15,20 @@ import RecentPostsSection from '../sections/RecentPostsSection.astro';
 import LocationsSection from '../sections/LocationsSection.astro';
 import MobileCallBar from '../components/MobileCallBar.astro';
 import { primaryServices } from '../data/services';
+import { heroSliderImages } from '../lib/hero-images';
+
+// LCP preloads: the hero comparison slider. Media queries mirror the lg:
+// (1024px) breakpoint that decides which slider instance renders.
+const { desktopBefore, desktopAfter, mobileBefore, mobileAfter } = heroSliderImages;
+const heroPreloads = [
+  { href: mobileBefore.src, media: '(max-width: 1023.98px)' },
+  { href: mobileAfter.src, media: '(max-width: 1023.98px)' },
+  { href: desktopBefore.src, media: '(min-width: 1024px)' },
+  { href: desktopAfter.src, media: '(min-width: 1024px)' },
+];
 ---
 
-<Layout preloadImages={['/before-damage.png', '/after-restored.png']}>
+<Layout preloadImages={heroPreloads}>
   <!-- Texture overlays -->
   <div class="grain-overlay"></div>
   <div class="concrete-texture"></div>

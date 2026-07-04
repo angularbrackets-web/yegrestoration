@@ -4,6 +4,12 @@ import '../styles/global.css';
 import { localBusinessSchema } from '../lib/seo';
 import Analytics from '../components/Analytics.astro';
 
+interface PreloadImage {
+  href: string;
+  /** Media query so only the viewport-appropriate variant is fetched. */
+  media?: string;
+}
+
 interface Props {
   title?: string;
   description?: string;
@@ -13,7 +19,7 @@ interface Props {
   publishDate?: Date;
   updatedDate?: Date;
   /** LCP image preloads — pass only images actually rendered above the fold on this page. */
-  preloadImages?: string[];
+  preloadImages?: PreloadImage[];
 }
 
 const {
@@ -86,8 +92,8 @@ const ogImageURL = new URL(ogImage, Astro.site);
     <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-latin.woff2" />
 
     <!-- LCP Preloads -->
-    {preloadImages.map((href) => (
-      <link rel="preload" as="image" href={href} fetchpriority="high" />
+    {preloadImages.map(({ href, media }) => (
+      <link rel="preload" as="image" href={href} fetchpriority="high" media={media} />
     ))}
     <!-- Structured Data -->
     <script type="application/ld+json" set:html={JSON.stringify(localBusinessSchema)} />
