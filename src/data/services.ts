@@ -7,6 +7,12 @@
  * they are stored on leads and mapped back to labels in the admin panel.
  */
 
+import type { ImageMetadata } from 'astro';
+import waterImage from '../assets/services/water.jpg';
+import fireImage from '../assets/services/fire.jpg';
+import moldImage from '../assets/services/mold.jpg';
+import stormImage from '../assets/services/storm.jpg';
+
 export const BUSINESS = {
   name: 'YEG Restoration',
   phone: '(780) 479-3285',
@@ -63,7 +69,8 @@ export interface Service {
   cardTagline: string;
   cardDescription: string;
   features: string[];
-  imageSrc: string;
+  /** Optimized via astro:assets — only primary-tier services render images. */
+  image?: ImageMetadata;
   imageAlt: string;
   /** Real job photos — drop in when available; gallery renders slots until then. */
   photos?: { src: string; alt: string; caption: string }[];
@@ -86,7 +93,7 @@ export const services: Service[] = [
       'Industrial drying & dehumidification',
       'Complete moisture mapping for your insurance claim',
     ],
-    imageSrc: '/hero-water.jpg',
+    image: waterImage,
     imageAlt: 'Water damage restoration in Edmonton',
     page: {
       slug: 'water-damage-restoration',
@@ -161,7 +168,7 @@ export const services: Service[] = [
       'Soot & residue cleaning',
       'Thermal fogging & deodorization',
     ],
-    imageSrc: '/hero-fire.jpg',
+    image: fireImage,
     imageAlt: 'Fire damage restoration in Edmonton',
     page: {
       slug: 'fire-smoke-damage',
@@ -236,7 +243,7 @@ export const services: Service[] = [
       'HEPA filtration & removal',
       'Prevention plan & moisture control',
     ],
-    imageSrc: '/hero-mold.jpg',
+    image: moldImage,
     imageAlt: 'Mold remediation in Edmonton',
     page: {
       slug: 'mold-removal',
@@ -311,7 +318,7 @@ export const services: Service[] = [
       'Debris removal & tree impact',
       'Structural stabilization',
     ],
-    imageSrc: '/hero-storm.jpg',
+    image: stormImage,
     imageAlt: 'Storm damage repair in Edmonton',
     // No landing page (by decision) — homepage section only; CTAs go to contact.
   },
@@ -329,7 +336,7 @@ export const services: Service[] = [
       'Hospital-grade disinfection',
       'Safe removal of contaminated materials',
     ],
-    imageSrc: '/hero-water.jpg', // TODO: replace with real sewage-job photo when available
+    image: waterImage, // TODO: replace with real sewage-job photo when available
     imageAlt: 'Sewage backup cleanup in Edmonton',
     page: {
       slug: 'sewage-cleanup',
@@ -400,7 +407,6 @@ export const services: Service[] = [
     cardDescription:
       'Full rebuild and repair after damage. From structural work to finishing — one team, start to finish.',
     features: [],
-    imageSrc: '',
     imageAlt: '',
   },
   {
@@ -413,7 +419,6 @@ export const services: Service[] = [
     cardDescription:
       'Salvaging and restoring furniture, documents, electronics, and belongings that matter to you.',
     features: [],
-    imageSrc: '',
     imageAlt: '',
   },
   {
@@ -426,7 +431,6 @@ export const services: Service[] = [
     cardDescription:
       'Safe, discreet decontamination and disposal for trauma and hazardous material events.',
     features: [],
-    imageSrc: '',
     imageAlt: '',
   },
   {
@@ -439,7 +443,6 @@ export const services: Service[] = [
     cardDescription:
       'Certified identification, containment, and full removal of asbestos-containing materials.',
     features: [],
-    imageSrc: '',
     imageAlt: '',
   },
 ];

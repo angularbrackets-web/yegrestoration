@@ -1,4 +1,9 @@
 ---
+import { Image } from 'astro:assets';
+// Duplicate of public/images/YEG_Restoration_Logo_RBG.png, which must stay
+// in public/ as a stable URL for JSON-LD; this copy gets optimized.
+import logo from '../assets/logo.png';
+
 interface Props {
   variant?: 'nav' | 'drawer' | 'footer';
 }
@@ -23,11 +28,11 @@ const img =
 <span
   class={`bg-yeg-amber inline-flex items-center justify-center overflow-hidden shrink-0 ${shell}`}
 >
-  <img
-    src="/images/YEG_Restoration_Logo_RBG.png"
+  <Image
+    src={logo}
     alt="YEG Restoration — Restore, Recover, Rebuild"
-    width="500"
-    height="500"
+    width={320}
+    format="webp"
     decoding="async"
     class={`${img} object-contain object-center [transform-origin:center] max-w-none`}
   />

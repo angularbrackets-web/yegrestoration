@@ -1,4 +1,6 @@
 ---
+import { Image } from 'astro:assets';
+
 interface Props {
   id: string;
   bgWord: string;
@@ -7,7 +9,7 @@ interface Props {
   description: string;
   features: string[];
   ctaText: string;
-  imageSrc: string;
+  image: ImageMetadata;
   imageAlt: string;
   reversed?: boolean;
   /** Landing page URL — when present, the title links there and a secondary CTA is added. */
@@ -22,7 +24,7 @@ const {
   description,
   features,
   ctaText,
-  imageSrc,
+  image,
   imageAlt,
   reversed = false,
   href,
@@ -52,9 +54,12 @@ const {
 
   <!-- Mobile Image -->
   <div class="lg:hidden w-full h-52 overflow-hidden relative mt-20">
-    <img
-      src={imageSrc}
+    <Image
+      src={image}
       alt={imageAlt}
+      widths={[480, 800, 1184]}
+      sizes="(min-width: 1024px) 46vw, 100vw"
+      format="webp"
       class="w-full h-full object-cover"
       loading="lazy"
       decoding="async"
@@ -176,9 +181,12 @@ const {
     class={`hidden lg:block absolute ${reversed ? 'left-[6vw]' : 'right-[6vw]'} top-[18vh] w-[46vw] h-[56vh]`}
   >
     <div class="image-frame w-full h-full rounded-lg">
-      <img
-        src={imageSrc}
+      <Image
+        src={image}
         alt={imageAlt}
+        widths={[480, 800, 1184]}
+        sizes="(min-width: 1024px) 46vw, 100vw"
+        format="webp"
         class="w-full h-full object-cover"
         loading="lazy"
         decoding="async"

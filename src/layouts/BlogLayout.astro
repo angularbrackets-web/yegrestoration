@@ -1,4 +1,5 @@
 ---
+import { Image } from 'astro:assets';
 import Layout from './Layout.astro';
 import Navbar from '../components/Navbar.svelte';
 import Footer from '../components/Footer.astro';
@@ -13,7 +14,7 @@ interface Props {
   author: string;
   tags: string[];
   slug: string;
-  heroImage?: string;
+  heroImage?: ImageMetadata;
   heroImageAlt?: string;
   rawContent?: string;
 }
@@ -32,7 +33,12 @@ const {
 } = Astro.props;
 
 const readingTime = getReadingTime(rawContent);
-const schema = blogArticleSchema({ title, description, publishDate, updatedDate, slug, heroImage });
+// Schema + OG need URL strings; heroImage.src is site-relative, resolved
+// absolute by blogArticleSchema's fallback logic / Layout's new URL().
+const heroImageUrl = heroImage
+  ? new URL(heroImage.src, Astro.site).href
+  : undefined;
+const schema = blogArticleSchema({ title, description, publishDate, updatedDate, slug, heroImage: heroImageUrl });
 
 const formattedDate = publishDate.toLocaleDateString('en-CA', {
   year: 'numeric',
@@ -44,7 +50,7 @@ const formattedDate = publishDate.toLocaleDateString('en-CA', {
 <Layout
   title={`${title} | YEG Restoration`}
   description={description}
-  ogImage={heroImage}
+  ogImage={heroImage?.src}
   ogType="article"
   publishDate={publishDate}
   updatedDate={updatedDate}
@@ -120,7 +126,15 @@ const formattedDate = publishDate.toLocaleDateString('en-CA', {
         <!-- Hero Image -->
         {heroImage && (
           <div class="image-frame rounded-xl overflow-hidden mb-10">
-            <img src={heroImage} alt={heroImageAlt ?? title} class="w-full aspect-video object-cover" loading="eager" />
+            <Image
+              src={heroImage}
+              alt={heroImageAlt ?? title}
+              widths={[480, 672, 1344]}
+              sizes="(min-width: 768px) 672px, 100vw"
+              format="webp"
+              class="w-full aspect-video object-cover"
+              loading="eager"
+            />
           </div>
         )}
 

@@ -22,5 +22,8 @@ export default defineConfig({
   ],
   output: 'static',
   adapter: vercel(),
+  // Responsive images: auto srcset/sizes + aspect-ratio CSS (CLS guard) on
+  // every <Image>. Styles are zero-specificity, so Tailwind classes win.
+  image: { layout: 'constrained' },
   vite: { plugins: [tailwindcss()] },
 });

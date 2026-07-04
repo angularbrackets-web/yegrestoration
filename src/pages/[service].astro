@@ -37,7 +37,6 @@ const schemas = [
 <Layout
   title={page.metaTitle}
   description={page.metaDescription}
-  ogImage={service.imageSrc}
 >
   <!-- Texture overlays -->
   <div class="grain-overlay"></div>
@@ -56,7 +55,7 @@ const schemas = [
     <ServiceProcess steps={page.process} />
     <WorkGallerySlots
       serviceName={service.shortName}
-      imageSrc={service.imageSrc}
+      image={service.image!}
       imageAlt={service.imageAlt}
       photos={service.photos}
     />

@@ -1,12 +1,14 @@
 ---
+import { Image } from 'astro:assets';
+
 interface Props {
   serviceName: string;
-  imageSrc: string;
+  image: ImageMetadata;
   imageAlt: string;
   photos?: { src: string; alt: string; caption: string }[];
 }
 
-const { serviceName, imageSrc, imageAlt, photos = [] } = Astro.props;
+const { serviceName, image, imageAlt, photos = [] } = Astro.props;
 
 // Grid always shows at least 3 cells: lead image + real photos, padded with
 // designed "coming soon" slots (honest placeholders, never fake content).
@@ -35,9 +37,12 @@ const placeholderCount = Math.max(3 - filledCount, 0);
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
         <!-- Lead image -->
         <div class="image-frame rounded-xl">
-          <img
-            src={imageSrc}
+          <Image
+            src={image}
             alt={imageAlt}
+            widths={[400, 640, 900]}
+            sizes="(min-width: 1024px) 30vw, (min-width: 640px) 50vw, 100vw"
+            format="webp"
             loading="lazy"
             decoding="async"
             class="w-full aspect-[4/3] object-cover"

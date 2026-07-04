@@ -1,4 +1,5 @@
 ---
+import { Image } from 'astro:assets';
 import type { Service, ServicePageContent } from '../data/services';
 import { BUSINESS } from '../data/services';
 
@@ -103,9 +104,12 @@ const { page } = service;
       <!-- Desktop Image -->
       <div class="hidden lg:block w-full lg:w-[45%]">
         <div class="image-frame relative rounded-lg aspect-[4/3]">
-          <img
-            src={service.imageSrc}
+          <Image
+            src={service.image!}
             alt={service.imageAlt}
+            widths={[480, 800, 1184]}
+            sizes="(min-width: 1024px) 45vw, 100vw"
+            format="webp"
             class="w-full h-full object-cover"
             loading="eager"
             fetchpriority="high"
