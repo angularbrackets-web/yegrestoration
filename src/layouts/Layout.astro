@@ -7,12 +7,15 @@ interface Props {
   title?: string;
   description?: string;
   ogImage?: string;
+  /** LCP image preloads — pass only images actually rendered above the fold on this page. */
+  preloadImages?: string[];
 }
 
 const {
   title = "YEG Restoration — Edmonton's 24/7 Emergency Restoration Team",
   description = '24/7 emergency restoration in Edmonton — water, fire, mold, sewage & storm. 60-minute response, IICRC certified, direct insurance billing. Free assessment: (780) 479-3285.',
   ogImage = '/og-cover.jpg',
+  preloadImages = [],
 } = Astro.props;
 
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
@@ -72,8 +75,9 @@ const ogImageURL = new URL(ogImage, Astro.site);
     />
 
     <!-- LCP Preloads -->
-    <link rel="preload" as="image" href="/before-damage.png" fetchpriority="high" />
-    <link rel="preload" as="image" href="/after-restored.png" fetchpriority="high" />
+    {preloadImages.map((href) => (
+      <link rel="preload" as="image" href={href} fetchpriority="high" />
+    ))}
     <!-- Structured Data -->
     <script type="application/ld+json" set:html={JSON.stringify(localBusinessSchema)} />
 

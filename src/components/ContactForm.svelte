@@ -1,5 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { z } from 'zod';
+  import { services } from '../data/services';
+
+  let { defaultService = '' } = $props();
 
   const schema = z.object({
     name: z.string().min(2, 'Please enter your name'),
@@ -13,7 +17,7 @@
     name: '',
     phone: '',
     email: '',
-    service: '',
+    service: defaultService,
     message: '',
   });
 
@@ -21,6 +25,12 @@
   let submitted = $state(false);
   let submitting = $state(false);
   let serverError = $state('');
+  // Disabled until hydration — a pre-hydration submit would do a native GET
+  // navigation (no onsubmit attached yet) and silently drop the lead.
+  let hydrated = $state(false);
+  onMount(() => {
+    hydrated = true;
+  });
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -149,14 +159,9 @@
             class:border-red-500={errors.service}
           >
             <option value="">Select a service</option>
-            <option value="water">Water Damage Restoration</option>
-            <option value="fire">Fire Damage Restoration</option>
-            <option value="mold">Mold Removal</option>
-            <option value="storm">Storm Damage Repair</option>
-            <option value="construction">Construction Services</option>
-            <option value="contents">Contents Restoration</option>
-            <option value="biohazard">Biohazard Cleaning</option>
-            <option value="asbestos">Asbestos Abatement</option>
+            {#each services as s (s.id)}
+              <option value={s.id}>{s.name}</option>
+            {/each}
             <option value="other">Other Emergency</option>
           </select>
           {#if errors.service}
@@ -185,7 +190,7 @@
         <div class="form-field opacity-0 pt-2">
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !hydrated}
             class="cta-primary w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>

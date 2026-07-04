@@ -171,7 +171,7 @@ export const services: Service[] = [
         'After the fire truck leaves, call us. 24/7 board-up, soot removal & odour elimination. Free assessment, direct insurance billing. (780) 479-3285.',
       heroTagline: 'The fire is out. Now get your home back.',
       heroCopy:
-        'Soot keeps corroding surfaces and smoke keeps sinking into walls long after the flames are out. Our IICRC-certified crew secures your home today, then removes every trace — the damage, the residue, and the smell — while we handle your insurance claim directly.',
+        'Soot keeps corroding surfaces and smoke keeps sinking into walls long after the flames are out. Our IICRC-certified crew secures your home today, then removes every trace — the damage, the residue, and the smell — while we handle your insurance claim directly. Free assessment, written guarantee.',
       process: [
         {
           step: '01',
@@ -201,7 +201,7 @@ export const services: Service[] = [
         {
           question: 'Will the smoke smell ever come out of my house?',
           answer:
-            'Yes — if it’s treated at the source. Smoke odour lives in particles embedded in drywall, insulation, and ducts, so sprays and ozone gimmicks only mask it. We remove contaminated materials that can’t be saved, clean everything that can, and use thermal fogging that penetrates exactly the way the smoke did. That’s how the smell leaves for good.',
+            'Yes — if it’s treated at the source. Smoke odour lives in particles embedded in drywall, insulation, and ducts, so surface cleaning and air fresheners only mask it. We remove contaminated materials that can’t be saved, clean everything that can, and use thermal fogging that penetrates exactly the way the smoke did. That’s how the smell leaves for good.',
         },
         {
           question: 'Does insurance cover fire and smoke damage?',
@@ -336,7 +336,7 @@ export const services: Service[] = [
       h1: 'Sewage Cleanup in Edmonton',
       metaTitle: 'Sewage Backup Cleanup Edmonton | 24/7 | YEG Restoration',
       metaDescription:
-        'Sewage backup? Keep your family away — it’s Category 3 water. Certified 24/7 cleanup, direct insurance billing. Call (780) 479-3285 now.',
+        'Sewage backup? It’s Category 3 water — keep your family away. Certified 24/7 cleanup, free assessment, direct insurance billing. (780) 479-3285.',
       heroTagline: 'Don’t touch it. Call us.',
       heroCopy:
         'Sewage backup is Category 3 “black water” — it carries bacteria and viruses that make it a health hazard, not a cleanup chore. Our certified crew extracts it, disinfects everything it touched, and disposes of what can’t be saved. On-site in about 60 minutes, and we bill your insurance directly.',
