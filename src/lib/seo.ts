@@ -67,7 +67,7 @@ export const localBusinessSchema = {
         '@type': 'PostalAddress',
         addressLocality: 'Edmonton',
         addressRegion: 'AB',
-        postalCode: 'T5J 0N3', // PLACEHOLDER
+        postalCode: 'T5J 0N3', // PLACEHOLDER — LAUNCH BLOCKER: replace with real postal code before launch
         addressCountry: 'CA',
       },
       geo: {
@@ -131,7 +131,9 @@ export const localBusinessSchema = {
       },
       // NOTE: no aggregateRating until real Google reviews exist — fabricated
       // review markup risks a manual action. Re-add with real values later.
-      // TODO: add sameAs (Facebook/Instagram/GBP) when real profile URLs are provided.
+      // TODO — LAUNCH BLOCKER: add sameAs (Facebook/Instagram/GBP) when real profile URLs are provided.
+      // Cross-web entity consistency (same NAP + description on GBP/socials) is a
+      // primary trust signal for both Google and AI answer engines.
     },
     {
       '@type': 'WebSite',
@@ -164,6 +166,28 @@ export function faqPageSchema(faqs: ServiceFaq[]) {
       '@type': 'Question',
       name: f.question,
       acceptedAnswer: { '@type': 'Answer', text: f.answer },
+    })),
+  };
+}
+
+export interface BlogIndexPost {
+  title: string;
+  slug: string;
+}
+
+/** Blog schema for the blog index page — lists posts so crawlers and AI
+ *  engines see the full article inventory from one node. */
+export function blogIndexSchema(posts: BlogIndexPost[]) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Blog',
+    url: `${BUSINESS.url}/blog/`,
+    name: 'Restoration Insights — YEG Restoration Blog',
+    publisher: { '@id': BUSINESS_ID },
+    blogPost: posts.map((p) => ({
+      '@type': 'BlogPosting',
+      headline: p.title,
+      url: `${BUSINESS.url}/blog/${p.slug}/`,
     })),
   };
 }

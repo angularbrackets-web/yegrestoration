@@ -8,6 +8,10 @@ interface Props {
   title?: string;
   description?: string;
   ogImage?: string;
+  /** 'article' adds article:published_time / article:modified_time (blog posts). */
+  ogType?: 'website' | 'article';
+  publishDate?: Date;
+  updatedDate?: Date;
   /** LCP image preloads — pass only images actually rendered above the fold on this page. */
   preloadImages?: string[];
 }
@@ -16,6 +20,9 @@ const {
   title = "YEG Restoration — Edmonton's 24/7 Emergency Restoration Team",
   description = '24/7 emergency restoration in Edmonton — water, fire, mold, sewage & storm. 60-minute response, IICRC certified, direct insurance billing. Free assessment: (780) 479-3285.',
   ogImage = '/og-cover.jpg',
+  ogType = 'website',
+  publishDate,
+  updatedDate,
   preloadImages = [],
 } = Astro.props;
 
@@ -35,7 +42,13 @@ const ogImageURL = new URL(ogImage, Astro.site);
     <link rel="canonical" href={canonicalURL} />
 
     <!-- Open Graph -->
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
+    {ogType === 'article' && publishDate && (
+      <meta property="article:published_time" content={publishDate.toISOString()} />
+    )}
+    {ogType === 'article' && (updatedDate ?? publishDate) && (
+      <meta property="article:modified_time" content={(updatedDate ?? publishDate)!.toISOString()} />
+    )}
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />

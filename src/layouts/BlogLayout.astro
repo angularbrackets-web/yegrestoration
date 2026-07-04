@@ -41,7 +41,14 @@ const formattedDate = publishDate.toLocaleDateString('en-CA', {
 });
 ---
 
-<Layout title={`${title} | YEG Restoration`} description={description} ogImage={heroImage}>
+<Layout
+  title={`${title} | YEG Restoration`}
+  description={description}
+  ogImage={heroImage}
+  ogType="article"
+  publishDate={publishDate}
+  updatedDate={updatedDate}
+>
   <!-- Texture overlays -->
   <div class="grain-overlay"></div>
   <div class="concrete-texture"></div>

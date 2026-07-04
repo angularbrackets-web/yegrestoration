@@ -4,9 +4,12 @@ import Layout from '../../layouts/Layout.astro';
 import Navbar from '../../components/Navbar.svelte';
 import Footer from '../../components/Footer.astro';
 import { getReadingTime } from '../../lib/utils';
+import { blogIndexSchema } from '../../lib/seo';
 
 const posts = await getCollection('blog', ({ data }) => !data.draft);
 const sorted = posts.sort((a, b) => b.data.publishDate.getTime() - a.data.publishDate.getTime());
+
+const blogSchema = blogIndexSchema(sorted.map((p) => ({ title: p.data.title, slug: p.id })));
 
 function formatDate(date: Date) {
   return date.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -21,6 +24,9 @@ function formatDate(date: Date) {
   <div class="concrete-texture"></div>
 
   <Navbar client:load />
+
+  <!-- Blog JSON-LD -->
+  <script type="application/ld+json" set:html={JSON.stringify(blogSchema)} />
 
   <main id="main-content" class="relative pt-28 pb-24 px-6">
     <div class="max-w-5xl mx-auto">

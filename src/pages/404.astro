@@ -1,0 +1,83 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import { BUSINESS, pagedServices } from '../data/services';
+---
+
+<Layout
+  title="Page Not Found | YEG Restoration"
+  description="That page doesn't exist — but help does. 24/7 emergency restoration in Edmonton. Call (780) 479-3285."
+>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main id="main-content" class="relative pt-28 pb-24 px-6">
+    <div class="max-w-2xl mx-auto text-center">
+      <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3 font-serif">
+        404 — Page not found
+      </p>
+      <h1
+        class="font-display font-bold text-yeg-text mb-4"
+        style="font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -0.03em; line-height: 1.1;"
+      >
+        This page is gone. Your emergency isn't.
+      </h1>
+      <p class="text-yeg-text-secondary leading-relaxed mb-8">
+        The page you're looking for doesn't exist or has moved. If you're dealing with water,
+        fire, mold, or sewage damage right now, skip the browsing — call us and a crew is on
+        the way.
+      </p>
+
+      <div class="flex flex-wrap justify-center gap-3 mb-14">
+        <a href={BUSINESS.phoneHref} class="cta-primary text-sm">
+          {BUSINESS.phone} — 24/7 emergency line
+        </a>
+        <a
+          href="/contact/"
+          class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+        >
+          Request a callback
+        </a>
+      </div>
+
+      <div class="text-left">
+        <h2 class="font-display font-bold text-yeg-text text-lg mb-4 text-center">
+          Looking for one of these?
+        </h2>
+        <ul class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {pagedServices.map((s) => (
+            <li>
+              <a
+                href={`/${s.page!.slug}/`}
+                class="block rounded-xl border border-black/[0.07] bg-white px-4 py-3 text-sm text-yeg-text-secondary hover:text-yeg-text hover:border-yeg-amber/25 transition-all duration-200"
+              >
+                {s.name}
+              </a>
+            </li>
+          ))}
+          <li>
+            <a
+              href="/insurance-claims/"
+              class="block rounded-xl border border-black/[0.07] bg-white px-4 py-3 text-sm text-yeg-text-secondary hover:text-yeg-text hover:border-yeg-amber/25 transition-all duration-200"
+            >
+              Insurance Claims Guide
+            </a>
+          </li>
+          <li>
+            <a
+              href="/blog/"
+              class="block rounded-xl border border-black/[0.07] bg-white px-4 py-3 text-sm text-yeg-text-secondary hover:text-yeg-text hover:border-yeg-amber/25 transition-all duration-200"
+            >
+              Restoration Insights (Blog)
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>
