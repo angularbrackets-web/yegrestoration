@@ -11,6 +11,10 @@ export default defineConfig({
   // enforcing it here makes Vercel redirect the non-slash variants instead
   // of serving duplicate URLs. File routes (/rss.xml, /llms.txt) are exempt.
   trailingSlash: 'always',
+  // Astro 7 changed the default to 'jsx' (JSX-style whitespace stripping).
+  // Several sections rely on inline-block/{' '} spacing tuned for the old
+  // compressor, so pin the pre-7 behavior. Revisit in a dedicated pass.
+  compressHTML: true,
   integrations: [
     svelte(),
     tailwind({ applyBaseStyles: false }),
