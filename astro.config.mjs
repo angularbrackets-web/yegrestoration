@@ -1,6 +1,6 @@
 import { defineConfig } from 'astro/config';
 import svelte from '@astrojs/svelte';
-import tailwind from '@astrojs/tailwind';
+import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import mdx from '@astrojs/mdx';
 import vercel from '@astrojs/vercel';
@@ -17,10 +17,10 @@ export default defineConfig({
   compressHTML: true,
   integrations: [
     svelte(),
-    tailwind({ applyBaseStyles: false }),
     sitemap({ filter: (page) => !page.includes('/admin') }),
     mdx(),
   ],
   output: 'static',
   adapter: vercel(),
+  vite: { plugins: [tailwindcss()] },
 });

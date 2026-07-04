@@ -1,6 +1,62 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Design tokens (was tailwind.config.cjs theme.extend) */
+@theme {
+  --font-display: 'Sora', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --text-display-xl: clamp(44px, 6vw, 84px);
+  --text-display-xl--line-height: 0.92;
+  --text-display-xl--letter-spacing: -0.03em;
+  --text-display-lg: clamp(34px, 4.2vw, 56px);
+  --text-display-lg--line-height: 0.95;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display-bg: clamp(96px, 18vw, 280px);
+  --text-display-bg--line-height: 0.85;
+  --text-display-bg--letter-spacing: -0.06em;
+
+  --color-yeg-bg: #F8F6F3;
+  --color-yeg-bg-light: #FFFFFF;
+  --color-yeg-amber: #F2C94C;
+  --color-yeg-amber-hover: #f5d56a;
+  --color-yeg-text: #0F1419;
+  --color-yeg-text-secondary: #5A6270;
+  --color-yeg-signal: #C2410C;
+  --color-yeg-signal-bright: #E85D04;
+  --color-yeg-signal-on-dark: #FB923C;
+  --color-yeg-surface: #FFFFFF;
+  --color-yeg-on-surface: #0f1419;
+  --color-yeg-on-surface-muted: #5a6270;
+
+  --shadow-image: 0 18px 50px rgba(0, 0, 0, 0.45);
+
+  --animate-beacon-pulse: beacon-pulse 2s ease-in-out infinite;
+  --animate-fade-up: fade-up 0.6s ease-out forwards;
+  --animate-fade-in: fade-in 0.5s ease-out forwards;
+  --animate-slide-in-right: slide-in-right 0.8s ease-out forwards;
+  --animate-slide-in-left: slide-in-left 0.8s ease-out forwards;
+
+  @keyframes beacon-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(232, 93, 4, 0.35); }
+    50% { box-shadow: 0 0 0 12px rgba(232, 93, 4, 0); }
+  }
+  @keyframes fade-up {
+    0% { opacity: 0; transform: translateY(20px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fade-in {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  @keyframes slide-in-right {
+    0% { opacity: 0; transform: translateX(50px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes slide-in-left {
+    0% { opacity: 0; transform: translateX(-50px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+}
 
 @layer base {
   :root {
@@ -25,6 +81,39 @@
     --ring: 43 95% 55%;
     --radius: 0.625rem;
   }
+}
+
+/* shadcn-style dynamic tokens: `@theme inline` because they reference the
+   bare :root custom properties above. The --radius-xs / --shadow-xs lines
+   MUST stay — Tailwind 4 ships built-ins under those names, and omitting
+   them would silently swap in Tailwind's defaults. */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xs: calc(var(--radius) - 6px);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 
 @layer base {
