@@ -1,0 +1,79 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import ContactSection from '../sections/ContactSection.astro';
+import LocationsSection from '../sections/LocationsSection.astro';
+import { BUSINESS } from '../data/services';
+import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
+
+const title = 'Contact YEG Restoration | 24/7 Emergency Line Edmonton';
+const description =
+  'Reach YEG Restoration any hour — call (780) 479-3285 for emergencies or send the form for a free assessment. We respond within 15 minutes, 24/7.';
+
+const schemas = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'ContactPage',
+    name: 'Contact YEG Restoration',
+    description,
+    url: `${BUSINESS.url}/contact/`,
+    mainEntity: { '@id': BUSINESS_ID },
+  },
+  breadcrumbSchema([
+    { name: 'Home', url: `${BUSINESS.url}/` },
+    { name: 'Contact' },
+  ]),
+];
+---
+
+<Layout title={title} description={description}>
+  <!-- Texture overlays -->
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <!-- ContactPage + Breadcrumb JSON-LD (valid anywhere in document per Google guidelines) -->
+  {schemas.map((schema) => (
+    <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  ))}
+
+  <main id="main-content" class="relative">
+    <!-- Page header (ContactSection below renders its own h2, so the h1 lives here) -->
+    <section class="relative bg-yeg-bg pt-28 lg:pt-36">
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <!-- Breadcrumb -->
+        <nav aria-label="Breadcrumb" class="mb-6">
+          <ol class="flex items-center gap-2 text-xs text-yeg-text-secondary">
+            <li>
+              <a href="/" class="hover:text-yeg-amber transition-colors duration-200">Home</a>
+            </li>
+            <li aria-hidden="true" class="text-yeg-text-secondary/50">&rsaquo;</li>
+            <li>
+              <span aria-current="page" class="text-yeg-text">Contact</span>
+            </li>
+          </ol>
+        </nav>
+
+        <h1 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+          Contact YEG Restoration — 24/7
+        </h1>
+        <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-2xl">
+          Emergency? Call
+          <a
+            href={BUSINESS.phoneHref}
+            class="font-semibold text-yeg-text hover:text-yeg-amber transition-colors whitespace-nowrap"
+          >{BUSINESS.phone}</a>
+          — a specialist answers live, any hour. For everything else, use the form below and
+          we&rsquo;ll respond within 15 minutes.
+        </p>
+      </div>
+    </section>
+
+    <ContactSection />
+    <LocationsSection />
+  </main>
+
+  <Footer />
+</Layout>

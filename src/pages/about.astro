@@ -1,0 +1,343 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import TestimonialsSection from '../sections/TestimonialsSection.astro';
+import ProcessSection from '../sections/ProcessSection.astro';
+import LocationsSection from '../sections/LocationsSection.astro';
+import { BUSINESS } from '../data/services';
+import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
+
+const metaTitle = 'About YEG Restoration | Edmonton Restoration Since 2008';
+const metaDescription =
+  'Locally owned, IICRC-certified restoration serving Edmonton 24/7 since 2008. Free assessments, direct insurance billing. Call (780) 479-3285.';
+
+const schemas = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'AboutPage',
+    name: metaTitle,
+    description: metaDescription,
+    url: `${BUSINESS.url}/about/`,
+    mainEntity: { '@id': BUSINESS_ID },
+  },
+  breadcrumbSchema([{ name: 'Home', url: `${BUSINESS.url}/` }, { name: 'About' }]),
+];
+
+const crew = [
+  {
+    title: 'IICRC-certified technicians',
+    copy: 'The crew at your door holds current IICRC certifications — the industry standard for water, fire, and mold restoration, and the one your insurance company recognizes.',
+  },
+  {
+    title: 'Background-checked and uniformed',
+    copy: 'You’re letting people into your home on a bad day. Every technician is background-checked and shows up in uniform, so you know exactly who’s working in your house.',
+  },
+  {
+    title: 'The same crew, start to finish',
+    copy: 'The team that handles the emergency stays through the rebuild. No handoff to a subcontractor you’ve never met halfway through the job.',
+  },
+  {
+    title: 'One point of contact',
+    copy: 'One project lead owns your job — the schedule, the crew, and the insurance paperwork. You always know who to call, and they answer.',
+  },
+];
+
+const certifications = [
+  {
+    name: 'IICRC Certified Firm',
+    note: 'Certified to the industry standard for water, fire, and mold restoration.',
+  },
+  {
+    name: 'BBB Accredited',
+    note: 'Accredited by the Better Business Bureau.',
+  },
+  {
+    name: 'Licensed & Insured',
+    note: 'Fully licensed and insured to work in your home.',
+  },
+];
+---
+
+<Layout title={metaTitle} description={metaDescription}>
+  <!-- Texture overlays -->
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <!-- AboutPage + Breadcrumb JSON-LD (valid anywhere in document per Google guidelines) -->
+  {schemas.map((schema) => (
+    <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  ))}
+
+  <main id="main-content" class="relative">
+    <!-- Hero -->
+    <section class="relative overflow-hidden bg-yeg-bg pt-28 lg:pt-36 pb-14 lg:pb-20">
+      <!-- Background Word -->
+      <div class="absolute bg-word opacity-[0.07]" style="left: 4vw; top: 8vh;">
+        LOCAL
+      </div>
+
+      <!-- Ambient amber glow -->
+      <div
+        class="absolute inset-0 pointer-events-none"
+        style="background: radial-gradient(ellipse 55% 45% at 10% 20%, rgba(242,201,76,0.05) 0%, transparent 65%);"
+      >
+      </div>
+
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-3xl">
+          <!-- Breadcrumb -->
+          <nav aria-label="Breadcrumb" class="mb-6">
+            <ol class="flex items-center gap-2 text-xs text-yeg-text-secondary">
+              <li>
+                <a href="/" class="hover:text-yeg-amber transition-colors duration-200">Home</a>
+              </li>
+              <li aria-hidden="true" class="text-yeg-text-secondary/50">&rsaquo;</li>
+              <li>
+                <span aria-current="page" class="text-yeg-text">About</span>
+              </li>
+            </ol>
+          </nav>
+
+          <!-- Kicker -->
+          <p class="text-yeg-signal text-xs font-medium uppercase tracking-widest mb-3">
+            Locally owned &amp; operated
+          </p>
+
+          <!-- H1 -->
+          <h1 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
+            Edmonton&rsquo;s Restoration Team Since 2008
+          </h1>
+
+          <!-- Canonical entity description — must match BUSINESS.description verbatim -->
+          <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-xl mb-8">
+            {BUSINESS.description}
+          </p>
+
+          <!-- CTAs -->
+          <div class="flex flex-wrap items-center gap-4 mb-8">
+            <a href={BUSINESS.phoneHref} class="cta-primary animate-beacon-pulse">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+                ></path>
+              </svg>
+              <span class="font-bold">Call {BUSINESS.phone}</span>
+            </a>
+            <a
+              href="/contact/"
+              class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+            >
+              Get Free Assessment
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+
+          <!-- Trust Badges -->
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {
+              ['IICRC Certified', 'BBB Accredited', 'Licensed & Insured', 'Since 2008'].map(
+                (badge) => (
+                  <span class="trust-badge">
+                    <span class="w-1 h-1 rounded-full bg-yeg-amber/50 flex-shrink-0 inline-block" />
+                    {badge}
+                  </span>
+                )
+              )
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Story -->
+    <section class="relative overflow-hidden bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28">
+      <div class="absolute bg-word opacity-[0.05]" style="right: -4vw; top: 10vh;">
+        2008
+      </div>
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-3xl">
+          <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+            Why We Exist
+          </p>
+          <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-8">
+            Built Around the 3 A.M. Call
+          </h2>
+          <div class="space-y-6 text-yeg-text-secondary text-lg leading-relaxed">
+            <p>
+              The worst day of your year usually starts with a phone call at a terrible hour —
+              water coming through the ceiling at 3 a.m., or the fire truck pulling away at dawn.
+              We built YEG Restoration around answering that call.
+            </p>
+            <p>
+              Here&rsquo;s what that means in practice: a restoration specialist picks up your
+              call — every hour, every day, no voicemail. A crew is dispatched while you&rsquo;re
+              still on the phone and reaches most Edmonton homes in about 60 minutes. The team
+              that handles the emergency stays through the rebuild, and we bill your insurance
+              company directly, so a covered claim usually costs you just your deductible.
+            </p>
+            <p>
+              We&rsquo;ve been locally owned and operated in Edmonton since 2008. The people who
+              answer your call are the people accountable for the work — and every job comes
+              with a free assessment up front and a written guarantee at the end.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Who shows up -->
+    <section class="bg-yeg-bg-light border-y border-black/[0.06] py-20 lg:py-28">
+      <div class="px-6 lg:px-[8vw]">
+        <div class="max-w-7xl mx-auto">
+          <div class="mb-12 lg:mb-14 max-w-2xl">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Who Shows Up
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+              The Crew at Your Door
+            </h2>
+            <p class="text-yeg-text-secondary text-lg">
+              When you call us, this is who arrives — and how they work in your home.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
+            {
+              crew.map((item) => (
+                <div class="bg-yeg-bg rounded-2xl p-8 border border-black/[0.06]">
+                  <div class="flex items-center gap-2 mb-4">
+                    <span class="w-1.5 h-1.5 rounded-full bg-yeg-amber flex-shrink-0" />
+                    <h3 class="font-display font-bold text-xl text-yeg-text">{item.title}</h3>
+                  </div>
+                  <p class="text-yeg-text-secondary leading-relaxed font-light">{item.copy}</p>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Commitments (shared homepage section) -->
+    <TestimonialsSection />
+
+    <!-- How we work (shared homepage section) -->
+    <ProcessSection />
+
+    <!-- Certifications -->
+    <section class="bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28">
+      <div class="px-6 lg:px-[8vw]">
+        <div class="max-w-7xl mx-auto">
+          <div class="mb-12 lg:mb-14 max-w-2xl">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Credentials
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+              Certified, Accredited, Insured
+            </h2>
+            <p class="text-yeg-text-secondary text-lg">
+              The credentials your insurance company looks for — ask to see the paperwork and
+              we&rsquo;ll bring it.
+            </p>
+          </div>
+
+          <!-- TODO: replace these placeholder slots with real certificate / accreditation
+               document scans when available (same pattern as WorkGallerySlots photos). -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+            {
+              certifications.map((cert) => (
+                <div class="rounded-xl border border-dashed border-black/15 aspect-[4/3] flex flex-col items-center justify-center gap-3 text-center px-6">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="text-yeg-text-secondary/40"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  </svg>
+                  <p class="text-sm font-semibold text-yeg-text">{cert.name}</p>
+                  <p class="text-xs text-yeg-text-secondary/70">{cert.note}</p>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Service area (shared homepage section) -->
+    <LocationsSection />
+
+    <!-- Closing CTA -->
+    <section class="relative bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28 overflow-hidden">
+      <div class="absolute bg-word opacity-[0.05]" style="left: 4vw; top: 6vh;">
+        RESPONSE
+      </div>
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-2xl mx-auto text-center">
+          <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+            Free Assessment
+          </p>
+          <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+            The Next Step Is One Call
+          </h2>
+          <p class="text-yeg-text-secondary text-lg mb-8">
+            A specialist answers 24/7 and a crew can be at your door in about 60 minutes. The
+            assessment is free, the scope is in writing, and we bill your insurer directly.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-4">
+            <a href={BUSINESS.phoneHref} class="cta-primary animate-beacon-pulse">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+                ></path>
+              </svg>
+              <span class="font-bold">Call {BUSINESS.phone}</span>
+            </a>
+            <a
+              href="/contact/"
+              class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+            >
+              Get Free Assessment
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Layout>

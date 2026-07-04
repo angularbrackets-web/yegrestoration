@@ -1,0 +1,374 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import StatsBar from '../components/StatsBar.astro';
+import FaqSection from '../components/FaqSection.astro';
+import ContactForm from '../components/ContactForm.svelte';
+import { pagedServices, BUSINESS } from '../data/services';
+import type { ServiceFaq } from '../data/services';
+import { faqPageSchema, breadcrumbSchema } from '../lib/seo';
+
+const metaTitle = 'Insurance Claims Help Edmonton | YEG Restoration';
+const metaDescription =
+  'We handle your restoration insurance claim and bill your insurer directly — you typically pay just your deductible. Free assessment: (780) 479-3285.';
+
+// 4-step claim walkthrough. ProcessSection's grid is 3-wide, so this section
+// is built inline on the same card styling — static, no entrance animation
+// (Ads visitors need instant content).
+const claimSteps = [
+  {
+    step: '01',
+    timing: 'First hour',
+    title: 'Call us before you touch anything',
+    copy: 'A specialist answers 24/7 and dispatches a crew. Don’t start cleaning — undisturbed damage is the evidence your claim is built on. We photograph everything exactly as we found it.',
+  },
+  {
+    step: '02',
+    timing: 'Day 1',
+    title: 'We document the loss',
+    copy: 'Moisture mapping, a photo inventory of damaged contents, and a written scope of work. This is the documentation your adjuster needs to approve the claim — done to insurer standards.',
+  },
+  {
+    step: '03',
+    timing: 'Days 1–7',
+    title: 'We work with your adjuster',
+    copy: 'We submit the scope, answer the adjuster’s questions, and agree on pricing directly with your insurer. You’re kept in the loop — you’re just not stuck in the middle.',
+  },
+  {
+    step: '04',
+    timing: 'Covered claim',
+    title: 'We restore. You pay the deductible.',
+    copy: 'We invoice your insurance company directly for the covered work. For a covered claim, your out-of-pocket cost is typically just your deductible — backed by our written guarantee.',
+  },
+];
+
+const faqs: ServiceFaq[] = [
+  {
+    question: 'Do I have to use the restoration company my insurance recommends?',
+    answer:
+      'No. In Alberta, you have the right to choose your own restoration contractor — your insurer can suggest a preferred vendor, but they cannot force you to use one. The company on their list works to keep the insurer’s costs down; we work for you. Either way, your coverage and your deductible stay exactly the same.',
+  },
+  {
+    question: 'Should I call you or my insurance company first?',
+    answer:
+      'Call us first — emergency mitigation can’t wait for an adjuster, and every policy requires you to prevent further damage anyway. We stop the loss from getting worse, document everything before it’s disturbed, and then help you report the claim with the details your insurer will ask for.',
+  },
+  {
+    question: 'Do you bill my insurance company directly?',
+    answer:
+      'Yes. We work with your adjuster, supply the documentation the claim needs, and invoice your insurer directly for the covered work. You’re not fronting thousands of dollars and waiting for a reimbursement cheque.',
+  },
+  {
+    question: 'What is a deductible, and what do I actually pay?',
+    answer:
+      'Your deductible is the fixed portion of a claim you agreed to pay when you bought your policy — commonly $500 to $2,500 in Alberta. For a covered claim, that’s typically all you pay us; the rest goes straight to your insurer. We confirm the numbers with you in writing before work starts.',
+  },
+  {
+    question: 'Will my insurance premiums go up if I file a claim?',
+    answer:
+      'Possibly — it depends on your insurer, your claim history, and the size of the loss. That’s why small damage isn’t always worth claiming. At the free assessment we give you a written scope with real costs, so you can compare the repair against your deductible and likely premium impact and decide with actual numbers.',
+  },
+  {
+    question: 'What if my claim is denied?',
+    answer:
+      'Most denials come down to documentation or cause-of-loss disputes — which is exactly what our moisture mapping and photo records exist to prevent. If your insurer still denies a claim, you can request a review or file a complaint, and our documentation becomes your evidence. And we tell you honestly at the assessment whether a claim is likely to be covered, before you pay a deductible.',
+  },
+];
+
+const schemas = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: metaTitle,
+    description: metaDescription,
+    url: `${BUSINESS.url}/insurance-claims/`,
+  },
+  faqPageSchema(faqs),
+  breadcrumbSchema([
+    { name: 'Home', url: `${BUSINESS.url}/` },
+    { name: 'Insurance Claims' },
+  ]),
+];
+---
+
+<Layout title={metaTitle} description={metaDescription}>
+  <!-- Texture overlays -->
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <!-- WebPage + FAQ + Breadcrumb JSON-LD (valid anywhere in document per Google guidelines) -->
+  {schemas.map((schema) => (
+    <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  ))}
+
+  <main id="main-content" class="relative">
+    <!-- Hero -->
+    <section class="relative overflow-hidden bg-yeg-bg pt-28 lg:pt-36 pb-14 lg:pb-20">
+      <div class="absolute bg-word opacity-[0.07]" style="left: 4vw; top: 8vh;">
+        CLAIM
+      </div>
+      <div
+        class="absolute inset-0 pointer-events-none"
+        style="background: radial-gradient(ellipse 55% 45% at 10% 20%, rgba(242,201,76,0.05) 0%, transparent 65%);"
+      >
+      </div>
+
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-3xl">
+          <!-- Breadcrumb -->
+          <nav aria-label="Breadcrumb" class="mb-6">
+            <ol class="flex items-center gap-2 text-xs text-yeg-text-secondary">
+              <li>
+                <a href="/" class="hover:text-yeg-amber transition-colors duration-200">Home</a>
+              </li>
+              <li aria-hidden="true" class="text-yeg-text-secondary/50">&rsaquo;</li>
+              <li>
+                <span aria-current="page" class="text-yeg-text">Insurance Claims</span>
+              </li>
+            </ol>
+          </nav>
+
+          <!-- Kicker -->
+          <p class="text-yeg-signal text-xs font-medium uppercase tracking-widest mb-3">
+            You choose your contractor — we handle the claim
+          </p>
+
+          <!-- H1 -->
+          <h1 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
+            We Deal With Your Insurance Company — So You Don't Have To
+          </h1>
+
+          <!-- Copy -->
+          <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-xl mb-8">
+            After a flood, fire, or sewer backup, the claim can feel harder than the damage. We
+            document the loss to insurer standards, work directly with your adjuster, and bill your
+            insurance company ourselves — for a covered claim, you typically pay just your
+            deductible while we get your home back.
+          </p>
+
+          <!-- CTAs -->
+          <div class="flex flex-wrap items-center gap-4 mb-8">
+            <a href={BUSINESS.phoneHref} class="cta-primary animate-beacon-pulse">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.73 3.35a2 2 0 0 1 1.48-2.18H6.09a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"
+                ></path>
+              </svg>
+              <span class="font-bold">Call {BUSINESS.phone}</span>
+            </a>
+            <a
+              href="#quote"
+              class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+            >
+              Get Free Assessment
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+
+          <!-- Trust Badges -->
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {
+              ['IICRC Certified', '60-Min Response', 'Direct Insurance Billing', 'Written Guarantee'].map(
+                (badge) => (
+                  <span class="trust-badge">
+                    <span class="w-1 h-1 rounded-full bg-yeg-amber/50 flex-shrink-0 inline-block" />
+                    {badge}
+                  </span>
+                )
+              )
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <StatsBar />
+
+    <!-- How a claim works in Alberta -->
+    <section class="yeg-surface-paper py-20 lg:py-28 relative overflow-hidden">
+      <div class="relative z-10 px-6 lg:px-[8vw] max-w-7xl mx-auto">
+        <div class="mb-14">
+          <p class="text-xs font-semibold text-yeg-signal uppercase tracking-[0.2em] mb-4">
+            The Claim, Step by Step
+          </p>
+          <h2
+            class="font-display font-extrabold text-4xl md:text-5xl text-yeg-on-surface mb-5 leading-[1.1]"
+          >
+            How a Property Claim Works in Alberta
+          </h2>
+          <p class="text-yeg-on-surface-muted text-lg max-w-xl font-light leading-relaxed">
+            Most homeowners file one or two claims in a lifetime. We do this every week — here's
+            exactly what happens, in order.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
+          {
+            claimSteps.map((item) => (
+              <div class="group flex flex-col">
+                <div class="bg-white/40 backdrop-blur-sm rounded-2xl p-8 border border-white/60 shadow-[0_4px_24px_rgba(0,0,0,0.03)] h-full transition-all duration-500 hover:-translate-y-2 hover:bg-white/60 hover:shadow-[0_20px_48px_rgba(0,0,0,0.06)] hover:border-yeg-signal/20">
+                  <div class="mb-8">
+                    <span class="font-display font-black text-yeg-signal/15 text-5xl transition-colors duration-500 group-hover:text-yeg-signal/30">
+                      {item.step}
+                    </span>
+                  </div>
+                  <div class="inline-block text-[10px] font-bold text-yeg-signal uppercase tracking-widest px-2.5 py-1 bg-yeg-signal/10 rounded-md mb-4 border border-yeg-signal/10">
+                    {item.timing}
+                  </div>
+                  <h3 class="font-display font-bold text-xl text-yeg-on-surface mb-3 group-hover:text-yeg-signal transition-colors duration-300">
+                    {item.title}
+                  </h3>
+                  <p class="text-yeg-on-surface-muted text-[15px] leading-relaxed font-light">
+                    {item.copy}
+                  </p>
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- Direct billing explainer -->
+    <section class="bg-yeg-bg-light border-y border-black/[0.06] py-20 lg:py-24">
+      <div class="px-6 lg:px-[8vw] max-w-7xl mx-auto">
+        <div class="flex flex-col lg:flex-row gap-10 lg:gap-16">
+          <div class="lg:w-[45%]">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Direct Insurance Billing
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-5">
+              What Direct Billing Actually Means
+            </h2>
+            <p class="text-yeg-text-secondary text-lg leading-relaxed">
+              On a covered claim, we invoice your insurance company — not you. You don't front the
+              restoration cost, chase a reimbursement cheque, or translate contractor paperwork for
+              your adjuster. Your out-of-pocket cost is typically just your deductible.
+            </p>
+          </div>
+          <div class="lg:w-[55%] lg:border-l lg:border-black/[0.06] lg:pl-16 space-y-8">
+            <div>
+              <h3 class="font-display font-bold text-lg text-yeg-text mb-2">
+                Documentation that gets claims approved
+              </h3>
+              <p class="text-yeg-text-secondary leading-relaxed">
+                Adjusters approve what they can verify. Every job includes moisture mapping, a photo
+                inventory of damaged materials and contents, and a written scope of work — the exact
+                evidence your insurer needs to say yes.
+              </p>
+            </div>
+            <div>
+              <h3 class="font-display font-bold text-lg text-yeg-text mb-2">
+                One point of contact for the whole claim
+              </h3>
+              <p class="text-yeg-text-secondary leading-relaxed">
+                The crew that answers your emergency call carries the job through adjuster
+                approvals and rebuild. You get straight answers about what's covered and what it
+                costs — in writing, before work starts.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <FaqSection
+      faqs={faqs}
+      kicker="Insurance FAQ"
+      heading="Insurance Questions Edmonton Homeowners Ask"
+    />
+
+    <!-- Quote form -->
+    <section id="quote" class="relative bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28 overflow-hidden">
+      <div class="absolute bg-word opacity-[0.05]" style="left: 4vw; top: 6vh;">
+        RESPONSE
+      </div>
+      <div class="relative z-10 px-6 lg:px-[8vw]">
+        <div class="max-w-2xl mx-auto">
+          <div class="text-center mb-10">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Free Assessment
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+              Get Help With Your Claim
+            </h2>
+            <p class="text-yeg-text-secondary text-lg">
+              Tell us what happened — we'll call you back within 15 minutes. Or call
+              <a href={BUSINESS.phoneHref} class="font-semibold text-yeg-text hover:text-yeg-amber transition-colors whitespace-nowrap">{BUSINESS.phone}</a>
+              now and skip the form.
+            </p>
+          </div>
+          <ContactForm client:visible />
+        </div>
+      </div>
+    </section>
+
+    <!-- Services we bill directly (inline — RelatedServices would self-link here) -->
+    <section class="bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-24">
+      <div class="px-6 lg:px-[8vw]">
+        <div class="max-w-7xl mx-auto">
+          <div class="mb-12 lg:mb-14">
+            <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3">
+              Covered Services
+            </p>
+            <h2 class="font-display font-extrabold text-display-lg text-yeg-text">
+              Every Service, Billed Directly
+            </h2>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+            {
+              pagedServices.map((s) => (
+                <div class="relative group bg-white rounded-2xl p-8 border border-black/[0.06] flex flex-col gap-6 overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:border-yeg-amber/30 hover:shadow-[0_16px_40px_rgba(0,0,0,0.08)]">
+                  <div class="absolute inset-0 bg-gradient-to-br from-yeg-amber/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+                  <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-yeg-amber/[0.2] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                  <div class="relative z-10 flex flex-col h-full">
+                    <div class="flex-1">
+                      <h3 class="font-display font-bold text-2xl text-yeg-text mb-3 tracking-wide group-hover:text-yeg-amber transition-colors duration-500">
+                        {s.shortName}
+                      </h3>
+                      <p class="text-base text-yeg-text-secondary leading-relaxed">{s.cardDescription}</p>
+                    </div>
+
+                    <div class="mt-8 pt-6 border-t border-black/[0.06]">
+                      <a
+                        href={`/${s.page.slug}/`}
+                        class="inline-flex items-center gap-2 text-sm text-yeg-amber/70 hover:text-yeg-amber transition-colors group/cta"
+                      >
+                        <span class="absolute inset-0 z-10" aria-hidden="true" />
+                        <span class="sr-only">{s.shortName} — </span>
+                        <span class="font-semibold tracking-wider uppercase text-[11px]">
+                          Learn more
+                        </span>
+                        <span class="transition-transform duration-300 group-hover/cta:translate-x-1.5">
+                          &rarr;
+                        </span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Layout>

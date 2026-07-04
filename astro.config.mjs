@@ -10,7 +10,7 @@ export default defineConfig({
   integrations: [
     svelte(),
     tailwind({ applyBaseStyles: false }),
-    sitemap(),
+    sitemap({ filter: (page) => !page.includes('/admin') }),
     mdx(),
   ],
   output: 'static',
