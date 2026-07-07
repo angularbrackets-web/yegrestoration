@@ -213,14 +213,14 @@
     tabindex={0}
   >
     <div class="flex items-center">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-bg" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-bg" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-text" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-text" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
     </div>
   </button>
 
   <!-- Labels -->
   <div
-    class="absolute top-4 left-4 px-3 py-1.5 bg-yeg-bg/80 backdrop-blur-sm rounded text-xs font-medium tracking-wider uppercase text-yeg-amber transition-opacity duration-300"
+    class="absolute top-4 left-4 px-3 py-1.5 bg-yeg-bg/80 backdrop-blur-sm rounded text-xs font-medium tracking-wider uppercase text-yeg-amber-deep transition-opacity duration-300"
     style:opacity={showLabels ? 1 : 0}
     style:font-family="'Source Serif 4', serif"
     style:letter-spacing="0.1em"
@@ -228,7 +228,7 @@
     Before
   </div>
   <div
-    class="absolute top-4 right-4 px-3 py-1.5 bg-yeg-bg/80 backdrop-blur-sm rounded text-xs font-medium tracking-wider uppercase text-yeg-amber transition-opacity duration-300"
+    class="absolute top-4 right-4 px-3 py-1.5 bg-yeg-bg/80 backdrop-blur-sm rounded text-xs font-medium tracking-wider uppercase text-yeg-amber-deep transition-opacity duration-300"
     style:opacity={showLabels ? 1 : 0}
     style:font-family="'Source Serif 4', serif"
     style:letter-spacing="0.1em"
@@ -238,7 +238,7 @@
 
   <!-- Drag hint -->
   <div
-    class="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-yeg-amber font-semibold bg-yeg-bg/85 border border-yeg-amber/30 backdrop-blur-sm px-3 py-1.5 rounded-full pointer-events-none transition-opacity duration-300"
+    class="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-yeg-amber-deep font-semibold bg-yeg-bg/85 border border-yeg-amber/30 backdrop-blur-sm px-3 py-1.5 rounded-full pointer-events-none transition-opacity duration-300"
     style:opacity={showLabels ? 1 : 0}
   >
     Drag to compare

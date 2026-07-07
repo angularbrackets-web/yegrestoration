@@ -81,7 +81,7 @@
       <div
         class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6"
       >
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
       </div>
       <h3 class="font-display font-bold text-2xl text-yeg-text mb-2">Request Sent!</h3>
       <p class="text-yeg-text-secondary">We'll call you within 15 minutes.</p>
@@ -90,7 +90,7 @@
     <form onsubmit={handleSubmit}>
       <div class="space-y-5">
         <!-- Name -->
-        <div class="form-field opacity-0">
+        <div class="form-field">
           <label class="block text-xs text-yeg-text-secondary uppercase tracking-wider mb-2">
             Name
           </label>
@@ -110,7 +110,7 @@
 
         <!-- Phone + Email row -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          <div class="form-field opacity-0">
+          <div class="form-field">
             <label class="block text-xs text-yeg-text-secondary uppercase tracking-wider mb-2">
               Phone
             </label>
@@ -128,7 +128,7 @@
             {/if}
           </div>
 
-          <div class="form-field opacity-0">
+          <div class="form-field">
             <label class="block text-xs text-yeg-text-secondary uppercase tracking-wider mb-2">
               Email
             </label>
@@ -147,7 +147,7 @@
         </div>
 
         <!-- Service select -->
-        <div class="form-field opacity-0">
+        <div class="form-field">
           <label class="block text-xs text-yeg-text-secondary uppercase tracking-wider mb-2">
             Service Needed
           </label>
@@ -170,7 +170,7 @@
         </div>
 
         <!-- Message -->
-        <div class="form-field opacity-0">
+        <div class="form-field">
           <label class="block text-xs text-yeg-text-secondary uppercase tracking-wider mb-2">
             Message
           </label>
@@ -187,7 +187,7 @@
         {#if serverError}
           <p class="text-red-400 text-sm text-center">{serverError}</p>
         {/if}
-        <div class="form-field opacity-0 pt-2">
+        <div class="form-field pt-2">
           <button
             type="submit"
             disabled={submitting || !hydrated}
@@ -198,7 +198,7 @@
           </button>
         </div>
 
-        <p class="form-field opacity-0 text-xs text-yeg-text-secondary text-center">
+        <p class="form-field text-xs text-yeg-text-secondary text-center">
           We never share your info. Emergency calls always prioritized.
         </p>
       </div>

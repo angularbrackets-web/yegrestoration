@@ -20,7 +20,7 @@ import ContactForm from '../components/ContactForm.svelte';
       class="w-full flex flex-col lg:flex-row items-start lg:items-center gap-12 lg:gap-0 px-6 lg:px-[8vw] py-12 lg:py-0"
     >
       <!-- Left Column — Info -->
-      <div data-contact-left class="w-full lg:w-[40%] opacity-0">
+      <div data-contact-left class="w-full lg:w-[40%]">
         <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
           Get a Free Quote
         </h2>
@@ -32,7 +32,7 @@ import ContactForm from '../components/ContactForm.svelte';
         <div class="space-y-5 mb-10">
           <a
             href="tel:+17804793285"
-            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber transition-colors group"
+            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber-deep transition-colors group"
           >
             <div
               class="w-10 h-10 rounded-full bg-yeg-bg-light border border-black/10 flex items-center justify-center group-hover:border-yeg-amber/50 transition-colors"
@@ -67,7 +67,7 @@ import ContactForm from '../components/ContactForm.svelte';
 
           <a
             href="mailto:info@yegrestoration.ca"
-            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber transition-colors group"
+            class="flex items-center gap-4 text-yeg-text hover:text-yeg-amber-deep transition-colors group"
           >
             <div
               class="w-10 h-10 rounded-full bg-yeg-bg-light border border-black/10 flex items-center justify-center group-hover:border-yeg-amber/50 transition-colors"
@@ -162,7 +162,7 @@ import ContactForm from '../components/ContactForm.svelte';
               stroke-width="2"
               stroke-linecap="round"
               stroke-linejoin="round"
-              class="text-yeg-amber"
+              class="text-yeg-amber-deep"
               aria-hidden="true"
             >
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
@@ -179,7 +179,7 @@ import ContactForm from '../components/ContactForm.svelte';
               fill="currentColor"
               stroke="currentColor"
               stroke-width="1"
-              class="text-yeg-amber"
+              class="text-yeg-amber-deep"
               aria-hidden="true"
             >
               <polygon
@@ -200,7 +200,7 @@ import ContactForm from '../components/ContactForm.svelte';
               stroke-width="2"
               stroke-linecap="round"
               stroke-linejoin="round"
-              class="text-yeg-amber"
+              class="text-yeg-amber-deep"
               aria-hidden="true"
             >
               <circle cx="12" cy="12" r="10"></circle>
@@ -214,7 +214,7 @@ import ContactForm from '../components/ContactForm.svelte';
       <!-- Right Column — Form -->
       <div
         data-contact-form
-        class="w-full lg:w-[50%] lg:ml-auto opacity-0"
+        class="w-full lg:w-[50%] lg:ml-auto"
         style="perspective: 1000px;"
       >
         <ContactForm client:visible />
@@ -237,15 +237,15 @@ import ContactForm from '../components/ContactForm.svelte';
     const trigger = { trigger: section, start: 'top 85%', once: true };
 
     if (leftCol) {
-      gsap.fromTo(leftCol, { x: '-8vw', opacity: 0 }, { x: 0, opacity: 1, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(leftCol, { x: '-8vw', opacity: 0, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
     }
 
     if (formCard) {
-      gsap.fromTo(formCard, { x: '8vw', opacity: 0, rotateY: 6 }, { x: 0, opacity: 1, rotateY: 0, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(formCard, { x: '8vw', opacity: 0, rotateY: 6, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
     }
 
     if (formFields.length) {
-      gsap.fromTo(formFields, { y: 16, opacity: 0 }, { y: 0, opacity: 1, stagger: 0.06, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(formFields, { y: 16, opacity: 0, stagger: 0.06, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
     }
   }
 </script>

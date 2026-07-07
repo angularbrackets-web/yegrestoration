@@ -19,6 +19,8 @@
   --color-yeg-bg-light: #FFFFFF;
   --color-yeg-amber: #F2C94C;
   --color-yeg-amber-hover: #f5d56a;
+  --color-yeg-amber-deep: #946300; /* text-safe gold on light backgrounds (≥4.5:1 on cream/white) */
+  --color-yeg-amber-deep-hover: #7a5200;
   --color-yeg-text: #0F1419;
   --color-yeg-text-secondary: #5A6270;
   --color-yeg-signal: #C2410C;
@@ -269,7 +271,7 @@
 .badge-24-7 {
   @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold;
   background-color: rgba(242, 201, 76, 0.15);
-  color: #f2c94c;
+  color: #946300;
   border: 1px solid rgba(242, 201, 76, 0.25);
 }
 
@@ -312,7 +314,7 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid #f2c94c;
+  outline: 2px solid #946300;
   outline-offset: 2px;
 }
 
@@ -386,7 +388,7 @@ select:focus-visible {
 }
 
 .blog-prose a {
-  color: #f2c94c;
+  color: #946300;
   text-decoration: underline;
   text-decoration-color: rgba(242, 201, 76, 0.35);
   text-underline-offset: 3px;
@@ -394,7 +396,7 @@ select:focus-visible {
 }
 
 .blog-prose a:hover {
-  color: #f5d56a;
+  color: #7a5200;
   text-decoration-color: rgba(245, 213, 106, 0.6);
 }
 

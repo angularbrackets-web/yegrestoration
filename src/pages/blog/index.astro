@@ -33,7 +33,7 @@ function formatDate(date: Date) {
 
       <!-- Header -->
       <header class="mb-14">
-        <p class="text-xs font-medium text-yeg-amber/60 uppercase tracking-widest mb-3 font-serif">
+        <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3 font-serif">
           Restoration Insights
         </p>
         <h1 class="font-display font-bold text-yeg-text mb-4"
@@ -60,7 +60,7 @@ function formatDate(date: Date) {
                 {post.data.tags.length > 0 && (
                   <div class="flex flex-wrap gap-1.5 mb-4">
                     {post.data.tags.slice(0, 2).map(tag => (
-                      <span class="text-[10px] font-medium text-yeg-amber/60 uppercase tracking-widest border border-yeg-amber/15 rounded-full px-2 py-0.5">
+                      <span class="text-[10px] font-medium text-yeg-amber-deep uppercase tracking-widest border border-yeg-amber/15 rounded-full px-2 py-0.5">
                         {tag.replace(/-/g, ' ')}
                       </span>
                     ))}
@@ -68,7 +68,7 @@ function formatDate(date: Date) {
                 )}
 
                 {/* Title */}
-                <h2 class="font-display font-bold text-yeg-text text-lg leading-snug mb-3 group-hover:text-yeg-amber transition-colors duration-200"
+                <h2 class="font-display font-bold text-yeg-text text-lg leading-snug mb-3 group-hover:text-yeg-amber-deep transition-colors duration-200"
                   style="letter-spacing: -0.02em;">
                   {post.data.title}
                 </h2>
@@ -87,7 +87,7 @@ function formatDate(date: Date) {
                     <span>·</span>
                     <span>{readingTime} min read</span>
                   </div>
-                  <span class="text-xs text-yeg-amber/60 group-hover:text-yeg-amber font-medium transition-colors duration-200">
+                  <span class="text-xs text-yeg-amber-deep group-hover:text-yeg-amber-deep-hover font-medium transition-colors duration-200">
                     Read →
                   </span>
                 </div>

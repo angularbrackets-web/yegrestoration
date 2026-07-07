@@ -8,15 +8,27 @@
     { label: 'Why Us', href: '#testimonials' },
     { label: 'About', href: '/about/' },
     { label: 'Blog', href: '/blog/' },
-    { label: 'Contact', href: '#contact' },
+    { label: 'Contact', href: '/contact/' },
   ];
 
-  // Dropdown + mobile quick links — generated from the data layer so nav
+  // Mega-menu + mobile quick links — generated from the data layer so nav
   // never drifts from the pages that actually exist.
-  const serviceLinks = [
-    ...pagedServices.map((s) => ({ label: s.shortName, href: `/${s.page.slug}/` })),
-    { label: 'Insurance Claims', href: '/insurance-claims/' },
-  ];
+  const megaServices = pagedServices.map((s) => ({
+    id: s.id,
+    label: s.shortName,
+    href: `/${s.page.slug}/`,
+    description: s.cardTagline,
+  }));
+  const insuranceLink = {
+    id: 'insurance',
+    label: 'Insurance Claims',
+    href: '/insurance-claims/',
+    description: 'We bill your insurer directly — you handle nothing.',
+  };
+  const serviceLinks = [...megaServices, insuranceLink].map(({ label, href }) => ({
+    label,
+    href,
+  }));
 
   let isScrolled = $state(false);
   let isMobileMenuOpen = $state(false);
@@ -80,6 +92,8 @@
       isServicesActive = true;
     } else if (path === '/about/') {
       activeLink = '/about/';
+    } else if (path === '/contact/') {
+      activeLink = '/contact/';
     } else if (path.startsWith('/blog/')) {
       activeLink = '/blog/';
     }
@@ -142,17 +156,82 @@
     const element = document.querySelector(href);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
-    } else {
-      // Not on homepage — navigate there with the hash
-      window.location.href = '/' + href;
+      return;
     }
+    if (href === '#contact') {
+      // Service pages have their own #quote form; otherwise use the contact page.
+      const quote = document.querySelector('#quote');
+      if (quote) {
+        quote.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        window.location.href = '/contact/';
+      }
+      return;
+    }
+    // Not on homepage — navigate there with the hash
+    window.location.href = '/' + href;
   }
 </script>
+
+{#snippet serviceIcon(id: string)}
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    {#if id === 'water'}
+      <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
+    {:else if id === 'fire'}
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    {:else if id === 'mold'}
+      <circle cx="9" cy="9" r="3.5" />
+      <circle cx="16.5" cy="14.5" r="3" />
+      <circle cx="9.5" cy="17.5" r="1.5" />
+    {:else if id === 'sewage'}
+      <path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+      <path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+      <path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
+    {:else}
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="m9 12 2 2 4-4" />
+    {/if}
+  </svg>
+{/snippet}
+
+{#snippet megaItem(svc: { id: string; label: string; href: string; description: string })}
+  <a
+    href={svc.href}
+    onclick={closeServices}
+    class="group flex items-start gap-3 rounded-xl px-3 py-3 hover:bg-black/[0.04] transition-colors duration-200"
+  >
+    <span
+      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-yeg-amber/15 text-yeg-amber-deep"
+    >
+      {@render serviceIcon(svc.id)}
+    </span>
+    <span>
+      <span
+        class="block font-body text-sm font-semibold text-yeg-text group-hover:text-yeg-amber-deep transition-colors duration-200"
+      >
+        {svc.label}
+      </span>
+      <span class="mt-0.5 block text-xs leading-snug text-yeg-text-secondary">
+        {svc.description}
+      </span>
+    </span>
+  </a>
+{/snippet}
 
 <!-- Skip to content -->
 <a
   href="#main-content"
-  class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[1001] focus:bg-yeg-amber focus:text-yeg-bg focus:px-4 focus:py-2 focus:rounded focus:font-semibold"
+  class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[1001] focus:bg-yeg-amber focus:text-yeg-text focus:px-4 focus:py-2 focus:rounded focus:font-semibold"
 >
   Skip to content
 </a>
@@ -198,8 +277,8 @@
             aria-haspopup="true"
             class={`relative flex items-center gap-1.5 px-4 py-2 font-body text-sm font-medium tracking-wide rounded-full transition-all duration-200 ${
               isServicesActive
-                ? 'text-yeg-amber bg-yeg-amber/5'
-                : 'text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04]'
+                ? 'text-yeg-amber-deep bg-yeg-amber/10'
+                : 'text-yeg-text hover:text-yeg-amber-deep hover:bg-black/[0.04]'
             }`}
           >
             Services
@@ -216,25 +295,24 @@
               aria-hidden="true"
             ><path d="m6 9 6 6 6-6" /></svg>
             {#if isServicesActive}
-              <span class="absolute inset-x-4 -bottom-px h-px bg-yeg-amber/60"></span>
+              <span class="absolute inset-x-4 -bottom-px h-px bg-yeg-amber-deep"></span>
             {/if}
           </button>
 
           {#if isServicesOpen}
             <!-- pt-2 bridge keeps hover alive between trigger and panel -->
-            <div class="absolute left-0 top-full pt-2 w-60">
+            <div class="absolute left-0 top-full pt-2 w-[560px] max-w-[calc(100vw-3rem)]">
               <div
-                class="bg-[#F8F6F3] border border-black/[0.07] rounded-xl shadow-[0_12px_32px_rgba(0,0,0,0.10)] py-2"
+                class="bg-[#F8F6F3] border border-black/[0.07] rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.10)] p-3"
               >
-                {#each serviceLinks as svc}
-                  <a
-                    href={svc.href}
-                    onclick={closeServices}
-                    class="block px-4 py-2.5 font-body text-sm font-medium tracking-wide text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04] transition-colors duration-200"
-                  >
-                    {svc.label}
-                  </a>
-                {/each}
+                <div class="grid grid-cols-2 gap-1">
+                  {#each megaServices as svc}
+                    {@render megaItem(svc)}
+                  {/each}
+                </div>
+                <div class="mt-2 pt-2 border-t border-black/[0.07]">
+                  {@render megaItem(insuranceLink)}
+                </div>
               </div>
             </div>
           {/if}
@@ -246,13 +324,13 @@
             onclick={(e) => handleLinkClick(e, link.href)}
             class={`relative px-4 py-2 font-body text-sm font-medium tracking-wide rounded-full transition-all duration-200 ${
               activeLink === link.href
-                ? 'text-yeg-amber bg-yeg-amber/5'
-                : 'text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04]'
+                ? 'text-yeg-amber-deep bg-yeg-amber/10'
+                : 'text-yeg-text hover:text-yeg-amber-deep hover:bg-black/[0.04]'
             }`}
           >
             {link.label}
             {#if activeLink === link.href}
-              <span class="absolute inset-x-4 -bottom-px h-px bg-yeg-amber/60"></span>
+              <span class="absolute inset-x-4 -bottom-px h-px bg-yeg-amber-deep"></span>
             {/if}
           </a>
         {/each}
@@ -263,13 +341,13 @@
         <a
           href="#contact"
           onclick={(e) => handleLinkClick(e, '#contact')}
-          class="flex items-center gap-2 bg-yeg-amber/10 hover:bg-yeg-amber/[0.15] border border-yeg-amber/25 hover:border-yeg-amber/40 text-yeg-amber rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200"
+          class="flex items-center gap-2 bg-yeg-amber/10 hover:bg-yeg-amber/[0.15] border border-yeg-amber-deep/30 hover:border-yeg-amber-deep/50 text-yeg-amber-deep rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200"
         >
           Free Assessment
         </a>
         <a
           href="tel:+17804793285"
-          class="flex items-center gap-2.5 bg-yeg-amber hover:bg-yeg-amber-hover text-yeg-bg rounded-full px-4 py-2 text-sm font-bold transition-all duration-200"
+          class="flex items-center gap-2.5 bg-yeg-amber hover:bg-yeg-amber-hover text-yeg-text rounded-full px-4 py-2 text-sm font-bold transition-all duration-200"
         >
           <span class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>
@@ -284,7 +362,7 @@
       <button
         bind:this={hamburgerRef}
         onclick={() => (isMobileMenuOpen = true)}
-        class="xl:hidden p-2 text-yeg-amber hover:bg-yeg-amber/10 rounded-lg transition-colors"
+        class="xl:hidden p-2 text-yeg-text hover:bg-yeg-amber/10 rounded-lg transition-colors"
         aria-label="Open navigation menu"
         aria-expanded={isMobileMenuOpen}
         aria-controls="mobile-menu"
@@ -341,8 +419,8 @@
             onclick={(e) => handleLinkClick(e, link.href)}
             class={`flex items-center justify-between w-full px-4 py-3 rounded-xl font-display font-bold text-xl transition-colors duration-200 ${
               activeLink === link.href
-                ? 'text-yeg-amber bg-yeg-amber/5'
-                : 'text-yeg-text hover:text-yeg-amber hover:bg-black/[0.04]'
+                ? 'text-yeg-amber-deep bg-yeg-amber/10'
+                : 'text-yeg-text hover:text-yeg-amber-deep hover:bg-black/[0.04]'
             }`}
           >
             {link.label}
@@ -374,7 +452,7 @@
     <div class="p-5 border-t border-black/[0.07] space-y-3">
       <a
         href="tel:+17804793285"
-        class="flex items-center justify-center gap-2.5 w-full py-3.5 bg-yeg-amber text-yeg-bg rounded-xl font-bold text-base hover:bg-yeg-amber-hover transition-colors"
+        class="flex items-center justify-center gap-2.5 w-full py-3.5 bg-yeg-amber text-yeg-text rounded-xl font-bold text-base hover:bg-yeg-amber-hover transition-colors"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.65 3.37 2 2 0 0 1 3.64 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 8.91a16 16 0 0 0 6 6l.81-.81a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         (780) 479-3285

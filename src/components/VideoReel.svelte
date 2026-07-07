@@ -71,7 +71,7 @@
       <!-- Left: Text Column -->
       <div class="w-full lg:w-2/5 flex-shrink-0 text-center lg:text-left">
         <span
-          class="inline-block text-xs font-semibold tracking-[0.2em] uppercase text-yeg-amber mb-5 font-body"
+          class="inline-block text-xs font-semibold tracking-[0.2em] uppercase text-yeg-amber-deep mb-5 font-body"
         >
           See the Work
         </span>
