@@ -65,6 +65,34 @@ when the token is minted.
   deliberate smoke tests. Set up as BK-02 step zero.
 - Vercel Blob's 4.5 MB limit is the *function body* limit and applies to server
   uploads only. Client uploads bypass it and cost no data transfer.
+- **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
+  (severity: doc-level — every consumer wraps them in `new Date(...)`, which
+  takes either; found in BK-01, owner: BK-10, the next ticket that touches
+  `leads`).
+
+## Red-observed — back-catalog pass (2026-08-06)
+
+One-time break-and-observe over the verify scripts that shipped green with no
+recorded red runs (the Red-first rule in `/CLAUDE.md`, applied retroactively
+after masjid-fundraiser's audit found the same exposure). For each line the
+production target was broken, the script observed red, and the target restored;
+both scripts re-ran green afterwards. All 15 failure modes went red — no fifth
+instance of the never-fails class.
+
+- `verify:slots` — wall clock (`zonedTimeToUtc` +30 min); DST (`zoneOffsetMs`
+  frozen at MST); closed Fridays (`isClosedWeekday` → false); 4 h notice
+  (dropped); horizon (+1 day); grid membership (`isSlotOnGrid` off by 1 ms).
+- `verify:availability` — window shape (`bookableDateRange` one day short);
+  notice boundary (`<` → `<=`); Friday / blackout / booked-slot rules (each
+  dropped from `isSlotBookable`); empty days filtered out; query bounds
+  (degraded to naive `now + 14×24h`); DST wall clock (`localTime` read UTC);
+  determinism (randomized output). Frozen-offset break also seen red here
+  ("window must span both offsets").
+- `verify:availability:db` — **red pass deferred, NOT observed-red.** Do not
+  cite this script as covered until BK-02 (scope item 5) runs its pass on the
+  dev branch. It writes to whatever `DATABASE_URL` names — currently
+  production — and deliberately breaking production targets while it hammers
+  the live DB is what the dev-branch rule forbids.
 
 ## Phases
 
@@ -92,10 +120,13 @@ files, so the current gate is blind to exactly what BK-03 delivers. Installing
 **→ Retro checkpoint after P2.** Ten minutes: what in this process earned its
 keep, and what gets trimmed for P3–P5? Agenda:
 
-- Which review passes actually caught something, and which were noise?
+- Count, don't vibe: process lines vs code lines shipped, and which gates and
+  review passes have defects to their name. Cut anything that has none.
 - Is the tier split drawn in the right place?
 - Generalize the `/CLAUDE.md` process section beyond `docs/booking/` — it is
   written as if booking is the only work this repo will ever see.
+- Close with one line: anything here the sibling projects (digital-masajid,
+  masjid-fundraiser) should hear?
 
 Do not skip it.
 
