@@ -74,7 +74,7 @@ Predates this process, so it has no ticket file.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | draft |
+| BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | ✅ committed |
 | BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | not started |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
