@@ -37,7 +37,6 @@ test-results/
 /*.png
 
 # Env
-.env
-.env.*
+.env*
 !.env.example
 .vercel

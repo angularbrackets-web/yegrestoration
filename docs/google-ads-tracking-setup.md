@@ -124,6 +124,40 @@ or push any commit to `main`.
    from "Inactive/Unverified" to **"Recording conversions"** within 24–48 h of
    the first real conversion.
 
+## Field notes — 2026-07-07 setup session
+
+The Google Ads UI changed from what Steps 4–5 describe. What the flow actually
+looks like now, plus gotchas hit during the real setup:
+
+- **New flow**: Goals → Conversions → Summary → **+ Create conversion action**
+  opens a 3-step wizard (Get started → Create conversion actions → Summary).
+  Conversion actions are grouped under **goal categories** (e.g. "Contact").
+- **Call action path**: inside the Contact category → **+ Create conversion** →
+  data source **"Calls from website visits"** (not "Calls from ads" — that only
+  tracks call-extension numbers in the ad itself; "Calls via uploads" is offline
+  import). Then choose event **"Someone calls a number shown on my website
+  (Requires a Google Forwarding number)"** — this matches our
+  `phone_conversion_number` snippet. The other option ("makes a call by
+  clicking a number") is a tel:-click conversion needing a different snippet.
+- **Two phone fields**: *Destination number* = raw digits callers reach
+  (`7804793285`); *Display number* = **exactly** as rendered on the site:
+  `(780) 479-3285` (must match `BUSINESS.phone` in `src/data/services.ts`).
+- **Call length defaults to 60s** — lower it to 30s in Edit settings
+  (Conversion settings panel). Emergency-restoration leads can be short calls.
+- **Value**: "same value each conversion, CAD $1" is fine and slightly better
+  than "no value" — gives Smart Bidding a signal to optimize on.
+- **"No tag found for this account" warning** on the final Summary screen is
+  expected while the site deploy predates the env vars — the site renders the
+  Google tag itself (`Analytics.astro`); never install Google's snippet.
+- **The label** lives under **"See event snippet"** on the final Summary
+  screen — the string after `/` in `send_to: 'AW-XXXXXXXXXX/LABEL'`.
+- **"Misconfigured" status** on an existing conversion action just means
+  Google has never seen the tag fire; it self-resolves after deploy + first
+  test conversion.
+- **GA4 property check**: verify timezone/currency (Admin → Property details).
+  This property was created with America/Los_Angeles + USD and had to be
+  corrected to Edmonton + CAD.
+
 ## Troubleshooting
 
 - **No gtag script in page source** → env vars not set for the environment you
