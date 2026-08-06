@@ -78,9 +78,21 @@ Predates this process, so it has no ticket file.
 | BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | not started |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
+| BK-12 | Switch the typecheck gate to `astro check` | Light | not started — **must land before BK-03** |
+
+BK-12 exists because `tsc --noEmit` never looks inside `.astro` or `.svelte`
+files, so the current gate is blind to exactly what BK-03 delivers. Installing
+`@astrojs/check` also makes `astro check` non-interactive.
 
 **→ Retro checkpoint after P2.** Ten minutes: what in this process earned its
-keep, and what gets trimmed for P3–P5? Do not skip it.
+keep, and what gets trimmed for P3–P5? Agenda:
+
+- Which review passes actually caught something, and which were noise?
+- Is the tier split drawn in the right place?
+- Generalize the `/CLAUDE.md` process section beyond `docs/booking/` — it is
+  written as if booking is the only work this repo will ever see.
+
+Do not skip it.
 
 ### P3 — Notifications
 
