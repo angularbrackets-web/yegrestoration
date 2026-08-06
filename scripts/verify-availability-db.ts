@@ -9,10 +9,18 @@
 // fires) and query bounds (a naive `now + 14 × 24h` bound misses a booking on
 // the last offered afternoon). Both only show up against real rows.
 //
-// This INSERTS AND DELETES rows in whatever database DATABASE_URL points at —
-// currently the production Neon branch, since there is no separate dev one.
-// Every row it writes carries MARKER in a text column, cleanup runs in a
-// finally block, and the script re-checks that nothing survived before exiting.
+// This INSERTS AND DELETES rows. Every row it writes carries MARKER in a text
+// column, cleanup retries and also runs from SIGINT/SIGTERM, and the script
+// re-checks that nothing survived before exiting.
+//
+// POLICY (set in BK-02): writing verification scripts run against the Neon dev
+// branch named by DATABASE_URL_DEV, never production, and refuse to run when it
+// is unset rather than falling back. `--allow-production` is reserved for
+// deliberate smoke tests against the live database.
+//
+// This script still runs against DATABASE_URL because it predates the dev
+// branch; BK-02 step zero creates the branch and retrofits this script to the
+// rule above. Until then `--allow-production` is required on every run.
 import { neon } from '@neondatabase/serverless';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';

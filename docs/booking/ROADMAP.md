@@ -58,6 +58,11 @@ when the token is minted.
   last.
 - **The Blob store is private.** Admin viewing needs an authenticated function
   proxy (BK-09), not a direct URL.
+- **Writing verification scripts target the Neon dev branch, never production.**
+  `DATABASE_URL_DEV` in `.env` is the dev branch; `DATABASE_URL` stays
+  production. A script that writes must refuse to run when `DATABASE_URL_DEV`
+  is unset rather than falling back, and `--allow-production` is reserved for
+  deliberate smoke tests. Set up as BK-02 step zero.
 - Vercel Blob's 4.5 MB limit is the *function body* limit and applies to server
   uploads only. Client uploads bypass it and cost no data transfer.
 
@@ -75,7 +80,7 @@ Predates this process, so it has no ticket file.
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | ✅ committed |
-| BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | not started |
+| BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | draft — plan review |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
 | BK-12 | Switch the typecheck gate to `astro check` | Light | not started — **must land before BK-03** |
