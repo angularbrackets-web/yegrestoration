@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "migrate": "tsx scripts/migrate.ts",
     "migrate:status": "tsx scripts/migrate.ts --status",
-    "verify:slots": "tsx scripts/verify-slots.ts"
+    "verify:slots": "tsx scripts/verify-slots.ts",
+    "verify:availability": "tsx scripts/verify-availability.ts",
+    "verify:availability:db": "tsx scripts/verify-availability-db.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.2",

@@ -97,5 +97,6 @@ export const DRAFT_RATE_LIMIT_PER_HOUR = 20;
 // rather than running the function.
 // ---------------------------------------------------------------------------
 
+export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_DRAFT_ENDPOINT = '/api/booking/draft/';
 export const BOOKING_UPLOAD_ENDPOINT = '/api/booking/upload-token/';
