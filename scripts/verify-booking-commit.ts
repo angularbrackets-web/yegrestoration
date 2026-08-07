@@ -44,9 +44,19 @@ if (!DEV_URL) {
   process.exit(1);
 }
 
-// 2. Assert it is not production.
+// 2. Assert it is not production. Refusing when DATABASE_URL is ABSENT is the
+//    point: on a fresh clone, in CI, or with a `vercel env pull` that blanked
+//    the value, a silent skip would leave a copy-pasted production string in
+//    DATABASE_URL_DEV unchallenged, and the hammer would run 12 parallel real
+//    bookings against the live table. A safety check must not fail open exactly
+//    when it has least information.
 const PROD_URL = process.env.DATABASE_URL ?? '';
-if (PROD_URL && hostOf(PROD_URL) === hostOf(DEV_URL)) {
+if (!PROD_URL) {
+  console.error('DATABASE_URL is not set, so DATABASE_URL_DEV cannot be proven different from');
+  console.error('production. Refusing to run. Pull the production env first.');
+  process.exit(1);
+}
+if (hostOf(PROD_URL) === hostOf(DEV_URL)) {
   console.error(`DATABASE_URL_DEV points at the production host (${hostOf(DEV_URL)}). Refusing.`);
   process.exit(1);
 }
@@ -55,7 +65,8 @@ if (PROD_URL && hostOf(PROD_URL) === hostOf(DEV_URL)) {
 process.env.DATABASE_URL = DEV_URL;
 
 // 4. Only now import the route and anything that reaches the database.
-const { POST, insertBooking } = await import('../src/pages/api/booking/create');
+const { POST } = await import('../src/pages/api/booking/create');
+const { insertBooking } = await import('../src/lib/booking-commit');
 const { issueDraftToken } = await import('../src/lib/draft-token');
 const { BOOKING_RATE_LIMIT_PER_HOUR, DRAFT_TOKEN_TTL_HOURS } = await import(
   '../src/lib/booking-config'
@@ -88,8 +99,13 @@ async function cleanup(attempts = 3): Promise<number> {
     try {
       // appointment_files first would orphan nothing (ON DELETE CASCADE covers
       // claimed rows), but unclaimed rows have no appointment to cascade from.
+      // Match on pathname as well as this run's draft ids: a crashed run's
+      // files are unreachable by id, and an unclaimed pile would otherwise
+      // accumulate on the branch forever.
       const f = (await sql`
-        DELETE FROM appointment_files WHERE draft_id = ANY(${draftIds}::uuid[]) RETURNING id
+        DELETE FROM appointment_files
+        WHERE draft_id = ANY(${draftIds}::uuid[]) OR pathname LIKE 'bk02/%'
+        RETURNING id
       `) as { id: number }[];
       const a = (await sql`
         DELETE FROM appointments WHERE name LIKE ${NAME + '%'} RETURNING id
@@ -97,7 +113,12 @@ async function cleanup(attempts = 3): Promise<number> {
       const r = (await sql`
         DELETE FROM rate_limits WHERE bucket LIKE 'booking-create:bk02-%' RETURNING bucket
       `) as { bucket: string }[];
-      return a.length + f.length + r.length;
+      // Blackout rows too: one surviving here suppresses a whole day of slots
+      // for every later run, quietly.
+      const b = (await sql`
+        DELETE FROM blackout_dates WHERE reason = ${NAME} RETURNING day
+      `) as { day: string }[];
+      return a.length + f.length + r.length + b.length;
     } catch (err) {
       lastErr = err;
       console.error(`  cleanup attempt ${i + 1} failed, retrying:`, err);
@@ -181,20 +202,38 @@ function freeSlots(now = new Date()): Date[] {
   return out;
 }
 
+/** Every `nextSlot()` call below consumes one. Keep this ahead of the real count. */
+const SLOTS_NEEDED = 24;
+
 const slots = freeSlots();
-if (slots.length < 10) {
-  console.error('Not enough free slots in the window to run these checks.');
+if (slots.length < SLOTS_NEEDED) {
+  console.error(`Need ${SLOTS_NEEDED} free slots to run these checks, found ${slots.length}.`);
   process.exit(1);
 }
 let slotCursor = 0;
-const nextSlot = () => slots[slotCursor++];
+function nextSlot(): Date {
+  const slot = slots[slotCursor++];
+  // An undefined here would surface as an opaque TypeError inside payload().
+  if (!slot) throw new Error(`Ran out of free slots after ${slotCursor - 1}; raise SLOTS_NEEDED.`);
+  return slot;
+}
 
 // ---------------------------------------------------------------------------
 try {
+  // A leftover row from a crashed run occupies a slot and makes every racer
+  // lose, which cascades into a page of unrelated failures. Sweep first, and
+  // abort rather than continue if the sweep does not clear it — downstream
+  // results would be noise. (Cleanup does not run on SIGPIPE, e.g. when the
+  // output is piped through `head`, so leftovers are a real occurrence.)
+  const stale = await cleanup().catch(() => -1);
+  if (stale > 0) console.log(`  swept ${stale} leftover row(s) from an earlier run\n`);
   const existing = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments WHERE name LIKE ${NAME + '%'}
   `) as { n: number }[];
-  check(existing[0].n === 0, `dev branch already holds ${existing[0].n} leftover verify rows`);
+  if (existing[0].n !== 0) {
+    console.error(`Dev branch still holds ${existing[0].n} verify row(s) after sweeping. Aborting.`);
+    process.exit(1);
+  }
   seeded = true;
 
   // -------------------------------------------------------------------------
@@ -207,6 +246,22 @@ try {
   {
     const slot = nextSlot();
     const now = new Date();
+
+    // Each racer gets its own draft with one file, so the losers' claim arm is
+    // exercised too: a loser must leave its own file unclaimed rather than
+    // writing over the winner's. Without this the EXISTS guard in the CTE has
+    // no test that would go red if it were removed.
+    const racerDrafts: string[] = [];
+    for (let i = 0; i < HAMMER_N; i++) {
+      const d = await issueDraftToken();
+      racerDrafts.push(d.draftId);
+      draftIds.push(d.draftId);
+      await sql`
+        INSERT INTO appointment_files (draft_id, pathname, content_type, upload_state)
+        VALUES (${d.draftId}::uuid, ${`bk02/cte/${d.draftId}.jpg`}, 'image/jpeg', 'pending')
+      `;
+    }
+
     const results = await Promise.all(
       Array.from({ length: HAMMER_N }, (_, i) =>
         insertBooking(
@@ -228,11 +283,11 @@ try {
             smsConsent: false,
             draftToken: null,
           },
-          null,
+          racerDrafts[i],
           now,
         ).then(
-          (r) => ({ ok: true as const, r }),
-          (e) => ({ ok: false as const, e }),
+          (r) => ({ ok: true as const, r, i }),
+          (e) => ({ ok: false as const, e, i }),
         ),
       ),
     );
@@ -245,7 +300,23 @@ try {
     check(won.length === 1, `exactly one execution must insert (got ${won.length})`);
     check(lost.length === HAMMER_N - 1, `the rest must return null (got ${lost.length})`);
     check((await countBookings(slot)) === 1, 'exactly one row must exist for the slot');
-    console.log(`  ${HAMMER_N} parallel executions → 1 insert, ${lost.length} clean conflicts`);
+
+    // The winner claims its own file; every loser leaves its file alone.
+    const winner = won[0] as { ok: true; r: { id: number; files: number }; i: number } | undefined;
+    check(winner?.r.files === 1, `the winner must claim its one file (got ${winner?.r.files})`);
+    const claimedRows = (await sql`
+      SELECT draft_id::text AS draft_id, appointment_id
+      FROM appointment_files WHERE draft_id = ANY(${racerDrafts}::uuid[])
+    `) as { draft_id: string; appointment_id: number | null }[];
+    const attached = claimedRows.filter((r) => r.appointment_id !== null);
+    check(attached.length === 1, `exactly one racer's file may be claimed (got ${attached.length})`);
+    check(
+      winner !== undefined && attached[0]?.draft_id === racerDrafts[winner.i],
+      "the claimed file must belong to the winner's own draft",
+    );
+    console.log(
+      `  ${HAMMER_N} parallel executions → 1 insert, ${lost.length} clean conflicts, only the winner's file claimed`,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -268,7 +339,17 @@ try {
     check((await countBookings(slot)) === 1, 'exactly one row must exist for the slot');
     check(typeof created[0]?.body?.id === 'number', 'the 201 must carry a numeric id');
     check(typeof created[0]?.body?.slotLabel === 'string', 'the 201 must carry a slot label');
-    check(conflicted[0]?.body?.code === 'slot_taken', 'a 409 must be machine-readable');
+    // Losers may fail either at the precheck (slot_unavailable) or at the index
+    // (slot_taken) depending on interleaving — both are 409, both must be
+    // machine-readable so BK-03 never has to parse prose.
+    check(
+      conflicted.every((r) => ['slot_taken', 'slot_unavailable'].includes(r.body?.code)),
+      'every 409 must carry a known code',
+    );
+    check(
+      conflicted.some((r) => r.body?.code === 'slot_taken'),
+      'at least one loser must reach the index rather than the precheck',
+    );
     console.log(`  ${HAMMER_N} parallel requests → 1×201, ${conflicted.length}×409, 1 row`);
   }
 
@@ -281,7 +362,16 @@ try {
 
     const offGrid = new Date(nextSlot().getTime() + 7 * 60 * 1000);
     const past = slotStartsForDate(addDays(bookableDateRange(now)[0], -3))[0];
-    const tooSoon = slots.find((s) => s.getTime() < now.getTime() + 4 * 60 * 60 * 1000);
+    // Build this from the raw grid, NOT from `slots`. `freeSlots()` keeps only
+    // slots satisfying isWithinBookingWindow (s >= now + 4h), so searching it
+    // for s < now + 4h is the negation of the filter that built it — it could
+    // only ever hit on the sub-second drift between the two `new Date()` calls.
+    // Measured across 2304 clock positions, it hit 35 times, all inside a
+    // ~2-second window. That is not a time-of-day limitation; it is a check
+    // that never runs.
+    const tooSoon = slotStartsForDate(bookableDateRange(now)[0]).find(
+      (s) => s.getTime() > now.getTime() && s.getTime() < now.getTime() + 4 * 60 * 60 * 1000,
+    );
     const beyondHorizon = slotStartsForDate(addDays(bookableDateRange(now).at(-1)!, 2))[0];
     const friday = (() => {
       for (const d of bookableDateRange(now)) if (isClosedWeekday(d)) return slotStartsForDate(d)[0];
@@ -298,12 +388,12 @@ try {
 
     for (const [label, slot] of cases) {
       if (!slot) {
-        // Loud, not silent. "Inside the notice window" only exists between
-        // roughly 07:30 and 15:30 local, so this case is unconstructible at
-        // other times of day. The boundary itself is asserted exactly, on both
-        // sides, by verify:availability through the same isSlotBookable
-        // predicate this endpoint calls — but a quiet skip would read as
-        // coverage, which is how a check rots into decoration.
+        // Loud, not silent. "Inside the notice window" needs a grid slot that
+        // is both future and less than 4h away, which genuinely does not exist
+        // outside roughly 07:30–15:30 local. The boundary itself is asserted
+        // exactly, on both sides, by verify:availability through the same
+        // isSlotBookable predicate this endpoint calls — but a quiet skip would
+        // read as coverage, which is how a check rots into decoration.
         console.log(`  ⚠ COVERAGE GAP: "${label}" not constructible right now — skipped.`);
         skipped.push(label);
         continue;
@@ -324,7 +414,14 @@ try {
     // An already-booked slot, via a fresh booking.
     const taken = nextSlot();
     check((await post(payload(taken))).status === 201, 'setup booking must succeed');
-    check((await post(payload(taken))).status === 409, 'an already-booked slot must 409');
+    const retaken = await post(payload(taken));
+    check(retaken.status === 409, 'an already-booked slot must 409');
+    // Uncontended, so this must be the precheck's code, not the index's — the
+    // two are different situations and BK-03 acts on them differently.
+    check(
+      retaken.body?.code === 'slot_unavailable',
+      `an uncontended repeat must read slot_unavailable (got ${retaken.body?.code})`,
+    );
 
     const after = (await sql`SELECT COUNT(*)::int AS n FROM appointments`) as { n: number }[];
     check(
@@ -380,6 +477,7 @@ try {
   console.log('\nDraft token integrity');
   // -------------------------------------------------------------------------
   {
+    const rowsBefore = (await sql`SELECT COUNT(*)::int AS n FROM appointments`) as { n: number }[];
     const good = await issueDraftToken();
     const forged = good.token.slice(0, -1) + (good.token.endsWith('a') ? 'b' : 'a');
     const expired = await issueDraftToken(
@@ -398,6 +496,14 @@ try {
     const none = await post(payload(nextSlot()));
     check(none.status === 201, 'a booking with no token must still succeed');
     check(none.body?.filesAttached === 0, 'a booking with no token must claim no files');
+
+    // AC5 is "…and creates nothing": a 400 returned *after* an insert would
+    // otherwise pass. Only the tokenless booking above may have added a row.
+    const rowsAfter = (await sql`SELECT COUNT(*)::int AS n FROM appointments`) as { n: number }[];
+    check(
+      rowsAfter[0].n === rowsBefore[0].n + 1,
+      `only the tokenless booking may have been created (${rowsBefore[0].n} → ${rowsAfter[0].n})`,
+    );
     console.log('  forged and expired rejected, bare draft_id refused, tokenless booking allowed');
   }
 
@@ -479,18 +585,102 @@ try {
     check(!('id' in (r.body ?? {})), 'a 500 must not look like a created booking');
     const after = (await sql`SELECT COUNT(*)::int AS n FROM appointments`) as { n: number }[];
     check(after[0].n === before[0].n, 'a failed commit must create nothing');
-    console.log('  unreachable database → 500, nothing created');
+
+    // The above dies at the availability precheck, never reaching the insert —
+    // so on its own it would stay green even if insertBooking were wrapped in a
+    // catch that returned 201, which is the exact failure AC10 names. Fail the
+    // insert directly to cover that half.
+    const deadSql = neon('postgresql://u:p@ep-does-not-exist-00000000.us-east-2.aws.neon.tech/nope');
+    let insertThrew = false;
+    try {
+      await insertBooking(
+        deadSql,
+        {
+          name: `${NAME} dead`,
+          phone: '7805550134',
+          email: null,
+          service: 'water',
+          description: null,
+          address: '1 Test Way',
+          city: 'Edmonton',
+          postal_code: null,
+          payment_route: 'private',
+          insurer_name: null,
+          policy_number: null,
+          claim_number: null,
+          slotStart: nextSlot(),
+          smsConsent: false,
+          draftToken: null,
+        },
+        null,
+        new Date(),
+      );
+    } catch {
+      insertThrew = true;
+    }
+    check(insertThrew, 'insertBooking must reject rather than resolve when the DB is unreachable');
+    console.log('  precheck failure → 500 with nothing created; insert failure rejects');
   }
 
   // -------------------------------------------------------------------------
   console.log('\nNo insurance identifier leaks (AC11)');
   // -------------------------------------------------------------------------
   {
+    // Scanning bodies that were never given a secret proves nothing — the
+    // realistic leak is an error path echoing the payload it rejected. So drive
+    // an insurance-bearing payload down every status a caller can reach.
+    const insured = (over: Record<string, unknown> = {}) => ({
+      payment_route: 'insurance',
+      insurer_name: 'Acme Mutual',
+      policy_number: 'POL-SECRET-3',
+      claim_number: 'CLM-SECRET-3',
+      ...over,
+    });
+
+    const takenSlot = nextSlot();
+    check((await post(payload(takenSlot, insured()))).status === 201, 'setup booking must succeed');
+    const conflict = await post(payload(takenSlot, insured()));
+    check(conflict.status === 409, `409 path must be reached (got ${conflict.status})`);
+
+    const invalid = await post(payload(nextSlot(), insured({ phone: 'nope' })));
+    check(invalid.status === 422, `422 path must be reached (got ${invalid.status})`);
+
+    const realUrl = process.env.DATABASE_URL;
+    process.env.DATABASE_URL =
+      'postgresql://u:p@ep-does-not-exist-00000000.us-east-2.aws.neon.tech/nope';
+    let broken;
+    try {
+      broken = await post(payload(nextSlot(), insured()));
+    } finally {
+      process.env.DATABASE_URL = realUrl;
+    }
+    check(broken.status === 500, `500 path must be reached (got ${broken.status})`);
+
+    const limitIp = freshIp();
+    let rateLimited = null;
+    for (let i = 0; i <= BOOKING_RATE_LIMIT_PER_HOUR + 1; i++) {
+      const r = await post(payload(nextSlot(), insured({ phone: 'nope' })), limitIp);
+      if (r.status === 429) {
+        rateLimited = r;
+        break;
+      }
+    }
+    check(rateLimited !== null, '429 path must be reached with insurance fields present');
+
     const all = bodies.join('\n');
-    for (const secret of ['POL-SECRET-1', 'CLM-SECRET-1', 'POL-SECRET-2', 'CLM-SECRET-2']) {
+    for (const secret of [
+      'POL-SECRET-1',
+      'CLM-SECRET-1',
+      'POL-SECRET-2',
+      'CLM-SECRET-2',
+      'POL-SECRET-3',
+      'CLM-SECRET-3',
+    ]) {
       check(!all.includes(secret), `${secret} must never appear in a response body`);
     }
-    console.log(`  scanned ${bodies.length} response bodies, no identifiers echoed`);
+    console.log(
+      `  identifiers sent down 201/409/422/500/429; scanned ${bodies.length} bodies, none echoed`,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -499,8 +689,10 @@ try {
   {
     const ip = freshIp();
     let limited = null;
+    let sent = 0;
     for (let i = 0; i <= BOOKING_RATE_LIMIT_PER_HOUR + 1; i++) {
       // Deliberately invalid, so the limiter is reached without booking anything.
+      sent++;
       const r = await post({ nope: true }, ip);
       if (r.status === 429) {
         limited = r;
@@ -512,7 +704,13 @@ try {
       limited !== null && Number(limited.headers.get('Retry-After')) > 0,
       'a 429 must carry a positive Retry-After',
     );
-    console.log(`  429 after ${BOOKING_RATE_LIMIT_PER_HOUR} requests, Retry-After present`);
+    // Report the measured count, not the expected one: a leftover bucket from a
+    // crashed run would 429 on request 1 while a hard-coded line still claimed 30.
+    check(
+      sent === BOOKING_RATE_LIMIT_PER_HOUR + 1,
+      `the 429 must arrive on request ${BOOKING_RATE_LIMIT_PER_HOUR + 1} (arrived on ${sent} — leftover bucket?)`,
+    );
+    console.log(`  429 on request ${sent}, Retry-After present`);
   }
 } finally {
   const removed = await cleanup().catch(() => -1);

@@ -13,14 +13,13 @@
 // column, cleanup retries and also runs from SIGINT/SIGTERM, and the script
 // re-checks that nothing survived before exiting.
 //
-// POLICY (set in BK-02): writing verification scripts run against the Neon dev
-// branch named by DATABASE_URL_DEV, never production, and refuse to run when it
-// is unset rather than falling back. `--allow-production` is reserved for
-// deliberate smoke tests against the live database.
+// It runs against the Neon DEV BRANCH (DATABASE_URL_DEV) by default and refuses
+// when that is unset rather than falling back to production. Pass
+// --allow-production for a deliberate smoke test against the live database.
 //
-// This script still runs against DATABASE_URL because it predates the dev
-// branch; BK-02 step zero creates the branch and retrofits this script to the
-// rule above. Until then `--allow-production` is required on every run.
+// The guard order matters: getDb() reads process.env.DATABASE_URL and nothing
+// else, so refusing without DATABASE_URL_DEV protects nothing on its own — the
+// variable has to be SWAPPED and the route imported only afterwards.
 import { neon } from '@neondatabase/serverless';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -45,29 +44,48 @@ function loadEnv(file: string) {
 loadEnv(resolve(root, '.env.local'));
 loadEnv(resolve(root, '.env'));
 
+const hostOf = (url: string) => url.replace(/.*@([^/]+)\/.*/, '$1');
+const allowProduction = process.argv.includes('--allow-production');
+
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL not set. Run: vercel env pull --environment=production .env.local');
   process.exit(1);
 }
 
-// Seeding writes to whatever DATABASE_URL names, and there is no separate dev
-// branch — so it must be asked for, never run by reflex. For the second or two
-// the rows exist, a visitor loading the picker would see those slots and that
-// day as unavailable.
-if (!process.argv.includes('--allow-production')) {
-  console.error('This script INSERTS INTO and DELETES FROM the live database.');
-  console.error('Re-run with --allow-production if that is what you want:');
-  console.error('  npm run verify:availability:db -- --allow-production');
-  process.exit(1);
+let target: string;
+if (allowProduction) {
+  // Deliberate smoke test against the live database. For the second or two the
+  // rows exist, a visitor loading the picker sees those slots and that day gone.
+  console.log('⚠ --allow-production: seeding the LIVE database.\n');
+  target = process.env.DATABASE_URL;
+} else {
+  const dev = process.env.DATABASE_URL_DEV;
+  if (!dev) {
+    console.error('DATABASE_URL_DEV is not set. This script seeds rows and defaults to the Neon');
+    console.error('dev branch; it will not fall back to production. See BK-02 step zero, or pass');
+    console.error('--allow-production for a deliberate smoke test.');
+    process.exit(1);
+  }
+  if (hostOf(dev) === hostOf(process.env.DATABASE_URL)) {
+    console.error(`DATABASE_URL_DEV points at the production host (${hostOf(dev)}). Refusing.`);
+    process.exit(1);
+  }
+  target = dev;
+  // Swap BEFORE importing the route: getDb() reads this variable per call, but
+  // a static import would have bound its module graph already.
+  process.env.DATABASE_URL = dev;
 }
 
 const { GET } = await import('../src/pages/api/booking/availability');
 const { MAX_ADVANCE_DAYS } = await import('../src/lib/booking-config');
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = neon(target);
+console.log(`Target: ${hostOf(target)}${allowProduction ? ' (production)' : ' (dev branch)'}\n`);
 const MARKER = 'BK-01 verification — safe to delete';
 
 let failures = 0;
+/** Cases not constructible on this run. Reported at the end, never swallowed. */
+const skipped: string[] = [];
 function check(condition: boolean, message: string) {
   if (!condition) {
     console.error(`  ✗ ${message}`);
@@ -162,14 +180,25 @@ try {
   const lastDate = before.body.dates[before.body.dates.length - 1].date;
   const horizonSlot = horizonDay.slots[horizonDay.slots.length - 1].start;
   const naiveBound = Date.now() + MAX_ADVANCE_DAYS * 24 * 60 * 60 * 1000;
-  check(
-    horizonDay.date === lastDate,
-    `query-bounds coverage lost: last open day is ${horizonDay.date}, window ends ${lastDate}`,
-  );
-  check(
-    Date.parse(horizonSlot) > naiveBound,
-    `query-bounds coverage lost: ${horizonSlot} is inside a naive ${MAX_ADVANCE_DAYS}×24h bound`,
-  );
+  const coversNaiveBound = Date.parse(horizonSlot) > naiveBound;
+
+  // When the window's last day is closed (a Friday) or fully booked, no OFFERED
+  // slot lies beyond `now + 14×24h`, so a naive-bound bug would be invisible
+  // through this endpoint and the check has nothing to catch. Say so instead of
+  // failing — and instead of quietly testing a weaker case, which is what this
+  // assertion exists to prevent.
+  if (!coversNaiveBound) {
+    console.log(
+      `  ⚠ COVERAGE GAP: query-bounds check inert today — last open day is ${horizonDay.date}, ` +
+        `window ends ${lastDate}, so no offered slot is beyond a naive ${MAX_ADVANCE_DAYS}×24h bound.`,
+    );
+    skipped.push('query bounds vs naive horizon');
+  } else {
+    check(
+      horizonDay.date === lastDate,
+      `last open day is ${horizonDay.date} but window ends ${lastDate}`,
+    );
+  }
 
   const bookedSlot = nearDay.slots[0].start;
   const cancelledSlot = nearDay.slots[1].start;
@@ -211,7 +240,7 @@ try {
   );
   check(
     !slotsOn(horizonDay.date).includes(horizonSlot),
-    'a booking on the last offered afternoon must disappear (query bounds)',
+    `a booking on the last offered afternoon must disappear${coversNaiveBound ? ' (query bounds)' : ''}`,
   );
   check(slotsOn(blackoutDay.date).length === 0, 'a blacked-out day must offer nothing');
   check(
@@ -270,5 +299,8 @@ try {
 if (failures > 0) {
   console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.`);
   process.exit(1);
+}
+if (skipped.length > 0) {
+  console.log(`\n⚠ Passed, but ${skipped.length} case(s) were inert today: ${skipped.join(', ')}.`);
 }
 console.log('\n✓ Endpoint round-trip passed.');

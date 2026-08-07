@@ -8,7 +8,8 @@ import {
   bookedQueryRange,
   isSlotBookable,
 } from '../../../lib/booking-availability';
-import { parseBookingPayload, type BookingPayload } from '../../../lib/booking-payload';
+import { insertBooking } from '../../../lib/booking-commit';
+import { parseBookingPayload } from '../../../lib/booking-payload';
 import { formatSlot, type DateKey } from '../../../lib/booking-time';
 import { verifyDraftToken } from '../../../lib/draft-token';
 import { getDb, SERVICE_LABELS } from '../../../lib/db';
@@ -66,21 +67,26 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   }
   const payload = parsed.payload;
 
-  // The claimed draft id is whatever the signature yields — never a field from
-  // the request. Otherwise a caller could pair their own valid token with
-  // someone else's draft id and adopt that person's uploaded photos.
-  let draftId: string | null = null;
-  if (payload.draftToken !== null) {
-    draftId = await verifyDraftToken(payload.draftToken, now);
-    if (draftId === null) {
-      return json(
-        { error: 'Your upload session expired. Reload the page and try again.' },
-        400,
-      );
-    }
-  }
-
   try {
+    // The claimed draft id is whatever the signature yields — never a field from
+    // the request. Otherwise a caller could pair their own valid token with
+    // someone else's draft id and adopt that person's uploaded photos.
+    //
+    // Inside the try because verifyDraftToken throws when BOOKING_DRAFT_SECRET
+    // is unset: outside it, a misconfigured deploy would answer with Astro's
+    // HTML 500 instead of this route's JSON, and BK-03's `res.json()` would
+    // throw a parse error rather than show a message.
+    let draftId: string | null = null;
+    if (payload.draftToken !== null) {
+      draftId = await verifyDraftToken(payload.draftToken, now);
+      if (draftId === null) {
+        return json(
+          { error: 'Your upload session expired. Reload the page and try again.' },
+          400,
+        );
+      }
+    }
+
     const slots = bookedQueryRange(now);
     const days = blackoutQueryRange(now);
 
@@ -107,7 +113,11 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       ),
     });
 
-    if (!bookable) return slotTaken();
+    // Not bookable for *some* reason — booked, blacked out, Friday, or outside
+    // the window. Which one is deliberately not disclosed (it would leak the
+    // schedule), but it is a different code from a lost race: retrying will not
+    // help, and BK-03 should re-fetch availability rather than trust the prose.
+    if (!bookable) return slotUnavailable();
 
     const created = await insertBooking(sql, payload, draftId, now);
 
@@ -133,6 +143,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   }
 };
 
+/** Lost the race: the slot really was booked between the check and the insert. */
 function slotTaken() {
   return json(
     { error: 'That time was just booked. Please choose another.', code: 'slot_taken' },
@@ -140,57 +151,10 @@ function slotTaken() {
   );
 }
 
-/**
- * Insert the appointment and claim its uploads in ONE statement.
- *
- * The Neon HTTP driver has no interactive transaction and the claim needs the
- * id the insert produces, so a two-call sequence has a window where a booking
- * exists whose photos are still unclaimed — and the orphan cron deletes those
- * 24 hours later. A data-modifying CTE is a single atomic statement.
- *
- * `FROM new_appt` on the tail is load-bearing: the scalar-subquery form
- * (`SELECT (SELECT id FROM new_appt)`) always returns one row, with a NULL id on
- * conflict, so the race loser would be told they had booked.
- *
- * Files are claimed regardless of `upload_state` — `onUploadCompleted` never
- * fires on localhost, so every dev upload is stuck at 'pending', and a
- * production callback can lag.
- *
- * Exported only so `scripts/verify-booking-commit.ts` can race this exact
- * statement instead of a hand-copied one that could drift away from it.
- */
-export async function insertBooking(
-  sql: ReturnType<typeof getDb>,
-  p: BookingPayload,
-  draftId: string | null,
-  now: Date,
-): Promise<{ id: number; files: number } | null> {
-  const rows = (await sql`
-    WITH new_appt AS (
-      INSERT INTO appointments (
-        name, phone, email, service, description, address, city, postal_code,
-        payment_route, insurer_name, policy_number, claim_number,
-        slot_start, source, sms_consent_at
-      ) VALUES (
-        ${p.name}, ${p.phone}, ${p.email}, ${p.service}, ${p.description},
-        ${p.address}, ${p.city}, ${p.postal_code},
-        ${p.payment_route}, ${p.insurer_name}, ${p.policy_number}, ${p.claim_number},
-        ${p.slotStart.toISOString()}, 'web',
-        ${p.smsConsent ? now.toISOString() : null}
-      )
-      ON CONFLICT (slot_start) WHERE status <> 'cancelled' DO NOTHING
-      RETURNING id
-    ), claimed AS (
-      UPDATE appointment_files
-      SET appointment_id = (SELECT id FROM new_appt)
-      WHERE draft_id = ${draftId}::uuid
-        AND appointment_id IS NULL
-        AND EXISTS (SELECT 1 FROM new_appt)
-      RETURNING id
-    )
-    SELECT new_appt.id, (SELECT COUNT(*)::int FROM claimed) AS files
-    FROM new_appt
-  `) as { id: number; files: number }[];
-
-  return rows[0] ?? null;
+/** Never offerable in the first place, or no longer offered. Retrying will not help. */
+function slotUnavailable() {
+  return json(
+    { error: 'That time is no longer available. Please choose another.', code: 'slot_unavailable' },
+    409,
+  );
 }

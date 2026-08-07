@@ -68,6 +68,16 @@ when the token is minted.
   protects nothing. See BK-02 step zero.
 - Vercel Blob's 4.5 MB limit is the *function body* limit and applies to server
   uploads only. Client uploads bypass it and cost no data transfer.
+- **`clientIp` trusts the leftmost `x-forwarded-for`, which the caller sets.**
+  `rate-limit.ts` prefers that header over `x-real-ip` and `clientAddress`, both
+  of which are platform-set. If Vercel appends the real address rather than
+  replacing the header, a script rotating `x-forwarded-for` gets unlimited
+  buckets and the booking rate limit is bypassed. Exploitability is
+  **unconfirmed** — it needs Vercel's actual append-vs-replace behaviour from a
+  primary source, which is why BK-02 recorded it rather than guessing. The
+  defensive ordering (`clientAddress` → `x-real-ip` → *rightmost* forwarded
+  entry) is correct regardless (severity: medium if exploitable, the limit is
+  what stands between a bot and the appointments table; owner: BK-11).
 - **`vercel env pull` writes sensitive variables back as empty strings.** In
   `.env.local`, `ADMIN_PASSWORD`, `RESEND_API_KEY`, `CRON_SECRET`,
   `BOOKING_DRAFT_SECRET`, `PUBLIC_AW_ID`, `PUBLIC_AW_CALL_LABEL`,
@@ -104,11 +114,12 @@ instance of the never-fails class.
   (degraded to naive `now + 14×24h`); DST wall clock (`localTime` read UTC);
   determinism (randomized output). Frozen-offset break also seen red here
   ("window must span both offsets").
-- `verify:availability:db` — **red pass deferred, NOT observed-red.** Do not
-  cite this script as covered until BK-02 (scope item 5) runs its pass on the
-  dev branch. It writes to whatever `DATABASE_URL` names — currently
-  production — and deliberately breaking production targets while it hammers
-  the live DB is what the dev-branch rule forbids.
+- `verify:availability:db` — **debt cleared in BK-02.** The script now defaults
+  to the dev branch and refuses rather than falling back, and its red pass ran
+  there: the dev-branch guard was observed red (made to fall back to
+  `DATABASE_URL`, refused correctly when restored), and the query-bounds
+  assertion now reports itself inert rather than failing on days when the
+  window's last day is closed.
 
 ## Phases
 
@@ -124,7 +135,7 @@ Predates this process, so it has no ticket file.
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | ✅ committed |
-| BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | draft — plan review |
+| BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | ✅ committed |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
 | BK-12 | Switch the typecheck gate to `astro check` | Light | not started — **must land before BK-03** |
