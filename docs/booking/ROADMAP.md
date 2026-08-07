@@ -68,6 +68,19 @@ when the token is minted.
   protects nothing. See BK-02 step zero.
 - Vercel Blob's 4.5 MB limit is the *function body* limit and applies to server
   uploads only. Client uploads bypass it and cost no data transfer.
+- **`vercel env pull` writes sensitive variables back as empty strings.** In
+  `.env.local`, `ADMIN_PASSWORD`, `RESEND_API_KEY`, `CRON_SECRET`,
+  `BOOKING_DRAFT_SECRET`, `PUBLIC_AW_ID`, `PUBLIC_AW_CALL_LABEL`,
+  `PUBLIC_AW_FORM_LABEL` and the whole `POSTGRES_*` family are all `""`. The key
+  being present therefore proves **nothing** about whether production has a
+  value — only the Vercel dashboard does. Local dev needs its own values in
+  `.env` (severity: medium, it invites false "it's configured" conclusions;
+  owner: BK-11, the launch-checks ticket).
+- **`process.env.X ?? import.meta.env.X` throws a TypeError under plain Node.**
+  `import.meta.env` is undefined outside Vite/Astro, so when `X` is unset a
+  verification script gets `Cannot read properties of undefined` instead of the
+  intended "not configured" error. Hit in `draft-token.ts`; the same pattern is
+  in `db.ts` (severity: low, dev-only, misleading diagnostics; owner: BK-12).
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
   (severity: doc-level — every consumer wraps them in `new Date(...)`, which
   takes either; found in BK-01, owner: BK-10, the next ticket that touches

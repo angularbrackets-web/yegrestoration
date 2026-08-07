@@ -89,6 +89,14 @@ export const DRAFT_TOKEN_TTL_HOURS = 6;
 /** Draft tokens a single IP may request per hour. Gates the whole upload funnel. */
 export const DRAFT_RATE_LIMIT_PER_HOUR = 20;
 
+/**
+ * Bookings a single IP may commit per hour. Generous next to five slots a day —
+ * it exists to stop a script, not to ration a household or an office behind one
+ * NAT. Must stay above the concurrency hammer's request count in
+ * `scripts/verify-booking-commit.ts`, or the hammer's expected 409s arrive as 429s.
+ */
+export const BOOKING_RATE_LIMIT_PER_HOUR = 30;
+
 // ---------------------------------------------------------------------------
 // Endpoints
 //
@@ -98,5 +106,6 @@ export const DRAFT_RATE_LIMIT_PER_HOUR = 20;
 // ---------------------------------------------------------------------------
 
 export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
+export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
 export const BOOKING_DRAFT_ENDPOINT = '/api/booking/draft/';
 export const BOOKING_UPLOAD_ENDPOINT = '/api/booking/upload-token/';
