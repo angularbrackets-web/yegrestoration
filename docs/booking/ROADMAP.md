@@ -59,10 +59,13 @@ when the token is minted.
 - **The Blob store is private.** Admin viewing needs an authenticated function
   proxy (BK-09), not a direct URL.
 - **Writing verification scripts target the Neon dev branch, never production.**
-  `DATABASE_URL_DEV` in `.env` is the dev branch; `DATABASE_URL` stays
+  `DATABASE_URL_DEV` in `.env` is the dev branch (`br-broad-dream-ap0sdq6f` on
+  project `purple-bar-39114890`, live since 2026-08-07); `DATABASE_URL` stays
   production. A script that writes must refuse to run when `DATABASE_URL_DEV`
   is unset rather than falling back, and `--allow-production` is reserved for
-  deliberate smoke tests. Set up as BK-02 step zero.
+  deliberate smoke tests. Because `getDb()` reads only `DATABASE_URL`, a script
+  must also *swap* it and then dynamically import the route — the guard alone
+  protects nothing. See BK-02 step zero.
 - Vercel Blob's 4.5 MB limit is the *function body* limit and applies to server
   uploads only. Client uploads bypass it and cost no data transfer.
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
