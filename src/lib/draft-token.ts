@@ -13,11 +13,12 @@
  */
 
 import { DRAFT_TOKEN_TTL_HOURS } from './booking-config';
+import { readEnv } from './env';
 
 const TOKEN_VERSION = 'v1';
 
 function secret(): string {
-  const value = process.env.BOOKING_DRAFT_SECRET ?? import.meta.env.BOOKING_DRAFT_SECRET;
+  const value = readEnv('BOOKING_DRAFT_SECRET');
   if (!value) throw new Error('BOOKING_DRAFT_SECRET is not configured');
   return value;
 }

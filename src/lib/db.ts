@@ -1,5 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 
+import { readEnv } from './env';
+
 export type Lead = {
   id: number;
   name: string;
@@ -102,7 +104,7 @@ export type BlackoutDayRow = {
 };
 
 export function getDb() {
-  const url = process.env.DATABASE_URL ?? import.meta.env.DATABASE_URL;
+  const url = readEnv('DATABASE_URL');
   if (!url) throw new Error('DATABASE_URL is not configured');
   return neon(url);
 }

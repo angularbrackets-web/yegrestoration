@@ -7,9 +7,10 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "astro check && svelte-check --tsconfig ./tsconfig.json --output human",
     "migrate": "tsx scripts/migrate.ts",
     "migrate:status": "tsx scripts/migrate.ts --status",
+    "verify:env": "tsx scripts/verify-env.ts",
     "verify:slots": "tsx scripts/verify-slots.ts",
     "verify:availability": "tsx scripts/verify-availability.ts",
     "verify:availability:db": "tsx scripts/verify-availability-db.ts",
@@ -29,11 +30,13 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.10",
     "@astrojs/sitemap": "^3.7.3",
     "@astrojs/svelte": "^9.0.1",
     "@tailwindcss/vite": "^4.3.2",
     "astro": "^7.0.6",
     "svelte": "^5.0.0",
+    "svelte-check": "^4.7.5",
     "tailwindcss": "^4.3.2",
     "tsx": "^4.23.1",
     "typescript": "^5.0.0"

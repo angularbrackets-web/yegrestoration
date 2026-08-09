@@ -86,11 +86,27 @@ when the token is minted.
   value — only the Vercel dashboard does. Local dev needs its own values in
   `.env` (severity: medium, it invites false "it's configured" conclusions;
   owner: BK-11, the launch-checks ticket).
-- **`process.env.X ?? import.meta.env.X` throws a TypeError under plain Node.**
-  `import.meta.env` is undefined outside Vite/Astro, so when `X` is unset a
-  verification script gets `Cannot read properties of undefined` instead of the
-  intended "not configured" error. Hit in `draft-token.ts`; the same pattern is
-  in `db.ts` (severity: low, dev-only, misleading diagnostics; owner: BK-12).
+- ~~**`process.env.X ?? import.meta.env.X` throws a TypeError under plain
+  Node.**~~ **Cleared in BK-12.** All three sites (`draft-token.ts`, `db.ts`,
+  and `cleanup-uploads.ts` — the third was not in the original note) now go
+  through `readEnv` in `src/lib/env.ts`, and `npm run verify:env` holds the
+  line under plain Node. Do not reintroduce the `??` spelling: it reads as
+  defensive and is the opposite.
+- **`astro check` does not look inside `.svelte` files.** Proved in BK-12: a
+  component with a planted type error, imported *and rendered* from a page,
+  left `astro check` green. `npm run typecheck` therefore runs `astro check &&
+  svelte-check` and both halves are red-observed. Anyone tempted to simplify
+  that script back to one command is removing the only checker that reads the
+  booking island.
+- **13 pre-existing `svelte-check` a11y warnings and 23 `astro check` hints.**
+  Warnings, so they do not fail the gate — which is exactly why they will rot.
+  `ContactForm.svelte` (4 labels with no associated control), `Navbar.svelte`
+  (a `<nav>` with mouse/keyboard handlers, a `dialog` role with no tabindex),
+  `VideoReel.svelte` (a static `<div>` with a mouseenter handler); hints are
+  mostly `is:inline` on JSON-LD `<script>` tags, plus an unused import in
+  `blog/[slug].astro` and a deprecated `z.string().email()` in `api/contact.ts`
+  (severity: low, real a11y defects on live pages but none in the booking flow;
+  owner: BK-10, the ticket that already rewrites `ContactForm.svelte`).
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
   (severity: doc-level — every consumer wraps them in `new Date(...)`, which
   takes either; found in BK-01, owner: BK-10, the next ticket that touches
@@ -138,11 +154,12 @@ Predates this process, so it has no ticket file.
 | BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | ✅ committed |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
-| BK-12 | Switch the typecheck gate to `astro check` | Light | not started — **must land before BK-03** |
+| BK-12 | Typecheck gate covers `.astro` and `.svelte` | Light | ✅ committed |
 
-BK-12 exists because `tsc --noEmit` never looks inside `.astro` or `.svelte`
-files, so the current gate is blind to exactly what BK-03 delivers. Installing
-`@astrojs/check` also makes `astro check` non-interactive.
+BK-12 existed because `tsc --noEmit` never looks inside `.astro` or `.svelte`
+files, so the gate was blind to exactly what BK-03 delivers. `astro check`
+turned out to close only half of that — it does not read `.svelte` either — so
+the gate is `astro check && svelte-check`. See Known traps.
 
 **→ Retro checkpoint after P2.** Ten minutes: what in this process earned its
 keep, and what gets trimmed for P3–P5? Agenda:

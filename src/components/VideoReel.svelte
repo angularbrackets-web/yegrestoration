@@ -22,6 +22,11 @@
   let fading = $state(false);
 
   onMount(() => {
+    // `bind:this` has always resolved by the time onMount runs, so this guard
+    // is inert at runtime — it exists because `sectionRef` is legitimately
+    // `HTMLElement | undefined` and gsap's TweenTarget is not.
+    if (!sectionRef) return;
+
     gsap.set(sectionRef, { opacity: 0, y: 40 });
 
     gsap.to(sectionRef, {

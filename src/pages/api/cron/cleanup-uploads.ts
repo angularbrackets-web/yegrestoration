@@ -5,6 +5,7 @@ export const prerender = false;
 import { del } from '@vercel/blob';
 import { UPLOAD_ORPHAN_TTL_HOURS } from '../../../lib/booking-config';
 import { getDb } from '../../../lib/db';
+import { readEnv } from '../../../lib/env';
 
 /** Bounded so a large backlog is worked off across several runs rather than timing out. */
 const BATCH_SIZE = 200;
@@ -28,7 +29,7 @@ const RATE_LIMIT_RETENTION_HOURS = 48;
  * $CRON_SECRET` when that variable is set on the project.
  */
 export const GET: APIRoute = async ({ request }) => {
-  const secret = process.env.CRON_SECRET ?? import.meta.env.CRON_SECRET;
+  const secret = readEnv('CRON_SECRET');
   if (!secret) {
     console.error('CRON_SECRET is not configured — refusing to run cleanup.');
     return Response.json({ error: 'Not configured' }, { status: 500 });
