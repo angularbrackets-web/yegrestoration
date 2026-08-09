@@ -4,18 +4,21 @@ Astro 7 + Tailwind 4 + Svelte islands on Vercel · Neon Postgres · Resend.
 
 ## How work runs
 
-Work is phases → tickets, one ticket per commit. Roadmap and tickets live in
-`docs/booking/` — read `ROADMAP.md` before starting anything.
+Work is phases → tickets, one ticket per commit. Each work area gets
+`docs/<area>/` with a `ROADMAP.md` and `tickets/` — booking is the current one.
+Read the area's `ROADMAP.md` before starting anything.
 
 - **Lifecycle** — draft → plan-reviewed → approved → implemented → reviewed →
   committed. Rewrite the ticket's `Status:` line at *every* transition, as it
   happens. Assume the session dies mid-flight.
-- **Tiers** — *Heavy* (public endpoints that write or expose data, insurance/PII,
-  concurrency, anything irreversible): plan review + implementation review.
-  *Standard*: same two reviews, lighter prompts. *Light* (copy, styling, config):
-  gates only. Reviewers are always fresh agents, never forks, and receive only
-  the ticket file, the diff, and gate output — never the implementer's
-  conversation or reasoning.
+- **Tiers** — *Reviewed*: plan review + implementation review; mandatory for
+  anything touching public write paths, PII/insurance, concurrency, or the
+  irreversible. *Light* (copy, styling, config): gates only. The ticket names
+  its risk areas; reviewers weight attention by them. (P2 retro, 2026-08-09:
+  collapsed from Heavy/Standard — prompt weight had no catches to its name.)
+  Reviewers are always fresh agents, never forks, and receive only the ticket
+  file, the diff, and gate output — never the implementer's conversation or
+  reasoning.
 - **Conflict** — findings are blocker / should-fix / nit. Blockers get fixed;
   refusing one in writing is allowed. Only a *disputed blocker* goes to a third
   fresh agent as tiebreaker. No standing third review.

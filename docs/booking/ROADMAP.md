@@ -204,39 +204,44 @@ files, so the gate was blind to exactly what BK-03 delivers. `astro check`
 turned out to close only half of that — it does not read `.svelte` either — so
 the gate is `astro check && svelte-check`. See Known traps.
 
-**→ Retro checkpoint after P2.** Ten minutes: what in this process earned its
-keep, and what gets trimmed for P3–P5? Agenda:
-
-- Count, don't vibe: process lines vs code lines shipped, and which gates and
-  review passes have defects to their name. Cut anything that has none.
-- Is the tier split drawn in the right place?
-- Generalize the `/CLAUDE.md` process section beyond `docs/booking/` — it is
-  written as if booking is the only work this repo will ever see.
-- Close with one line: anything here the sibling projects (digital-masajid,
-  masjid-fundraiser) should hear?
-
-Do not skip it.
+**→ Retro checkpoint after P2 — done 2026-08-09.** The count: ~7,800 code lines
+against ~2,000 ticket/roadmap lines (≈1:4); ticket files double as spec and
+review record, so the pure-process core is the ~30 lines in `/CLAUDE.md`.
+Defect ledger: plan review 5 blockers across 3/3 reviewed tickets;
+implementation review caught two would-have-shipped bugs (BK-02) plus 9
+should-fixes (BK-03); red-first found real bugs in the verification itself on
+3/5 tickets; the disputed-blocker tiebreaker never fired (~40 findings, zero
+disputes) and stays because it costs nothing and plausibly deters disputes.
+Changes made: Heavy/Standard collapsed into one *Reviewed* tier (prompt weight
+had no catches to its name; Standard reviews out-caught Heavy's), and the
+`/CLAUDE.md` process section generalized beyond `docs/booking/`. Considered and
+rejected: ticket-size cap (BK-03's 655 lines correlate with its highest review
+yield) and loosening Light (n=2, and P3–P5 barely contains Light-eligible
+work). Line for the sibling projects: fresh-agent reviews with input isolation
+plus red-first verification caught 5 plan blockers and several
+would-have-shipped bugs across 5 tickets at ~1 process line per 4 code lines —
+port those two practices; skip prompt-weight tiers and standing third reviews.
 
 ### P3 — Notifications
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-05 | Customer confirmation email + internal notification (Resend) | Standard | not started |
-| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Heavy | blocked — Twilio number in verification |
+| BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | not started |
+| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number in verification |
 
 ### P4 — Admin
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-07 | Appointments list + detail in `/admin` | Standard | not started |
-| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Heavy | not started |
-| BK-09 | Authenticated proxy for private Blob files | Heavy | not started |
+| BK-07 | Appointments list + detail in `/admin` | Reviewed | not started |
+| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | not started |
+| BK-09 | Authenticated proxy for private Blob files | Reviewed | not started |
 
 ### P5 — Cutover
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-10 | Booking replaces the contact form; `leads` read-only; fix the 308 | Standard | not started |
+| BK-10 | Booking replaces the contact form; `leads` read-only; fix the 308 | Reviewed | not started |
 | BK-11 | Production launch checks — env vars, cron secret, tracking | Light | not started |
 
 ## Open questions for the client
