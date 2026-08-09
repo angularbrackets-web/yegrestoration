@@ -263,7 +263,7 @@ port those two practices; skip prompt-weight tiers and standing third reviews.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | ✅ reviewed — ready to commit |
+| BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | ✅ committed |
 | BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number in verification |
 
 ### P4 — Admin
