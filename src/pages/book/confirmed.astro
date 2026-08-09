@@ -1,0 +1,34 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.svelte';
+import Footer from '../../components/Footer.astro';
+import BookingConfirmation from '../../components/BookingConfirmation.svelte';
+
+const title = 'Booking confirmed | YEG Restoration Edmonton';
+const description = 'Your free on-site restoration assessment is booked.';
+---
+
+<!--
+  Same treatment /book/ gets, and for the same reasons: noindex here, excluded
+  from the sitemap in astro.config.mjs. A confirmation page has nothing to rank
+  for and renders nothing at all to a crawler, which arrives with no session.
+  Both come off with /book/'s when BK-10 cuts the contact form over.
+-->
+<Layout title={title} description={description} noindex={true}>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main class="pt-28 pb-20">
+    <div class="max-w-2xl mx-auto px-6">
+      <!--
+        client:load, not client:visible: this is the whole page, above the fold,
+        and a visit carrying no confirmation redirects from within it.
+      -->
+      <BookingConfirmation client:load />
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

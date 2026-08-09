@@ -10,9 +10,11 @@ What you get once it's live:
   visitors who clicked an ad, so calls are attributed to the exact campaign,
   ad group, and keyword.
 - **Form conversions** — every quote-form submission is reported to Google Ads.
+- **Booking conversions** — every completed booking on `/book/` is reported as
+  its own action, separate from form leads, so the two can be bid on apart.
 - **GA4 analytics** — page views plus a `click_to_call` event for every tap on
-  a phone link, and a `generate_lead` event (tagged with the service requested)
-  for every form submission.
+  a phone link, a `generate_lead` event (tagged with the service requested) for
+  every form submission, and a `booking_confirmed` event for every booking.
 
 ---
 
@@ -34,7 +36,7 @@ What you get once it's live:
 ## Step 3 — Find your Google Ads conversion ID
 
 1. In Google Ads: **Tools & settings → Measurement → Conversions**.
-2. You'll create two conversion actions (steps 4 and 5). Both share one
+2. You'll create three conversion actions (steps 4, 5 and 6). All share one
    **conversion ID** that looks like `AW-XXXXXXXXXX` — you'll see it in the tag
    setup screen of either action. This is `PUBLIC_AW_ID`.
 
@@ -69,9 +71,29 @@ What you get once it's live:
 3. Again choose "install yourself" and note the conversion **label** →
    `PUBLIC_AW_FORM_LABEL` (the `AW-` ID is the same one from Step 4).
 
-## Step 6 — Set the env vars
+## Step 6 — Create the booking conversion action
 
-Four variables, same names everywhere:
+A booked assessment is a firmer commitment than a contact-form enquiry — the
+visitor has given a time, an address, and often photos — so it gets its own
+action rather than sharing the form's. Keeping them apart is what lets you bid
+differently on the two.
+
+1. Conversions → **+ New conversion action** → **Website**.
+2. Enter `https://yegrestoration.ca`, then create the action manually:
+   - Category: **Book appointment**.
+   - Conversion name: `Assessment booked`.
+   - Count: **One**. The site also sends a `transaction_id`, so a refreshed or
+     re-opened confirmation page cannot count twice.
+3. "Install yourself" again, and note the conversion **label** →
+   `PUBLIC_AW_BOOKING_LABEL` (same `AW-` ID as Step 4).
+
+The site fires this on `/book/confirmed/`, alongside a GA4 `booking_confirmed`
+event. Until the variable is set, the booking flow reports to GA4 only and sends
+Google Ads nothing — no broken or empty conversion is sent in the meantime.
+
+## Step 7 — Set the env vars
+
+Five variables, same names everywhere:
 
 | Variable | Example value | From |
 |---|---|---|
@@ -79,6 +101,7 @@ Four variables, same names everywhere:
 | `PUBLIC_AW_ID` | `AW-XXXXXXXXXX` | Step 3/4 |
 | `PUBLIC_AW_CALL_LABEL` | `AbC-D_efGhIjKlMnOp` | Step 4 |
 | `PUBLIC_AW_FORM_LABEL` | `QrS-T_uvWxYzAbCdEf` | Step 5 |
+| `PUBLIC_AW_BOOKING_LABEL` | `UvW-X_yzAbCdEfGhIj` | Step 6 |
 
 **Vercel (production):**
 
@@ -87,16 +110,17 @@ vercel env add PUBLIC_GA4_ID production
 vercel env add PUBLIC_AW_ID production
 vercel env add PUBLIC_AW_CALL_LABEL production
 vercel env add PUBLIC_AW_FORM_LABEL production
+vercel env add PUBLIC_AW_BOOKING_LABEL production
 ```
 
 (or Dashboard → Project → Settings → Environment Variables). Add to
 **Production only** — leaving preview/dev unset keeps test traffic out of your
 conversion data.
 
-**Local testing (optional):** add the same four lines to `.env.local`
+**Local testing (optional):** add the same five lines to `.env.local`
 (see `.env.example`), run `npm run dev`, and check that the gtag script loads.
 
-## Step 7 — Redeploy
+## Step 8 — Redeploy
 
 Env vars are baked in at build time (static site), so trigger a new deploy:
 
@@ -106,7 +130,7 @@ vercel --prod
 
 or push any commit to `main`.
 
-## Step 8 — Verify
+## Step 9 — Verify
 
 1. **Tag present**: open yegrestoration.ca → view source → search for
    `googletagmanager.com/gtag/js`. Should appear exactly once.
@@ -116,11 +140,15 @@ or push any commit to `main`.
 3. **Form event**: submit a test lead → in browser devtools console run
    `dataLayer` → the array should contain a `conversion` and a `generate_lead`
    event. In GA4: Reports → Realtime shows `generate_lead`.
-4. **Number swap**: click one of your own ads (yes, it costs a click), and
+4. **Booking event**: complete a test booking → you land on `/book/confirmed/`
+   → run `dataLayer` in the console: it should contain a `conversion` and a
+   `booking_confirmed` event. **Reload the page** — neither should appear a
+   second time. In GA4: Reports → Realtime shows `booking_confirmed`.
+5. **Number swap**: click one of your own ads (yes, it costs a click), and
    confirm the phone number displayed on the landing page changes to a Google
    forwarding number. Call it briefly — within ~3 hours the call shows in
    Ads → Conversions.
-5. **Ads diagnostics**: Tools → Conversions → each action's status should move
+6. **Ads diagnostics**: Tools → Conversions → each action's status should move
    from "Inactive/Unverified" to **"Recording conversions"** within 24–48 h of
    the first real conversion.
 

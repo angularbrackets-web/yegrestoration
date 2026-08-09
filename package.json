@@ -17,6 +17,7 @@
     "verify:booking:payload": "tsx scripts/verify-booking-payload.ts",
     "verify:booking:commit": "tsx scripts/verify-booking-commit.ts",
     "verify:booking:form": "tsx scripts/verify-booking-form.ts",
+    "verify:booking:confirmation": "tsx scripts/verify-booking-confirmation.ts",
     "verify:booking:smoke": "tsx scripts/verify-booking-smoke.ts"
   },
   "dependencies": {

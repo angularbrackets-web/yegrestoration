@@ -132,6 +132,24 @@ when the token is minted.
   both files into `process.env` and passes that environment to the dev server it
   spawns — so the scripted gate is the reproducible path, and a hand-started
   `npx astro dev` is the one that needs `export`s.
+- **`PUBLIC_AW_BOOKING_LABEL` is unset, so booked assessments report to GA4 but
+  not to Google Ads.** Added in BK-04. It needs a *new conversion action* in the
+  client's Ads account (runbook Step 6) as well as the Vercel variable, so it is
+  not a copy-paste of an existing value. Until both exist the booking funnel is
+  invisible to Ads bidding while looking tracked in GA4 — which is the failure
+  mode worth naming, because nothing is broken enough to notice (severity:
+  medium, it is the conversion the whole booking system exists to produce;
+  owner: BK-11).
+- **`import.meta.env.PUBLIC_*` must be read as a literal expression, never
+  through a helper.** Vite substitutes these at build time by matching the
+  source text, so `readEnv('PUBLIC_AW_ID')` or `env[name]` compiles to a lookup
+  on an object that does not exist in the client bundle, and the value silently
+  becomes `undefined` in production while working in dev. This is the *opposite*
+  of the BK-12 rule for server-side vars, and the two are easy to confuse:
+  `readEnv` for anything the server reads, bare `import.meta.env.PUBLIC_X` for
+  anything the browser reads. Verified in BK-04 by building with a test value
+  and finding it inlined in `dist/client/_astro/booking-form.*.js` (severity:
+  low as long as nobody "tidies" it; owner: none, documented here).
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
   (severity: doc-level — every consumer wraps them in `new Date(...)`, which
   takes either; found in BK-01, owner: BK-10, the next ticket that touches
@@ -178,7 +196,7 @@ Predates this process, so it has no ticket file.
 | BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | ✅ committed |
 | BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | ✅ committed |
 | BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | ✅ committed |
-| BK-04 | Confirmation page, success state, conversion event | Light | not started |
+| BK-04 | Confirmation page, success state, conversion event | Light | ✅ committed |
 | BK-12 | Typecheck gate covers `.astro` and `.svelte` | Light | ✅ committed |
 
 BK-12 existed because `tsc --noEmit` never looks inside `.astro` or `.svelte`

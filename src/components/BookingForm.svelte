@@ -20,12 +20,15 @@
   import {
     ALLOWED_UPLOAD_TYPES,
     BOOKING_AVAILABILITY_ENDPOINT,
+    BOOKING_CONFIRMED_PATH,
     BOOKING_CREATE_ENDPOINT,
     BOOKING_DRAFT_ENDPOINT,
     BOOKING_UPLOAD_ENDPOINT,
     MAX_FILES_PER_BOOKING,
     MAX_FILE_BYTES,
   } from '../lib/booking-config';
+  import type { Confirmation } from '../lib/booking-confirmation';
+  import { reportBookingConversion, storeConfirmation } from '../lib/booking-handoff';
   import type { AvailableDate, AvailableSlot } from '../lib/booking-availability';
   import { MAX_FIELD_LENGTHS } from '../lib/booking-payload';
   import { buildUploadPathname, formatBytes } from '../lib/booking-uploads';
@@ -90,11 +93,24 @@
   let uploadsInFlight = $state(0);
 
   let submitting = $state(false);
-  let result = $state<{ id: number; slotLabel: string } | null>(null);
+  /**
+   * Only ever set when the handoff to `/book/confirmed/` could not happen.
+   * The happy path navigates; this is the card that keeps a committed booking
+   * on screen when `sessionStorage` refuses to hold it. See BK-04.
+   */
+  let result = $state<Confirmation | null>(null);
 
   // Disabled until hydration: a pre-hydration submit does a native GET
   // navigation with no handler attached and silently drops everything.
   let hydrated = $state(false);
+
+  /**
+   * Set once the booking is committed and the browser is on its way to
+   * `/book/confirmed/`. The unload is not instant, and `submitting` is cleared
+   * in `finally` — without this the button re-enables for the window in
+   * between, and a second click books a second appointment.
+   */
+  let leaving = $state(false);
 
   const guard = createSubmitGuard();
 
@@ -111,7 +127,7 @@
     dates.flatMap((d) => d.slots).find((s) => s.start === values.slotStart) ?? null,
   );
   const selectedDay = $derived(dates.find((d) => d.date === selectedDate) ?? null);
-  const busy = $derived(submitting || uploadsInFlight > 0);
+  const busy = $derived(submitting || leaving || uploadsInFlight > 0);
 
   onMount(() => {
     hydrated = true;
@@ -318,6 +334,9 @@
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
+    // The booking is committed and the page is unloading. Nothing below this
+    // line may run again, whatever the button currently looks like.
+    if (leaving) return;
     formMessage = '';
 
     const found = ([1, 2, 3] as Step[]).flatMap((s) => validateStep(s, values, SERVICE_IDS));
@@ -351,7 +370,28 @@
               `Booking ${outcome.id}: server attached ${outcome.filesAttached} files, browser uploaded ${uploaded}.`,
             );
           }
-          result = { id: outcome.id, slotLabel: outcome.slotLabel };
+          const confirmation: Confirmation = {
+            id: outcome.id,
+            slotLabel: outcome.slotLabel,
+            address: [values.address.trim(), values.city.trim()].filter(Boolean).join(', '),
+          };
+
+          if (storeConfirmation(confirmation)) {
+            leaving = true;
+            // The conversion is reported on the confirmed page, keyed on the
+            // booking id — not here as well, or one booking counts twice.
+            // `replace`, not `assign`: Back from the confirmation must not land
+            // on a fresh empty form, which is how one job gets booked twice.
+            window.location.replace(BOOKING_CONFIRMED_PATH);
+            break;
+          }
+
+          // sessionStorage refused the write. The booking is committed either
+          // way, so navigating would send them to a page with nothing to show
+          // that bounces straight back to an empty form. Keep the BK-03 card,
+          // and report from here — nothing else is going to.
+          result = confirmation;
+          reportBookingConversion(confirmation.id);
           break;
         }
         case 'fields':
@@ -409,7 +449,8 @@
       <h3 class="font-display font-bold text-2xl text-yeg-text mb-2">You're booked</h3>
       <p class="text-yeg-text-secondary mb-1">{result.slotLabel}</p>
       <p class="text-yeg-text-secondary text-sm">
-        Reference #{result.id}. We'll confirm shortly. To change or cancel, call or text
+        Reference #{result.id}. The visit takes about 30 minutes. To cancel or reschedule, call or
+        text
         <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{PHONE_DISPLAY}</a>.
       </p>
     </div>
@@ -716,7 +757,11 @@
           {:else}
             <button type="submit" class="cta-primary disabled:opacity-60 disabled:cursor-not-allowed"
               disabled={busy || !hydrated}>
-              {submitting ? 'Booking…' : uploadsInFlight > 0 ? 'Uploading…' : 'Confirm booking'}
+              {submitting || leaving
+                ? 'Booking…'
+                : uploadsInFlight > 0
+                  ? 'Uploading…'
+                  : 'Confirm booking'}
             </button>
           {/if}
         </div>

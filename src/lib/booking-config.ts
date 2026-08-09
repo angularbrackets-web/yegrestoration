@@ -98,12 +98,18 @@ export const DRAFT_RATE_LIMIT_PER_HOUR = 20;
 export const BOOKING_RATE_LIMIT_PER_HOUR = 30;
 
 // ---------------------------------------------------------------------------
-// Endpoints
+// Paths and endpoints
 //
 // The trailing slashes are required. astro.config.mjs sets
 // trailingSlash: 'always', so the unslashed form answers with a 308 redirect
 // rather than running the function.
 // ---------------------------------------------------------------------------
+
+/** The booking form. Where a confirmed page with nothing to show sends people. */
+export const BOOKING_PATH = '/book/';
+
+/** Where a committed booking lands. Both `noindex` and out of the sitemap. */
+export const BOOKING_CONFIRMED_PATH = '/book/confirmed/';
 
 export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
