@@ -71,8 +71,15 @@ function str(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Digits only, 10 or 11 with a leading 1 — North American, which is all this business serves. */
-function isPlausiblePhone(value: string): boolean {
+/**
+ * Digits only, 10 or 11 with a leading 1 — North American, which is all this
+ * business serves.
+ *
+ * Exported so BK-03's island validates with the *same* predicate rather than a
+ * second copy of the rule. Two hand-built copies drifting apart is the failure
+ * this module's header already warns about.
+ */
+export function isPlausiblePhone(value: string): boolean {
   const digits = value.replace(/\D/g, '');
   return digits.length === 10 || (digits.length === 11 && digits.startsWith('1'));
 }
@@ -82,7 +89,7 @@ function isPlausiblePhone(value: string): boolean {
  * optional here anyway — the phone number is how this business actually calls
  * people back.
  */
-function isPlausibleEmail(value: string): boolean {
+export function isPlausibleEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= MAX_FIELD_LENGTHS.email;
 }
 

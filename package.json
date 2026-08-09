@@ -15,7 +15,9 @@
     "verify:availability": "tsx scripts/verify-availability.ts",
     "verify:availability:db": "tsx scripts/verify-availability-db.ts",
     "verify:booking:payload": "tsx scripts/verify-booking-payload.ts",
-    "verify:booking:commit": "tsx scripts/verify-booking-commit.ts"
+    "verify:booking:commit": "tsx scripts/verify-booking-commit.ts",
+    "verify:booking:form": "tsx scripts/verify-booking-form.ts",
+    "verify:booking:smoke": "tsx scripts/verify-booking-smoke.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.2",

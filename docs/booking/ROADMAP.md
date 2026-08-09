@@ -56,8 +56,13 @@ when the token is minted.
 - **Migrations are not atomic** — Neon's HTTP driver has no cross-call transaction.
   Safe only because every statement is IF NOT EXISTS and the ledger row is written
   last.
-- **The Blob store is private.** Admin viewing needs an authenticated function
-  proxy (BK-09), not a direct URL.
+- **The Blob store is private, and enforces it at the store level.** Admin
+  viewing needs an authenticated function proxy (BK-09), not a direct URL.
+  Confirmed in BK-03: an unauthenticated GET of an uploaded blob URL answers
+  **403**, and uploading with `access: 'public'` fails outright with "Cannot use
+  public access on a private store." So although `onBeforeGenerateToken` cannot
+  constrain `access` (it is a client-set header the handleUpload route never
+  sees), a hostile client still cannot publish anything.
 - **Writing verification scripts target the Neon dev branch, never production.**
   `DATABASE_URL_DEV` in `.env` is the dev branch (`br-broad-dream-ap0sdq6f` on
   project `purple-bar-39114890`, live since 2026-08-07); `DATABASE_URL` stays
@@ -107,6 +112,26 @@ when the token is minted.
   `blog/[slug].astro` and a deprecated `z.string().email()` in `api/contact.ts`
   (severity: low, real a11y defects on live pages but none in the booking flow;
   owner: BK-10, the ticket that already rewrites `ContactForm.svelte`).
+- **A real value in `.env` does not reach `astro dev` when `.env.local` has the
+  same key as `""`.** Vite merges the two into one `import.meta.env` with
+  `.env.local` winning, so the blank shadows the real value *before* `readEnv`
+  ever sees it — `readEnv`'s empty-string rule cannot help, because it is handed
+  the merged result. BK-02's assumption that "a local `BOOKING_DRAFT_SECRET` in
+  `.env` makes token signing work locally" holds for `tsx` scripts (whose own
+  `loadEnv` skips empty values and writes `process.env`) but **not** for the dev
+  server: `POST /api/booking/draft/` 500s under a plain `npx astro dev`
+  (severity: low, dev-only and it fails closed with the right message; owner:
+  BK-11).
+- **Third-party SDKs read `process.env`, which `astro dev` never populates.**
+  Vite fills only `import.meta.env`, so `@vercel/blob`'s
+  `BLOB_READ_WRITE_TOKEN` lookup finds nothing and `/api/booking/upload-token/`
+  400s in local dev even though `.env.local` has a real token. Vercel populates
+  `process.env` in production, so this is dev-only. Same family as the entry
+  above and the same owner (BK-11).
+  **Both are already handled by `npm run verify:booking:smoke`**, which loads
+  both files into `process.env` and passes that environment to the dev server it
+  spawns — so the scripted gate is the reproducible path, and a hand-started
+  `npx astro dev` is the one that needs `export`s.
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
   (severity: doc-level — every consumer wraps them in `new Date(...)`, which
   takes either; found in BK-01, owner: BK-10, the next ticket that touches
@@ -152,7 +177,7 @@ Predates this process, so it has no ticket file.
 | --- | --- | --- | --- |
 | BK-01 | Availability computation + `GET /api/booking/availability/` | Standard | ✅ committed |
 | BK-02 | Booking commit endpoint — validation, slot conflict, file claim | Heavy | ✅ committed |
-| BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | not started |
+| BK-03 | Booking form island — steps, picker, insurance toggle, upload, consent | Standard | ✅ committed |
 | BK-04 | Confirmation page, success state, conversion event | Light | not started |
 | BK-12 | Typecheck gate covers `.astro` and `.svelte` | Light | ✅ committed |
 

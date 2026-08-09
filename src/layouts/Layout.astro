@@ -20,6 +20,13 @@ interface Props {
   updatedDate?: Date;
   /** LCP image preloads — pass only images actually rendered above the fold on this page. */
   preloadImages?: PreloadImage[];
+  /**
+   * Keep the page out of search results. Defaults to false, so no existing page
+   * changes. Excluding a page from the sitemap does NOT stop indexing — a
+   * sitemap is a hint about what to crawl, not a rule about what to keep — so a
+   * page that must not rank yet needs this as well.
+   */
+  noindex?: boolean;
 }
 
 const {
@@ -30,6 +37,7 @@ const {
   publishDate,
   updatedDate,
   preloadImages = [],
+  noindex = false,
 } = Astro.props;
 
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
@@ -73,7 +81,9 @@ const ogImageURL = new URL(ogImage, Astro.site);
     <!-- Robots + Geo -->
     <meta
       name="robots"
-      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+      content={noindex
+        ? 'noindex, nofollow'
+        : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1'}
     />
     <meta name="geo.region" content="CA-AB" />
     <meta name="geo.placename" content="Edmonton, Alberta" />

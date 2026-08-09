@@ -17,7 +17,12 @@ export default defineConfig({
   compressHTML: true,
   integrations: [
     svelte(),
-    sitemap({ filter: (page) => !page.includes('/admin') }),
+    // /book is live but unannounced — the contact form is still the advertised
+    // path, and a booking page that ranks before cutover splits the funnel.
+    // BK-10 removes this alongside the layout's noindex.
+    // Exact match, not a substring: `includes('/book')` would silently also
+    // exclude any future /bookings… path.
+    sitemap({ filter: (page) => !page.includes('/admin') && !page.endsWith('/book/') }),
     mdx(),
   ],
   output: 'static',

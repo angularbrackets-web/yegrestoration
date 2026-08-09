@@ -15,7 +15,13 @@ import { ALLOWED_UPLOAD_TYPES, UPLOAD_EXTENSIONS } from './booking-config';
 
 export const UPLOAD_ROOT = 'bookings';
 
-const EXTENSION_TO_TYPE: Record<string, string> = Object.fromEntries(
+/**
+ * Reverse of `UPLOAD_EXTENSIONS`. Exported because the browser needs it too:
+ * some browsers report `file.type` as `''` for HEIC, and the island falls back
+ * to the filename extension rather than telling an iPhone owner their photo is
+ * unsupported.
+ */
+export const EXTENSION_TO_TYPE: Record<string, string> = Object.fromEntries(
   Object.entries(UPLOAD_EXTENSIONS).map(([type, ext]) => [ext, type]),
 );
 

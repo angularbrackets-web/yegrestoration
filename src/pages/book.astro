@@ -1,0 +1,49 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.svelte';
+import Footer from '../components/Footer.astro';
+import BookingForm from '../components/BookingForm.svelte';
+
+const title = 'Book a Free Assessment | YEG Restoration Edmonton';
+const description =
+  'Pick a time for a free on-site restoration assessment in Edmonton. About 30 minutes, no obligation.';
+---
+
+<!--
+  Unannounced until BK-10 cuts the contact form over: noindex here, and
+  excluded from the sitemap in astro.config.mjs. Both come off together.
+-->
+<Layout title={title} description={description} noindex={true}>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main class="pt-28 pb-20">
+    <div class="max-w-3xl mx-auto px-6">
+      <header class="mb-8">
+        <p class="text-xs uppercase tracking-wider text-yeg-text-secondary mb-2">
+          Free assessment
+        </p>
+        <h1 class="font-display font-bold text-3xl sm:text-4xl text-yeg-text mb-3">
+          Book a time that works for you
+        </h1>
+        <p class="text-yeg-text-secondary">
+          An IICRC-certified tech comes out, looks at the damage, and tells you what it takes to
+          put it right. About 30 minutes, no obligation. Flooding right now?
+          <a class="text-yeg-amber-deep font-semibold" href="tel:+17804793285">
+            Call (780) 479-3285
+          </a> — we answer 24/7.
+        </p>
+      </header>
+
+      <!--
+        client:load, not client:visible: the form is the entire page and sits
+        above the fold, and its submit button stays disabled until hydration.
+      -->
+      <BookingForm client:load />
+    </div>
+  </main>
+
+  <Footer />
+</Layout>
