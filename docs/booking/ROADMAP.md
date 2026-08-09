@@ -162,7 +162,7 @@ Do not skip it.
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-05 | Customer confirmation email + internal notification (Resend) | Standard | not started |
-| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Heavy | blocked — SMS provider undecided |
+| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Heavy | blocked — Twilio number in verification |
 
 ### P4 — Admin
 
@@ -181,10 +181,27 @@ Do not skip it.
 
 ## Open questions for the client
 
-1. **SMS provider and budget** (blocks BK-06). Twilio is the default; a Canadian
-   long code or toll-free number needs verification lead time. Email-only reminders
-   are the fallback if SMS is not worth the cost.
-2. **Confirmation and reminder wording**, including what the customer is told to
-   have ready for an assessment.
-3. **Cancellation/reschedule policy** — is there a self-service cancel link, or is
-   cancelling a phone call? Affects BK-04 and BK-05.
+All three were answered on 2026-08-08. Kept here as decisions rather than
+deleted, because BK-04/05/06 are written against them.
+
+1. **SMS provider — settled: Twilio.** Number verification is running in
+   parallel. BK-06 stays blocked *only* until the number is live; the provider
+   choice is no longer open. Email-only reminders are no longer the fallback.
+2. **Confirmation and reminder wording — settled: the implementer drafts it,
+   the client edits later.** Constraints, which are not the implementer's to
+   change:
+   - Confirmation carries date/time in America/Edmonton, the address, that the
+     visit runs about 30 minutes, and a "have ready" list: access to the
+     affected areas, photos or a list of the damage, insurance policy and claim
+     numbers if filing, someone 18+ on site, pets secured.
+   - Reminder carries date/time, the address, and the reschedule phone number.
+     Nothing else.
+   - **Locked rule:** `policy_number` and `claim_number` never appear in an SMS
+     body. The confirmation may *ask* the customer to have them ready; it may
+     never print them. This restates the Locked data-model rule at the copy
+     level so a copy edit cannot quietly break it.
+3. **Cancellation — settled: phone-in at launch.** No self-service cancel link.
+   Confirmation and reminder both say "call or text to cancel or reschedule".
+   Freeing the slot is an admin status edit (BK-08). Self-service is deferred
+   until volume justifies it, so BK-04 ships no cancel token and BK-05 embeds
+   no cancel URL.
