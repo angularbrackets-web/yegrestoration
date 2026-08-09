@@ -18,6 +18,7 @@
     "verify:booking:commit": "tsx scripts/verify-booking-commit.ts",
     "verify:booking:form": "tsx scripts/verify-booking-form.ts",
     "verify:booking:confirmation": "tsx scripts/verify-booking-confirmation.ts",
+    "verify:booking:email": "tsx scripts/verify-booking-email.ts",
     "verify:booking:smoke": "tsx scripts/verify-booking-smoke.ts"
   },
   "dependencies": {

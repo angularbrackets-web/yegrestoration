@@ -77,3 +77,38 @@ export async function insertBooking(
 
   return rows[0] ?? null;
 }
+
+/**
+ * Record which of a booking's two notifications actually went out.
+ *
+ * Lives here beside `insertBooking` rather than inline in the route so that
+ * `scripts/verify-booking-smoke.ts` can run the *same statement* against the
+ * dev branch. That matters more than tidiness: the two `CASE WHEN ${boolean}`
+ * parameters are sent untyped by the Neon HTTP driver and their type is inferred
+ * from context, and "it should infer boolean" is exactly the kind of claim about
+ * a third-party client that this ticket refused to make about Resend. Without a
+ * shared symbol the statement would be executed by no gate at all — the email
+ * verify injects a fake sender and never touches SQL, and the smoke run mutes
+ * notifications so both outcomes are 'skipped'.
+ *
+ * Advisory only. Whether it succeeds changes nothing the customer sees, which is
+ * why the caller must not let it decide the response.
+ */
+export async function stampNotifications(
+  sql: Sql,
+  id: number,
+  sent: { customer: boolean; internal: boolean },
+  at: Date,
+): Promise<void> {
+  if (!sent.customer && !sent.internal) return;
+
+  const stamp = at.toISOString();
+  await sql`
+    UPDATE appointments
+    SET confirmation_sent_at = CASE WHEN ${sent.customer}
+          THEN ${stamp}::timestamptz ELSE confirmation_sent_at END,
+        internal_notified_at = CASE WHEN ${sent.internal}
+          THEN ${stamp}::timestamptz ELSE internal_notified_at END
+    WHERE id = ${id}
+  `;
+}

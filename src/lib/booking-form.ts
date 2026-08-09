@@ -25,6 +25,7 @@ import {
   MAX_FILES_PER_BOOKING,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
+  SUPPORT_PHONE,
 } from './booking-config';
 import {
   MAX_FIELD_LENGTHS,
@@ -338,7 +339,18 @@ export function readAvailabilityResponse(status: number, body: unknown): Availab
 // ---------------------------------------------------------------------------
 
 export type CommitOutcome =
-  | { kind: 'booked'; id: number; slotLabel: string; filesAttached: number }
+  | {
+      kind: 'booked';
+      id: number;
+      slotLabel: string;
+      filesAttached: number;
+      /**
+       * Whether the server actually sent the confirmation email. False is the
+       * safe answer and the default: a customer told "check your email" who has
+       * nothing is a support call, the reverse is a pleasant surprise.
+       */
+      emailSent: boolean;
+    }
   /** Per-field errors that map to a visible input. */
   | { kind: 'fields'; errors: FieldError[]; step: Step }
   /** The slot went away. Refetch availability and go back to step 1. */
@@ -348,7 +360,14 @@ export type CommitOutcome =
   /** Anything with no field to attach it to. Shown at form level. */
   | { kind: 'formError'; message: string };
 
-export const SUPPORT_PHONE = '(780) 479-3285';
+/**
+ * Re-exported, not defined here.
+ *
+ * It moved to `booking-config.ts` in BK-05 so the email builder could reach it
+ * without importing this module's validation machinery. The re-export keeps
+ * BK-03's and BK-04's call sites untouched.
+ */
+export { SUPPORT_PHONE };
 
 /**
  * Every message the island can show for a failed commit.
@@ -388,6 +407,10 @@ export function mapCommitResponse(status: number, body: unknown): CommitOutcome 
       id: typeof data.id === 'number' ? data.id : 0,
       slotLabel: typeof data.slotLabel === 'string' ? data.slotLabel : '',
       filesAttached: typeof data.filesAttached === 'number' ? data.filesAttached : 0,
+      // Only a literal `true` counts. A missing field, a string "true", or a
+      // response from a build that predates BK-05 all mean "we cannot claim an
+      // email was sent" — and claiming it wrongly is the expensive direction.
+      emailSent: data.emailSent === true,
     };
   }
 

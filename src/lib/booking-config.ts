@@ -115,3 +115,42 @@ export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
 export const BOOKING_DRAFT_ENDPOINT = '/api/booking/draft/';
 export const BOOKING_UPLOAD_ENDPOINT = '/api/booking/upload-token/';
+
+// ---------------------------------------------------------------------------
+// Contact points and outbound mail
+//
+// These duplicate `BUSINESS` in `src/data/services.ts` on purpose. That module
+// imports `.jpg` assets, so it cannot be loaded under `tsx` — putting these
+// there would put the whole email builder out of reach of a verify script.
+// ---------------------------------------------------------------------------
+
+/** The number every customer-facing message tells people to call or text. */
+export const SUPPORT_PHONE = '(780) 479-3285';
+
+/** Same sender identity the contact form uses, so no new domain verification. */
+export const BOOKING_EMAIL_FROM = 'YEG Restoration <noreply@yegrestoration.ca>';
+
+/**
+ * Where a reply to a confirmation lands. People *do* reply to booking
+ * confirmations, which is the only thing that makes a `noreply` sender
+ * acceptable above.
+ */
+export const BOOKING_EMAIL_REPLY_TO = 'info@yegrestoration.ca';
+
+/** Who hears that a crew is expected somewhere. Settled with the user 2026-08-09. */
+export const BOOKING_INTERNAL_TO = 'info@yegrestoration.ca';
+
+/**
+ * Total wall-clock budget for everything that happens AFTER the appointment row
+ * is inserted: building the messages, sending both, and stamping the result.
+ *
+ * One budget for the whole block rather than one timer per send. Two serial
+ * 5-second races would stack on top of the rate-limit query, two availability
+ * queries and the insert; nothing in this repo raises the function limit
+ * (`vercel.json` has no `functions` block, `astro.config.mjs` sets no adapter
+ * `maxDuration`), so the platform default applies and blowing it returns a
+ * platform 504 — which `mapCommitResponse` shows the customer as "something
+ * went wrong", for a booking that committed. Sized against the lowest
+ * documented Vercel default (10s); BK-11 confirms the plan's real limit.
+ */
+export const POST_COMMIT_BUDGET_MS = 5000;

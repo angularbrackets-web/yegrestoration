@@ -311,6 +311,21 @@ console.log('\nCommit response mapping');
   check(booked.kind === 'booked' && booked.id === 7, 'the appointment id is carried');
   check(booked.kind === 'booked' && booked.filesAttached === 2, 'filesAttached is carried');
 
+  // emailSent decides whether the confirmation page tells the visitor to check
+  // their inbox, so only a literal `true` may produce `true`. Everything else —
+  // absent (a build that predates BK-05), a string, a truthy non-boolean — must
+  // read as false: promising an email that never arrives is a support call.
+  check(booked.kind === 'booked' && booked.emailSent === false, 'emailSent defaults to false when absent');
+  check(
+    mapCommitResponse(201, { id: 7, emailSent: true }).kind === 'booked' &&
+      (mapCommitResponse(201, { id: 7, emailSent: true }) as { emailSent: boolean }).emailSent === true,
+    'emailSent is carried when the server says true',
+  );
+  for (const value of ['true', 1, {}, null] as const) {
+    const outcome = mapCommitResponse(201, { id: 7, emailSent: value }) as { emailSent: boolean };
+    check(outcome.emailSent === false, `emailSent of ${JSON.stringify(value)} does not read as true`);
+  }
+
   const fields = mapCommitResponse(422, {
     error: 'Please check the highlighted fields.',
     fields: [{ field: 'phone', message: 'Enter a 10-digit phone number.' }],

@@ -66,6 +66,10 @@ export type Appointment = {
   /** Timestamp of CASL opt-in. Null means no consent — do not send SMS. */
   sms_consent_at: Date | null;
   reminder_sent_at: Date | null;
+  /** Set only when the customer's confirmation email actually sent. NULL = never sent. */
+  confirmation_sent_at: Date | null;
+  /** Set only when the office notification actually sent. NULL = nobody was told. */
+  internal_notified_at: Date | null;
   admin_notes: string | null;
   cancelled_at: Date | null;
   created_at: Date;

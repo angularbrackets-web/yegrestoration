@@ -32,6 +32,15 @@ export type Confirmation = {
   slotLabel: string;
   /** One display string — `address, city`. Rendered, never parsed. */
   address: string;
+  /**
+   * Whether the server said it sent the confirmation email.
+   *
+   * Never optional in the type, always defaulted to `false` on read: a payload
+   * stored by the build that shipped before BK-05 has no such field, and the
+   * page must render for that visitor rather than bounce them to an empty form.
+   * One shape means the component has one condition to write.
+   */
+  emailSent: boolean;
 };
 
 export function serializeConfirmation(confirmation: Confirmation): string {
@@ -67,6 +76,9 @@ export function readConfirmation(raw: string | null): Confirmation | null {
     id: record.id,
     slotLabel: record.slotLabel,
     address: typeof record.address === 'string' ? record.address : '',
+    // Only a literal `true`. Absent, malformed, or written by a pre-BK-05
+    // build all mean "do not tell this visitor we emailed them".
+    emailSent: record.emailSent === true,
   };
 }
 

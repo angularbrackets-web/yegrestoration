@@ -26,6 +26,7 @@ const BOOKING: Confirmation = {
   id: 481,
   slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
   address: '123 Maple St, Edmonton',
+  emailSent: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,21 @@ console.log('\nReading the stored confirmation');
   const thin = readConfirmation(JSON.stringify({ id: 0, slotLabel: '' }));
   check(thin !== null, 'a committed booking with no label still renders');
   check(thin?.address === '', 'a missing address reads as empty, not as a rejection');
+
+  // emailSent gates the "we've emailed you" line, so it must never be inferred.
+  // A payload stored by the build that shipped before BK-05 has no such field
+  // and must still render — as a confirmation that promises no email.
+  check(thin?.emailSent === false, 'a payload with no emailSent renders without promising an email');
+  check(
+    readConfirmation(serializeConfirmation(BOOKING))?.emailSent === true,
+    'emailSent round-trips when the server sent the confirmation',
+  );
+  for (const value of ['true', 1, {}, null]) {
+    check(
+      readConfirmation(JSON.stringify({ id: 1, slotLabel: 'x', emailSent: value }))?.emailSent === false,
+      `an emailSent of ${JSON.stringify(value)} does not promise an email`,
+    );
+  }
 
   console.log('  shape validated; only "no booking here" reads as null');
 }

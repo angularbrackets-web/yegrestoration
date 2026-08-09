@@ -2,14 +2,16 @@ import type { APIRoute } from 'astro';
 
 export const prerender = false;
 
-import { BOOKING_RATE_LIMIT_PER_HOUR } from '../../../lib/booking-config';
+import { BOOKING_RATE_LIMIT_PER_HOUR, POST_COMMIT_BUDGET_MS } from '../../../lib/booking-config';
 import {
   blackoutQueryRange,
   bookedQueryRange,
   isSlotBookable,
 } from '../../../lib/booking-availability';
-import { insertBooking } from '../../../lib/booking-commit';
-import { parseBookingPayload } from '../../../lib/booking-payload';
+import { insertBooking, stampNotifications } from '../../../lib/booking-commit';
+import { planBookingNotifications } from '../../../lib/booking-email';
+import { notifyAndStamp, withDeadline } from '../../../lib/booking-notify';
+import { parseBookingPayload, type BookingPayload } from '../../../lib/booking-payload';
 import { formatSlot, type DateKey } from '../../../lib/booking-time';
 import { verifyDraftToken } from '../../../lib/draft-token';
 import { getDb, SERVICE_LABELS } from '../../../lib/db';
@@ -126,12 +128,16 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     // only thing that decides a booking did not happen.
     if (created === null) return slotTaken();
 
+    const slotLabel = formatSlot(payload.slotStart);
+    const emailSent = await notify(sql, created.id, slotLabel, payload, created.files);
+
     return json(
       {
         id: created.id,
         slotStart: payload.slotStart.toISOString(),
-        slotLabel: formatSlot(payload.slotStart),
+        slotLabel,
         filesAttached: created.files,
+        emailSent,
       },
       201,
     );
@@ -142,6 +148,77 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     return json({ error: 'Something went wrong. Please call us instead.' }, 500);
   }
 };
+
+/**
+ * Send the two booking notifications and record what happened. Returns whether
+ * the customer's confirmation went out.
+ *
+ * **This function cannot fail the request.** By the time it runs the
+ * appointment row exists and the slot is gone, so anything that escaped here
+ * would reach the caller's `catch` and answer 500 for a booking that committed
+ * — the customer books again, or phones to report a failure that did not
+ * happen. That is a worse outcome than every failure this function swallows,
+ * which is why it swallows all of them and returns `false`.
+ *
+ * The whole block runs under ONE deadline covering both sends and both stamps.
+ * Per-operation timers would stack on a path that already ran a rate-limit
+ * query, two availability queries and the insert; exceeding the platform's
+ * function limit returns a 504 that the island renders as "something went
+ * wrong". See POST_COMMIT_BUDGET_MS.
+ */
+async function notify(
+  sql: ReturnType<typeof getDb>,
+  id: number,
+  slotLabel: string,
+  payload: BookingPayload,
+  filesAttached: number,
+): Promise<boolean> {
+  try {
+    const plan = planBookingNotifications({
+      id,
+      slotLabel,
+      name: payload.name,
+      phone: payload.phone,
+      email: payload.email,
+      // The fallback is unreachable: `parseBookingPayload` is handed
+      // `Object.keys(SERVICE_LABELS)` as the allowed set, so `service` is always
+      // a key here. Kept so the two cannot drift into a `undefined` in a subject
+      // line, not because raw user input can reach one.
+      serviceLabel: SERVICE_LABELS[payload.service] ?? payload.service,
+      description: payload.description,
+      address: payload.address,
+      city: payload.city,
+      postalCode: payload.postal_code,
+      paymentRoute: payload.payment_route,
+      insurerName: payload.insurer_name,
+      policyNumber: payload.policy_number,
+      claimNumber: payload.claim_number,
+      smsConsent: payload.smsConsent,
+      filesAttached,
+    });
+
+    return await withDeadline(
+      // Send-then-record, with the answer decided by the send. The stamp is
+      // awaited rather than fired and forgotten — the same reason the sends are
+      // inline, that post-response work is not guaranteed to run — and its
+      // failure is swallowed inside `notifyAndStamp`, where it is asserted.
+      // 'skipped' and 'failed' both leave NULL, which reads as "nobody was told".
+      notifyAndStamp(plan, {
+        stamp: (sent) =>
+          // Fresh clock, not the request's: this is when the send returned, and
+          // BK-07/BK-08 read these columns as timestamps.
+          stampNotifications(sql, id, sent, new Date()),
+      }),
+      POST_COMMIT_BUDGET_MS,
+      // The deadline's answer. A message that lands late is reported as unsent,
+      // which is wrong in the safe direction: the page then promises nothing.
+      false,
+    );
+  } catch (err) {
+    console.error(`Booking ${id} committed but notification failed:`, err);
+    return false;
+  }
+}
 
 /** Lost the race: the slot really was booked between the check and the insert. */
 function slotTaken() {

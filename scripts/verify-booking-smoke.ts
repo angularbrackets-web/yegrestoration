@@ -176,7 +176,22 @@ async function startDevServer() {
   await new Promise<void>((done, fail) => {
     const child = spawn('npx', ['astro', 'dev', '--port', String(PORT)], {
       cwd: root,
-      env: process.env,
+      // BOOKING_NOTIFY_DISABLED, or this script mails the client.
+      //
+      // It commits a real booking on every run. The customer address is
+      // smoke@example.com (RFC 2606, undeliverable), but BOOKING_INTERNAL_TO is
+      // info@yegrestoration.ca — a real inbox. Today the run is inert only by
+      // accident: `.env` has no RESEND_API_KEY and `.env.local` has it as "".
+      // Put a real key in `.env` — which `.env.example` invites — and every
+      // smoke run emails the client.
+      //
+      // Note what does NOT work: *removing* the key from this environment.
+      // `readEnv` falls back to `import.meta.env`, which Vite populates from the
+      // dotenv files INSIDE the spawned dev server, where this process cannot
+      // reach. A positive signal in `process.env` does work, because `readEnv`
+      // checks `process.env` first and a non-empty value wins — the same
+      // mechanism as the DATABASE_URL swap at the top of this file.
+      env: { ...process.env, BOOKING_NOTIFY_DISABLED: '1' },
       stdio: 'ignore',
     });
     child.on('error', fail);
@@ -355,6 +370,7 @@ try {
     id?: number;
     slotLabel?: string;
     filesAttached?: number;
+    emailSent?: boolean;
     error?: string;
   };
   check(createRes.status === 201, `commit must answer 201 (got ${createRes.status}: ${created.error ?? ''})`);
@@ -365,6 +381,70 @@ try {
 
   check(created.filesAttached === 1, `the response must report 1 attached file (got ${created.filesAttached})`);
   check(typeof created.slotLabel === 'string' && created.slotLabel.length > 0, 'a slot label must come back');
+
+  // The notification path answered without sending, and without disturbing the
+  // 201. This is the end-to-end half of BK-05's AC10: notifications are muted
+  // here (see the spawn call), so `true` would mean the mute failed — which is
+  // the assertion that stands between this script and the client's inbox.
+  check(
+    created.emailSent === false,
+    `emailSent must be false when notifications are disabled (got ${String(created.emailSent)})`,
+  );
+
+  // The stamp statement, against the real schema through the real driver.
+  //
+  // Nothing else runs it: verify:booking:email injects a fake sender and never
+  // touches SQL, and the commit above has notifications muted, so both outcomes
+  // are 'skipped' and the route's own call is short-circuited. The specific
+  // doubt is the two `CASE WHEN ${boolean}` parameters — the Neon HTTP driver
+  // sends them untyped and Postgres infers from context, and "it should infer
+  // boolean" is the kind of claim about a third-party client this ticket
+  // refused to make about Resend. So execute it and read the columns back.
+  {
+    const { stampNotifications } = await import('../src/lib/booking-commit');
+    const at = new Date();
+
+    await stampNotifications(sql, createdId, { customer: true, internal: false }, at);
+    let rows = (await sql`
+      SELECT confirmation_sent_at, internal_notified_at FROM appointments WHERE id = ${createdId}
+    `) as { confirmation_sent_at: Date | null; internal_notified_at: Date | null }[];
+    check(rows[0]?.confirmation_sent_at !== null, 'a sent confirmation stamps confirmation_sent_at');
+    check(rows[0]?.internal_notified_at === null, 'and leaves internal_notified_at alone');
+
+    // The CASE arms matter: a second stamp must not clear what the first wrote.
+    await stampNotifications(sql, createdId, { customer: false, internal: true }, at);
+    rows = (await sql`
+      SELECT confirmation_sent_at, internal_notified_at FROM appointments WHERE id = ${createdId}
+    `) as { confirmation_sent_at: Date | null; internal_notified_at: Date | null }[];
+    check(rows[0]?.confirmation_sent_at !== null, 'stamping the internal side preserves the customer stamp');
+    check(rows[0]?.internal_notified_at !== null, 'and sets internal_notified_at');
+
+    // The symmetric case. Without it the ELSE arm of internal_notified_at is
+    // covered by nothing — breaking it to NULL left this block green until this
+    // assertion existed, which is the whole point of the red-first rule.
+    await stampNotifications(sql, createdId, { customer: true, internal: false }, at);
+    rows = (await sql`
+      SELECT confirmation_sent_at, internal_notified_at FROM appointments WHERE id = ${createdId}
+    `) as { confirmation_sent_at: Date | null; internal_notified_at: Date | null }[];
+    check(rows[0]?.internal_notified_at !== null, 'stamping the customer side preserves the internal stamp');
+
+    console.log('  both stamp columns write through the driver without a type error');
+  }
+
+  // The mute rests entirely on readEnv preferring a non-empty process.env value
+  // over import.meta.env. Assert that invariant directly rather than inferring
+  // it: if the precedence in src/lib/env.ts is ever reversed, the check above
+  // starts passing for the wrong reason on a machine with no key configured,
+  // and starts mailing the client on one that has.
+  {
+    const { readEnv } = await import('../src/lib/env');
+    process.env.BOOKING_NOTIFY_DISABLED = '1';
+    check(
+      readEnv('BOOKING_NOTIFY_DISABLED') === '1',
+      'readEnv must prefer a non-empty process.env value — the mute depends on it',
+    );
+    delete process.env.BOOKING_NOTIFY_DISABLED;
+  }
 
   // Scoped to this slot: the dev branch is a copy-on-write snapshot of
   // production plus BK-02's hammer rows, so it is nowhere near empty.

@@ -28,6 +28,7 @@
     MAX_FILE_BYTES,
   } from '../lib/booking-config';
   import type { Confirmation } from '../lib/booking-confirmation';
+  import { EMAILED_LINE } from '../lib/booking-copy';
   import { reportBookingConversion, storeConfirmation } from '../lib/booking-handoff';
   import type { AvailableDate, AvailableSlot } from '../lib/booking-availability';
   import { MAX_FIELD_LENGTHS } from '../lib/booking-payload';
@@ -374,6 +375,7 @@
             id: outcome.id,
             slotLabel: outcome.slotLabel,
             address: [values.address.trim(), values.city.trim()].filter(Boolean).join(', '),
+            emailSent: outcome.emailSent,
           };
 
           if (storeConfirmation(confirmation)) {
@@ -453,6 +455,9 @@
         text
         <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{PHONE_DISPLAY}</a>.
       </p>
+      {#if result.emailSent}
+        <p class="text-yeg-text-secondary text-sm mt-2">{EMAILED_LINE}</p>
+      {/if}
     </div>
   {:else}
     <form onsubmit={handleSubmit} novalidate>

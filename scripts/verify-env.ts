@@ -112,6 +112,52 @@ console.log('\nDraft tokens without BOOKING_DRAFT_SECRET');
   console.log('  throws "BOOKING_DRAFT_SECRET is not configured"');
 }
 
+// ---------------------------------------------------------------------------
+console.log('\nBooking notifications without RESEND_API_KEY');
+// ---------------------------------------------------------------------------
+{
+  // The fourth readEnv site, and the one that must NOT throw: it runs after the
+  // appointment row exists, where an exception becomes a 500 for a booking that
+  // committed. It reports 'failed' instead — and it has to reach that answer
+  // before `new Resend(key)`, which is the one SDK call that does throw on a
+  // falsy key.
+  const { sendBookingNotifications } = await import('../src/lib/booking-notify');
+  const { planBookingNotifications } = await import('../src/lib/booking-email');
+
+  delete process.env.RESEND_API_KEY;
+  delete process.env.BOOKING_NOTIFY_DISABLED;
+
+  const plan = planBookingNotifications({
+    id: 1,
+    slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
+    name: 'Probe',
+    phone: '780-555-0100',
+    email: 'probe@example.com',
+    serviceLabel: 'Water Damage Restoration',
+    description: null,
+    address: '1 Test St',
+    city: 'Edmonton',
+    postalCode: null,
+    paymentRoute: 'private',
+    insurerName: null,
+    policyNumber: null,
+    claimNumber: null,
+    smsConsent: false,
+    filesAttached: 0,
+  });
+
+  const r = await attempt(() => sendBookingNotifications(plan));
+  check(!r.threw, `sendBookingNotifications must not throw (threw "${r.threw ? message(r.error) : ''}")`);
+  if (!r.threw) {
+    const outcome = r.value as { customer: string; internal: string };
+    check(
+      outcome.customer === 'failed' && outcome.internal === 'failed',
+      `an unset key must report failed, never sent (got ${JSON.stringify(outcome)})`,
+    );
+  }
+  console.log('  reports failed without throwing');
+}
+
 if (failures > 0) {
   console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.`);
   process.exit(1);

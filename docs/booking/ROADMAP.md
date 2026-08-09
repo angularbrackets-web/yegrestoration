@@ -150,6 +150,43 @@ when the token is minted.
   anything the browser reads. Verified in BK-04 by building with a test value
   and finding it inlined in `dist/client/_astro/booking-form.*.js` (severity:
   low as long as nobody "tidies" it; owner: none, documented here).
+- **`verify:booking:smoke` would mail the client, and the obvious mute does not
+  work.** It commits a real booking every run; the customer address is
+  `smoke@example.com` (undeliverable by design) but `BOOKING_INTERNAL_TO` is
+  `info@yegrestoration.ca`, a real inbox. Today it is inert only by accident —
+  `.env` has no `RESEND_API_KEY` and `.env.local` has it as `""` — and
+  `.env.example` invites putting a real key in `.env`. **Removing** the key from
+  the spawned dev server's environment cannot mute it: `readEnv` falls back to
+  `import.meta.env`, which Vite populates from the dotenv files *inside* that
+  process, where the parent has no reach. The mute is therefore a positive
+  signal, `BOOKING_NOTIFY_DISABLED=1` in the child's `process.env`, which wins
+  because `readEnv` checks `process.env` first — the same mechanism as the
+  `DATABASE_URL` swap. The flag is fail-open (unset = send) so no production
+  misconfiguration can silence mail by omission, and only `1`/`true` trip it so
+  `=0` cannot silence it by accident. Never "simplify" this back to deleting a
+  key (severity: **high** if reintroduced — it mails the client on every test
+  run; owner: none, this is the fix).
+- **The Resend SDK never throws on a failed send — it *resolves* with
+  `{ data: null, error }`.** Confirmed against the installed source in BK-05
+  (`resend@6.17.1`, `dist/index.mjs` → `fetchRequest`): a non-2xx response and a
+  network failure both come back as a resolved value, and `CreateEmailResponse`
+  is a `{data, error}` union. So `try { await resend.emails.send(…) } catch`
+  catches nothing. `api/contact.ts` is written exactly that way and returns
+  `{ ok: true }` on the next line, so a bounced key, a rate limit, or an outage
+  all reach the visitor as "message sent" and are never logged. The one place
+  the SDK *does* throw is `new Resend(key)` with a falsy key — and it silently
+  falls back to `process.env.RESEND_API_KEY` first, which under `astro dev` is
+  empty exactly when `import.meta.env` holds the value (severity: **medium**,
+  the contact form is the advertised conversion path until BK-10 and every lost
+  lead is silent; owner: **BK-10**).
+- **`npm run migrate:status` reports production and nothing else.**
+  `scripts/migrate.ts` reads `DATABASE_URL` only, and `.env.local`
+  (production) wins over `.env`, so there is no flag that aims it at the dev
+  branch — it takes a prefix: `DATABASE_URL="$DATABASE_URL_DEV" npm run migrate
+  -- --status`. Anyone checking "is the migration applied?" after running the
+  bare command has checked one branch and will believe they checked both.
+  Found in BK-02, recorded only in that ticket's finding table until BK-05
+  promoted it here (severity: **low**, it misleads rather than breaks).
 - **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
   (severity: doc-level — every consumer wraps them in `new Date(...)`, which
   takes either; found in BK-01, owner: BK-10, the next ticket that touches
@@ -226,7 +263,7 @@ port those two practices; skip prompt-weight tiers and standing third reviews.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | not started |
+| BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | ✅ reviewed — ready to commit |
 | BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number in verification |
 
 ### P4 — Admin
