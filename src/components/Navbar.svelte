@@ -339,8 +339,8 @@
       <!-- Desktop CTAs -->
       <div class="hidden xl:flex items-center gap-3">
         <a
-          href="#contact"
-          onclick={(e) => handleLinkClick(e, '#contact')}
+          href="/book/"
+          onclick={(e) => handleLinkClick(e, '/book/')}
           class="flex items-center gap-2 bg-yeg-amber/10 hover:bg-yeg-amber/[0.15] border border-yeg-amber-deep/30 hover:border-yeg-amber-deep/50 text-yeg-amber-deep rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200"
         >
           Free Assessment
@@ -450,6 +450,13 @@
 
     <!-- Panel Footer -->
     <div class="p-5 border-t border-black/[0.07] space-y-3">
+      <a
+        href="/book/"
+        onclick={(e) => handleLinkClick(e, '/book/')}
+        class="flex items-center justify-center gap-2.5 w-full py-3.5 bg-yeg-amber/10 border border-yeg-amber-deep/30 text-yeg-amber-deep rounded-xl font-semibold text-base hover:bg-yeg-amber/[0.15] hover:border-yeg-amber-deep/50 transition-all"
+      >
+        Book a Free Assessment
+      </a>
       <a
         href="tel:+17804793285"
         class="flex items-center justify-center gap-2.5 w-full py-3.5 bg-yeg-amber text-yeg-text rounded-xl font-bold text-base hover:bg-yeg-amber-hover transition-colors"
