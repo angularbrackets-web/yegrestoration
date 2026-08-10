@@ -180,6 +180,57 @@ export async function sendBookingNotifications(
 }
 
 /**
+ * Send the customer's confirmation and nothing else. The admin path's only
+ * send.
+ *
+ * THE INVARIANT: this function never delivers the internal message. It reads
+ * `plan.customer` and no other field of the plan, so "the office was not
+ * mailed" is a property of the code rather than a rule to remember — the same
+ * shape as `customerConfirmation` in `booking-email.ts` not reading the policy
+ * number. A manual entry is the office typing the booking in; mailing them
+ * about their own keystrokes is noise, and the office inbox is a real one.
+ *
+ * It exists because the existing seam could not express this (plan-review
+ * blocker 1): `sendBookingNotifications` delivers `plan.internal`
+ * unconditionally, and `resendSender`/`deliver` are module-private, so "just
+ * don't send the internal one" was not buildable from outside. Everything that
+ * matters is shared with it rather than re-implemented — the disable flag, the
+ * key lookup, the adapter, and `deliver`'s never-throws contract — so a fix to
+ * any of those reaches both paths.
+ *
+ * Same contract as the rest of the module: it never throws. It runs after the
+ * appointment row exists, and an entry that saved must not report as failed.
+ *
+ * Takes the whole `NotificationPlan` rather than a bare `Message` so the
+ * caller builds it with `planBookingNotifications` — one copy module, one set
+ * of PII rules — and so the booking id is available for the idempotency key.
+ */
+export async function sendCustomerConfirmation(
+  plan: NotificationPlan,
+  deps: NotifyDeps = {},
+): Promise<SendOutcome> {
+  // No email address on the appointment: nothing to send, and not a failure.
+  if (!plan.customer) return 'skipped';
+
+  if (notificationsDisabled()) {
+    console.error(`${DISABLE_FLAG} is set — booking ${plan.bookingId} was not notified.`);
+    return 'skipped';
+  }
+
+  let send = deps.send;
+  if (!send) {
+    const apiKey = readEnv('RESEND_API_KEY');
+    if (!apiKey) {
+      console.error('RESEND_API_KEY is not configured — the confirmation was not sent.');
+      return 'failed';
+    }
+    send = resendSender(apiKey, plan.bookingId);
+  }
+
+  return deliver(send, plan.customer, 'confirmation', plan.bookingId);
+}
+
+/**
  * Send, then record — and return what was *sent*, never what was recorded.
  *
  * This exists as its own function because the ordering is a defect waiting to

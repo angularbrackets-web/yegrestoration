@@ -1,0 +1,206 @@
+---
+export const prerender = false;
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import {
+  ADMIN_BLACKOUT_ADD_ENDPOINT,
+  ADMIN_BLACKOUT_DELETE_ENDPOINT,
+} from '../../lib/booking-admin';
+import { MAX_ADVANCE_DAYS } from '../../lib/booking-config';
+import { TIMEZONE_NOTE } from '../../lib/booking-copy';
+import { isClosedWeekday, localDateKey, parseDateKey } from '../../lib/booking-time';
+import { getDb, type BlackoutDayRow } from '../../lib/db';
+
+// `day::text`, never a bare `SELECT day`. The column is a timezone-naive DATE,
+// and the driver parses it at the SERVER's midnight — UTC on Vercel — which
+// converts back to the previous Edmonton day. Every blackout would render and
+// sort one day early.
+type Row = BlackoutDayRow & { reason: string | null };
+
+let blackouts: Row[] = [];
+let dbError: string | null = null;
+
+try {
+  const sql = getDb();
+  blackouts = (await sql`
+    SELECT day::text AS day, reason FROM blackout_dates ORDER BY day DESC
+  `) as Row[];
+} catch (e) {
+  dbError = 'Could not load blackout dates. Is DATABASE_URL configured?';
+  console.error(e);
+}
+
+const params = Astro.url.searchParams;
+const added = params.get('added') === '1';
+const removed = params.get('removed') === '1';
+// Field-error CODES, mapped here. A single "Choose a valid date" for every code
+// points the office at a field that may be perfectly fine — the reason can be
+// too long, and a malformed submission is neither.
+const ERR_MESSAGES: Record<string, string> = {
+  db: 'The database rejected that change. Nothing was saved.',
+  form: 'That submission could not be read. Nothing was saved.',
+  day: 'Choose a valid date.',
+  reason: 'That reason is too long.',
+};
+const errParam = params.get('err');
+const errMessage = errParam
+  ? (Object.hasOwn(ERR_MESSAGES, errParam) ? ERR_MESSAGES[errParam] : 'Nothing was saved.')
+  : null;
+
+const today = localDateKey(new Date());
+const upcoming = blackouts.filter((b) => b.day >= today);
+const pastDays = blackouts.filter((b) => b.day < today);
+
+/**
+ * `Mon, Dec 25, 2026` from a calendar date — built with `Date.UTC` and rendered
+ * in UTC on purpose. This is a *date*, not an instant: there is no Edmonton
+ * wall clock to convert, and running it through a zone would shift it a day.
+ */
+function formatDay(key: string): string {
+  const { year, month, day } = parseDateKey(key);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+---
+
+<AdminLayout title="Blackout dates">
+  <div class="flex items-start justify-between mb-6 gap-4">
+    <div>
+      <h1 class="text-white text-xl font-bold">Blackout dates</h1>
+      <p class="text-zinc-500 text-xs mt-0.5">
+        Days closed to online booking. All dates {TIMEZONE_NOTE}. Fridays are already closed
+        and need no entry here.
+      </p>
+    </div>
+    <span class="text-zinc-600 text-sm shrink-0">{blackouts.length} total</span>
+  </div>
+
+  {dbError && (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-5">
+      {dbError}
+    </div>
+  )}
+
+  {added && (
+    <div class="bg-green-900/30 border border-green-800 rounded-lg px-4 py-3 text-green-300 text-sm mb-5">
+      Day closed. It is gone from the public booking calendar.
+    </div>
+  )}
+
+  {removed && (
+    <div class="bg-green-900/30 border border-green-800 rounded-lg px-4 py-3 text-green-300 text-sm mb-5">
+      Day reopened.
+    </div>
+  )}
+
+  {errMessage && (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-5">
+      {errMessage}
+    </div>
+  )}
+
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
+    <h2 class="text-white font-semibold mb-1">Close a day</h2>
+    <p class="text-zinc-600 text-xs mb-4">
+      Only the next {MAX_ADVANCE_DAYS} days are ever offered publicly, so closing a day
+      further out has no effect until the window reaches it. Appointments already booked on
+      that day are left alone — phone those customers.
+    </p>
+
+    <form method="POST" action={ADMIN_BLACKOUT_ADD_ENDPOINT} class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="day">Date</label>
+        <input
+          type="date"
+          id="day"
+          name="day"
+          required
+          class="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+        />
+      </div>
+      <div class="flex-1 min-w-[12rem]">
+        <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="reason">
+          Reason <span class="text-zinc-600 normal-case">(optional)</span>
+        </label>
+        <input
+          type="text"
+          id="reason"
+          name="reason"
+          placeholder="Christmas Day"
+          class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-amber-500 focus:outline-none"
+        />
+      </div>
+      <button
+        type="submit"
+        class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-4 py-2 transition-colors"
+      >
+        Close day
+      </button>
+    </form>
+  </div>
+
+  <section class="mb-10">
+    <h2 class="text-white text-sm font-semibold uppercase tracking-wide mb-3">
+      Upcoming <span class="text-zinc-600 font-normal">({upcoming.length})</span>
+    </h2>
+    {upcoming.length === 0 ? (
+      <div class="text-center py-10 text-zinc-600 text-sm">No days closed.</div>
+    ) : (
+      <ul class="divide-y divide-zinc-800/60">
+        {upcoming.map(b => (
+          <li class="py-3 flex items-center justify-between gap-4 text-sm">
+            <div class="min-w-0">
+              <span class="text-white font-medium">{formatDay(b.day)}</span>
+              {isClosedWeekday(b.day) && (
+                <span class="ml-2 text-zinc-600 text-xs">already closed — Friday</span>
+              )}
+              {b.reason && <span class="block text-zinc-500 text-xs mt-0.5 truncate">{b.reason}</span>}
+            </div>
+            <form method="POST" action={ADMIN_BLACKOUT_DELETE_ENDPOINT} class="shrink-0">
+              <input type="hidden" name="day" value={b.day} />
+              <button
+                type="submit"
+                class="text-zinc-500 hover:text-red-300 text-xs font-medium transition-colors"
+              >
+                Reopen
+              </button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+
+  <section>
+    <h2 class="text-zinc-500 text-sm font-semibold uppercase tracking-wide mb-3">
+      Past <span class="text-zinc-600 font-normal">({pastDays.length})</span>
+    </h2>
+    {pastDays.length === 0 ? (
+      <div class="text-center py-8 text-zinc-700 text-sm">Nothing yet.</div>
+    ) : (
+      <ul class="divide-y divide-zinc-800/40">
+        {pastDays.map(b => (
+          <li class="py-2.5 flex items-center justify-between gap-4 text-sm text-zinc-500">
+            <div class="min-w-0">
+              <span>{formatDay(b.day)}</span>
+              {b.reason && <span class="block text-zinc-600 text-xs mt-0.5 truncate">{b.reason}</span>}
+            </div>
+            <form method="POST" action={ADMIN_BLACKOUT_DELETE_ENDPOINT} class="shrink-0">
+              <input type="hidden" name="day" value={b.day} />
+              <button
+                type="submit"
+                class="text-zinc-600 hover:text-red-300 text-xs font-medium transition-colors"
+              >
+                Remove
+              </button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+</AdminLayout>

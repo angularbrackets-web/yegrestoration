@@ -11,6 +11,33 @@
 import { TIMEZONE } from './booking-config';
 import type { Appointment } from './db';
 
+// ---------------------------------------------------------------------------
+// Paths
+//
+// `astro.config.mjs` sets `trailingSlash: 'always'`, so every one of these ends
+// in a slash and none of them is spelled out again at a call site. An unslashed
+// href merely costs a 308 — but an unslashed *form action* is a POST replayed
+// after a redirect, and an unslashed `PUBLIC_ADMIN_PATHS` entry is what made
+// the whole `/admin` surface unreachable for a month (BK-07). One list, checked
+// by `scripts/verify-booking-admin.ts`, is the cheapest way not to pay that
+// again.
+// ---------------------------------------------------------------------------
+
+export const ADMIN_APPOINTMENTS_PATH = '/admin/appointments/';
+export const ADMIN_APPOINTMENT_NEW_PATH = '/admin/appointments/new/';
+export const ADMIN_BLACKOUTS_PATH = '/admin/blackouts/';
+
+export const ADMIN_APPOINTMENT_CREATE_ENDPOINT = '/api/admin/appointments/create/';
+export const ADMIN_APPOINTMENT_UPDATE_ENDPOINT = '/api/admin/appointments/update/';
+export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend/';
+export const ADMIN_BLACKOUT_ADD_ENDPOINT = '/api/admin/blackouts/add/';
+export const ADMIN_BLACKOUT_DELETE_ENDPOINT = '/api/admin/blackouts/delete/';
+
+/** `/admin/appointments/12/` — the one place that URL is spelled. */
+export function adminAppointmentPath(id: number): string {
+  return `${ADMIN_APPOINTMENTS_PATH}${id}/`;
+}
+
 /**
  * The fields the partition reads. Declared structurally rather than as
  * `Appointment` so the list page can pass rows it has decorated with a file
@@ -100,6 +127,47 @@ export function notificationFlags(appointment: NotifiableAppointment): Notificat
 export function hasNotificationWarning(appointment: NotifiableAppointment): boolean {
   const flags = notificationFlags(appointment);
   return flags.internalMissing || flags.customerMissing;
+}
+
+/**
+ * How the detail page renders a notification stamp. Three neutral states and
+ * one failure, because a NULL means four different things.
+ *
+ * - `sent` — the column has a timestamp.
+ * - `failed` — the row was OWED this message and never got it. Warning styling.
+ * - `none` — nothing was sent and nothing was owed, but sending is *possible*.
+ * - `not-applicable` — sending was never on the table.
+ *
+ * `none` is the state BK-08 added, and it is the reason this is a function
+ * rather than the two-branch ternary BK-07 had. Since manual entries can send a
+ * confirmation, "Not applicable" on an admin row with an email address is now
+ * simply false — the office may have unticked the box, or the send may have
+ * failed. Which of those it was is deliberately not recorded: a NULL stamp on
+ * an admin row stays ambiguous after the flash is gone, the resend button
+ * recovers either case, and a column to disambiguate would buy nothing an
+ * operator would act on differently.
+ *
+ * `failed` stays web-only, matching `notificationFlags`: an admin row's missing
+ * confirmation is not a system failure, so it must not raise the list page's
+ * red marker.
+ */
+export type StampState = 'sent' | 'failed' | 'none' | 'not-applicable';
+
+export function customerStampState(appointment: NotifiableAppointment): StampState {
+  if (appointment.confirmation_sent_at != null) return 'sent';
+  if (notificationFlags(appointment).customerMissing) return 'failed';
+  const hasEmail = typeof appointment.email === 'string' && appointment.email.trim() !== '';
+  // No email address means no confirmation was ever possible, on either source.
+  return hasEmail ? 'none' : 'not-applicable';
+}
+
+/**
+ * The office notification has no `none`: it is sent by the public commit path
+ * or by nothing at all. An admin row was never owed one — the office typed it.
+ */
+export function internalStampState(appointment: NotifiableAppointment): StampState {
+  if (appointment.internal_notified_at != null) return 'sent';
+  return notificationFlags(appointment).internalMissing ? 'failed' : 'not-applicable';
 }
 
 /**

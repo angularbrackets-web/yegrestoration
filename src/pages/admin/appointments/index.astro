@@ -2,6 +2,8 @@
 export const prerender = false;
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import {
+  ADMIN_APPOINTMENT_NEW_PATH,
+  adminAppointmentPath,
   hasNotificationWarning,
   notificationFlags,
   partitionAppointments,
@@ -61,6 +63,18 @@ function statusClasses(status: Appointment['status']) {
 function pastStatusLabel(appointment: Appointment) {
   return appointment.status === 'booked' ? 'Elapsed' : STATUS_LABELS[appointment.status];
 }
+
+// Where an edit or a resend lands when there is no detail page to return to —
+// a malformed or vanished id. Rendered here rather than swallowed, so a click
+// that did nothing says so. Both routes redirect with `saved=`, because that
+// is the parameter this page reads; `email=` is the detail page's flash.
+const saved = Astro.url.searchParams.get('saved');
+const savedMessage =
+  saved === 'missing'
+    ? 'That appointment no longer exists. Nothing was changed and nothing was sent.'
+    : saved === 'invalid'
+      ? 'That request was not valid. Nothing was changed and nothing was sent.'
+      : null;
 ---
 
 <AdminLayout title="Appointments" refresh={30}>
@@ -70,6 +84,12 @@ function pastStatusLabel(appointment: Appointment) {
     </div>
   ) : (
     <>
+      {savedMessage && (
+        <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-5">
+          {savedMessage}
+        </div>
+      )}
+
       <div class="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 class="text-white text-xl font-bold">Appointments</h1>
@@ -81,7 +101,15 @@ function pastStatusLabel(appointment: Appointment) {
             </p>
           )}
         </div>
-        <span class="text-zinc-600 text-sm shrink-0">{appointments.length} total</span>
+        <div class="flex items-center gap-4 shrink-0">
+          <span class="text-zinc-600 text-sm">{appointments.length} total</span>
+          <a
+            href={ADMIN_APPOINTMENT_NEW_PATH}
+            class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-4 py-2 transition-colors"
+          >
+            Add appointment
+          </a>
+        </div>
       </div>
 
       <section class="mb-10">
@@ -113,7 +141,7 @@ function pastStatusLabel(appointment: Appointment) {
                     <tr class="hover:bg-zinc-900/60 transition-colors text-zinc-400">
                       <td class="py-3.5 pr-6 whitespace-nowrap">
                         <a
-                          href={`/admin/appointments/${appointment.id}/`}
+                          href={adminAppointmentPath(appointment.id)}
                           class="text-white font-medium hover:text-amber-400 transition-colors"
                         >
                           {formatSlot(appointment.slot_start)}
@@ -153,7 +181,7 @@ function pastStatusLabel(appointment: Appointment) {
                       <td class="py-3.5 pr-6 text-zinc-500">{fileCounts.get(appointment.id) ?? 0}</td>
                       <td class="py-3.5">
                         <a
-                          href={`/admin/appointments/${appointment.id}/`}
+                          href={adminAppointmentPath(appointment.id)}
                           class="text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors"
                         >
                           View →
@@ -192,7 +220,7 @@ function pastStatusLabel(appointment: Appointment) {
                   <tr class="hover:bg-zinc-900/40 transition-colors text-zinc-500">
                     <td class="py-3 pr-6 whitespace-nowrap">
                       <a
-                        href={`/admin/appointments/${appointment.id}/`}
+                        href={adminAppointmentPath(appointment.id)}
                         class="hover:text-amber-400 transition-colors"
                       >
                         {formatSlot(appointment.slot_start)}
@@ -207,7 +235,7 @@ function pastStatusLabel(appointment: Appointment) {
                     </td>
                     <td class="py-3">
                       <a
-                        href={`/admin/appointments/${appointment.id}/`}
+                        href={adminAppointmentPath(appointment.id)}
                         class="text-zinc-600 hover:text-amber-300 text-xs font-medium transition-colors"
                       >
                         View →

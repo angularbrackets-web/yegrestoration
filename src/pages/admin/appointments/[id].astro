@@ -2,13 +2,22 @@
 export const prerender = false;
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import {
+  ADMIN_APPOINTMENTS_PATH,
+  ADMIN_APPOINTMENT_RESEND_ENDPOINT,
+  ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
+  customerStampState,
   formatAdminTimestamp,
   formatFileSize,
-  notificationFlags,
+  internalStampState,
   PAYMENT_ROUTE_LABELS,
   PIPELINE_STAGE_LABELS,
   STATUS_LABELS,
 } from '../../../lib/booking-admin';
+import {
+  APPOINTMENT_STATUSES,
+  MAX_ADMIN_NOTES,
+  PIPELINE_STAGES,
+} from '../../../lib/booking-admin-entry';
 import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
 import { formatSlot } from '../../../lib/booking-time';
 import { getDb, SERVICE_LABELS, type Appointment, type AppointmentFile } from '../../../lib/db';
@@ -50,9 +59,59 @@ if (!appointment && !dbError) {
   return new Response('Not found', { status: 404 });
 }
 
-const flags = appointment
-  ? notificationFlags(appointment)
-  : { internalMissing: false, customerMissing: false };
+// Four states per stamp, not two. `none` is BK-08's addition: an admin row with
+// an email may simply not have been sent one, which "Not applicable" would now
+// claim falsely.
+const customerStamp = appointment ? customerStampState(appointment) : 'not-applicable';
+const internalStamp = appointment ? internalStampState(appointment) : 'not-applicable';
+
+// The confirmation button is offered only for a booked appointment with an
+// email. A cancelled or no-show row must not receive a fresh "You're booked"
+// for a slot that may since belong to somebody else — and the endpoint
+// re-checks this rather than trusting the button's absence.
+const canResend =
+  !!appointment &&
+  appointment.status === 'booked' &&
+  typeof appointment.email === 'string' &&
+  appointment.email.trim() !== '';
+
+// Flashes. The `?email=` one is load-bearing rather than decorative: BK-07's
+// warning flags deliberately never fire for `source = 'admin'` rows, so this is
+// the only place a failed admin-entry send is surfaced at the moment it
+// happens. Afterwards the neutral stamp and the resend button are the recovery.
+const emailFlash = Astro.url.searchParams.get('email');
+const savedFlash = Astro.url.searchParams.get('saved');
+
+const EMAIL_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  sent: { tone: 'ok', text: 'Confirmation email sent to the customer.' },
+  failed: {
+    tone: 'warn',
+    text: 'The confirmation email did not send. The appointment is saved — use “Send confirmation” below to try again.',
+  },
+  // Reached from the entry form with the box unticked, and from either sender
+  // when the mute flag is set. Worded for both — the page they are looking at
+  // is itself the evidence the appointment saved.
+  off: { tone: 'ok', text: 'No confirmation email was sent.' },
+  refused: {
+    tone: 'warn',
+    text: 'A confirmation is only sent for a booked appointment with an email address.',
+  },
+};
+
+const SAVED_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  '1': { tone: 'ok', text: 'Saved.' },
+  conflict: {
+    tone: 'warn',
+    text: 'That slot has since been rebooked, so this appointment stays cancelled. Nothing was saved.',
+  },
+  invalid: { tone: 'warn', text: 'That edit was not valid. Nothing was saved.' },
+  error: { tone: 'warn', text: 'The database rejected that change. Nothing was saved.' },
+};
+
+const flashes = [
+  emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
+  savedFlash ? SAVED_MESSAGES[savedFlash] : null,
+].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
 function statusClasses(status: Appointment['status']) {
   if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
@@ -64,10 +123,22 @@ function statusClasses(status: Appointment['status']) {
 
 <AdminLayout title={appointment ? `${appointment.name} — Appointment` : 'Appointment'}>
   <div class="mb-5">
-    <a href="/admin/appointments/" class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
+    <a href={ADMIN_APPOINTMENTS_PATH} class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
       ← All Appointments
     </a>
   </div>
+
+  {flashes.map(flash => (
+    <div
+      class={`rounded-lg px-4 py-3 text-sm mb-5 border ${
+        flash.tone === 'ok'
+          ? 'bg-green-900/30 border-green-800 text-green-300'
+          : 'bg-amber-900/30 border-amber-800/70 text-amber-200'
+      }`}
+    >
+      {flash.text}
+    </div>
+  ))}
 
   {dbError && (
     <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">{dbError}</div>
@@ -190,16 +261,34 @@ function statusClasses(status: Appointment['status']) {
         FAILURE; consent and reminder are neutral states by design — a null
         consent is "no consent" (the timestamp is the consent), and a null
         reminder is expected on every row until BK-06 ships.
+
+        BK-08 added a third neutral state, "None sent": an office-entered row
+        with an email address may simply not have been sent one — the box was
+        unticked, or the send failed — and "Not applicable" would now be a lie.
+        Which of those it was is not recorded; the resend button recovers both.
       -->
       <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <h2 class="text-white font-semibold mb-4">Notifications</h2>
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <h2 class="text-white font-semibold">Notifications</h2>
+          {canResend && (
+            <form method="POST" action={ADMIN_APPOINTMENT_RESEND_ENDPOINT} class="shrink-0">
+              <input type="hidden" name="id" value={String(appointment.id)} />
+              <button
+                type="submit"
+                class="border border-amber-700/60 text-amber-300 hover:bg-amber-900/30 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+              >
+                {appointment.confirmation_sent_at ? 'Resend confirmation' : 'Send confirmation'}
+              </button>
+            </form>
+          )}
+        </div>
         <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Office notified</dt>
             <dd>
-              {appointment.internal_notified_at ? (
-                <span class="text-white">{formatAdminTimestamp(appointment.internal_notified_at)}</span>
-              ) : flags.internalMissing ? (
+              {internalStamp === 'sent' ? (
+                <span class="text-white">{formatAdminTimestamp(appointment.internal_notified_at!)}</span>
+              ) : internalStamp === 'failed' ? (
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-red-900/40 text-red-300 border-red-800">
                   Never sent — the office was not told
                 </span>
@@ -211,12 +300,14 @@ function statusClasses(status: Appointment['status']) {
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Customer confirmation</dt>
             <dd>
-              {appointment.confirmation_sent_at ? (
-                <span class="text-white">{formatAdminTimestamp(appointment.confirmation_sent_at)}</span>
-              ) : flags.customerMissing ? (
+              {customerStamp === 'sent' ? (
+                <span class="text-white">{formatAdminTimestamp(appointment.confirmation_sent_at!)}</span>
+              ) : customerStamp === 'failed' ? (
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-amber-900/30 text-amber-300 border-amber-800/70">
                   Never sent
                 </span>
+              ) : customerStamp === 'none' ? (
+                <span class="text-zinc-500">None sent</span>
               ) : (
                 <span class="text-zinc-600">Not applicable</span>
               )}
@@ -272,17 +363,78 @@ function statusClasses(status: Appointment['status']) {
         )}
       </div>
 
-      <!-- Notes — read-only here; editing is BK-08. -->
-      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <h2 class="text-white font-semibold mb-4">Office notes</h2>
-        {appointment.admin_notes ? (
-          <p class="text-white whitespace-pre-wrap bg-zinc-800/50 rounded-lg p-3 text-sm leading-relaxed">
-            {appointment.admin_notes}
-          </p>
-        ) : (
-          <p class="text-zinc-600 text-sm">No notes.</p>
-        )}
-      </div>
+      <!--
+        The edit form. Status, stage and notes in ONE submit, because they are
+        one UPDATE: a status change that collides rolls the whole statement
+        back, and splitting the form would imply the notes survived when they
+        did not.
+
+        Cancelling is just the status select — there is no separate destructive
+        button, and cancelling never deletes the row. Rescheduling is not here:
+        it is cancel + re-enter (see the ticket's Out of scope).
+      -->
+      <form method="POST" action={ADMIN_APPOINTMENT_UPDATE_ENDPOINT} class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <input type="hidden" name="id" value={String(appointment.id)} />
+        <h2 class="text-white font-semibold mb-1">Update</h2>
+        <p class="text-zinc-600 text-xs mb-5">
+          Cancelling frees the slot for online booking but keeps the record. Un-cancelling
+          fails if somebody has taken the slot since.
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+          <div>
+            <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="status">Status</label>
+            <select
+              id="status"
+              name="status"
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+            >
+              {APPOINTMENT_STATUSES.map(value => (
+                <option value={value} selected={value === appointment.status}>
+                  {STATUS_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="pipeline_stage">
+              Pipeline stage
+            </label>
+            <select
+              id="pipeline_stage"
+              name="pipeline_stage"
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+            >
+              {PIPELINE_STAGES.map(value => (
+                <option value={value} selected={value === appointment.pipeline_stage}>
+                  {PIPELINE_STAGE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div class="mb-5">
+          <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="admin_notes">
+            Office notes
+          </label>
+          <textarea
+            id="admin_notes"
+            name="admin_notes"
+            rows="4"
+            maxlength={MAX_ADMIN_NOTES}
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-amber-500 focus:outline-none"
+            placeholder="Internal only — never sent to the customer."
+          >{appointment.admin_notes ?? ''}</textarea>
+        </div>
+
+        <button
+          type="submit"
+          class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+        >
+          Save changes
+        </button>
+      </form>
     </div>
   )}
 </AdminLayout>

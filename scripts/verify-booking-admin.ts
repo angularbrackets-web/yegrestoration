@@ -22,9 +22,20 @@ import { fileURLToPath } from 'url';
 
 import { isPublicAdminPath, ADMIN_LOGIN_PATH } from '../src/lib/auth';
 import {
+  ADMIN_APPOINTMENTS_PATH,
+  ADMIN_APPOINTMENT_CREATE_ENDPOINT,
+  ADMIN_APPOINTMENT_NEW_PATH,
+  ADMIN_APPOINTMENT_RESEND_ENDPOINT,
+  ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
+  ADMIN_BLACKOUTS_PATH,
+  ADMIN_BLACKOUT_ADD_ENDPOINT,
+  ADMIN_BLACKOUT_DELETE_ENDPOINT,
+  adminAppointmentPath,
+  customerStampState,
   formatAdminTimestamp,
   formatFileSize,
   hasNotificationWarning,
+  internalStampState,
   notificationFlags,
   partitionAppointments,
   type NotifiableAppointment,
@@ -128,6 +139,119 @@ console.log('\nEvery form action and redirect the login flow uses is slashed (AC
   check(
     !/['"]\/admin\/login['"]/.test(middleware),
     'the middleware holds no unslashed /admin/login literal of its own',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
+// ---------------------------------------------------------------------------
+{
+  // The constants first. These are the only spellings the pages and routes use,
+  // so an unslashed one here is an unslashed one everywhere at once.
+  const PATHS: [string, string][] = [
+    ['ADMIN_APPOINTMENTS_PATH', ADMIN_APPOINTMENTS_PATH],
+    ['ADMIN_APPOINTMENT_NEW_PATH', ADMIN_APPOINTMENT_NEW_PATH],
+    ['ADMIN_BLACKOUTS_PATH', ADMIN_BLACKOUTS_PATH],
+    ['ADMIN_APPOINTMENT_CREATE_ENDPOINT', ADMIN_APPOINTMENT_CREATE_ENDPOINT],
+    ['ADMIN_APPOINTMENT_UPDATE_ENDPOINT', ADMIN_APPOINTMENT_UPDATE_ENDPOINT],
+    ['ADMIN_APPOINTMENT_RESEND_ENDPOINT', ADMIN_APPOINTMENT_RESEND_ENDPOINT],
+    ['ADMIN_BLACKOUT_ADD_ENDPOINT', ADMIN_BLACKOUT_ADD_ENDPOINT],
+    ['ADMIN_BLACKOUT_DELETE_ENDPOINT', ADMIN_BLACKOUT_DELETE_ENDPOINT],
+  ];
+  for (const [name, value] of PATHS) {
+    check(value.endsWith('/'), `${name} (${value}) ends with a slash`);
+    check(value.startsWith('/'), `${name} is root-relative`);
+  }
+  check(adminAppointmentPath(12) === '/admin/appointments/12/', 'a detail path is built slashed');
+
+  // Every one of them is behind the middleware, and none accidentally became
+  // public. The gate normalizes exactly one trailing slash, so a new public path
+  // would have to be added deliberately — this proves none was.
+  for (const [, value] of PATHS) {
+    check(!isPublicAdminPath(value), `${value} still needs a session`);
+  }
+  check(!isPublicAdminPath(adminAppointmentPath(12)), 'and so does an appointment detail page');
+
+  // Now the source. Every `/admin/...` or `/api/admin/...` string literal in the
+  // new pages and routes must end in a slash — that is the general shape of the
+  // trap, not just the paths this file happens to know the names of. An
+  // unslashed form ACTION is a POST replayed after a 308.
+  const NEW_SOURCES = [
+    'src/pages/admin/appointments/new.astro',
+    'src/pages/admin/appointments/index.astro',
+    'src/pages/admin/appointments/[id].astro',
+    'src/pages/admin/blackouts.astro',
+    'src/pages/api/admin/appointments/create.ts',
+    'src/pages/api/admin/appointments/update.ts',
+    'src/pages/api/admin/appointments/resend.ts',
+    'src/pages/api/admin/blackouts/add.ts',
+    'src/pages/api/admin/blackouts/delete.ts',
+    'src/lib/booking-admin.ts',
+    'src/layouts/AdminLayout.astro',
+  ];
+  for (const file of NEW_SOURCES) {
+    const path = resolve(root, file);
+    check(existsSync(path), `${file} exists`);
+    if (!existsSync(path)) continue;
+    // Comments are stripped: prose about `/api/admin/reply` is documentation,
+    // not a link, and BK-07's own trap entry is written in exactly that form.
+    const source = readFileSync(path, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '');
+
+    // Backticks are in the delimiter class deliberately. The spelling
+    // `adminAppointmentPath` replaced was a TEMPLATE literal
+    // (href={`/admin/appointments/${id}/`}), which a quotes-only scan cannot
+    // see — so the one form this rule most needs to cover would have been the
+    // one it missed. Newlines are excluded so a long template body cannot make
+    // the match run away.
+    for (const match of source.matchAll(/['"`](\/(?:api\/)?admin\/[^'"`?#\n]*)['"`]/g)) {
+      const literal = match[1];
+      check(literal.endsWith('/'), `${file}: ${literal} must end with a slash`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe forms post, and post to the right places (BK-08 AC9)');
+// ---------------------------------------------------------------------------
+{
+  // Each write form is pinned to its endpoint by NAME rather than by literal,
+  // because the literal is what the constant exists to stop being retyped. A
+  // form that lost its `method="POST"` would issue a GET with the fields in the
+  // query string — customer details in a URL, which item 3 of the ticket exists
+  // to prevent.
+  const FORMS: [string, string[]][] = [
+    ['src/pages/admin/appointments/new.astro', ['ADMIN_APPOINTMENT_CREATE_ENDPOINT']],
+    [
+      'src/pages/admin/appointments/[id].astro',
+      ['ADMIN_APPOINTMENT_UPDATE_ENDPOINT', 'ADMIN_APPOINTMENT_RESEND_ENDPOINT'],
+    ],
+    [
+      'src/pages/admin/blackouts.astro',
+      ['ADMIN_BLACKOUT_ADD_ENDPOINT', 'ADMIN_BLACKOUT_DELETE_ENDPOINT'],
+    ],
+    ['src/pages/admin/appointments/index.astro', ['ADMIN_APPOINTMENT_NEW_PATH']],
+  ];
+  for (const [file, needles] of FORMS) {
+    const source = readFileSync(resolve(root, file), 'utf8');
+    for (const needle of needles) {
+      check(source.includes(`action={${needle}}`) || source.includes(`href={${needle}}`), `${file} wires up ${needle}`);
+    }
+    const forms = source.match(/<form\b[^>]*>/g) ?? [];
+    for (const form of forms) {
+      check(/method="POST"/i.test(form), `${file}: every form posts — ${form.slice(0, 60)}…`);
+    }
+  }
+
+  // The entry form must never round-trip typed values. A `value={` bound to
+  // anything read off the query string would put a customer's name back into a
+  // URL on the next failed submit.
+  const entryForm = readFileSync(resolve(root, 'src/pages/admin/appointments/new.astro'), 'utf8');
+  check(
+    !/value=\{[^}]*searchParams/.test(entryForm),
+    'the entry form repopulates nothing from the query string',
   );
 }
 
@@ -313,6 +437,84 @@ console.log('\nnotificationFlags — which missing stamp is a failure (AC4)');
   // keys — the fixture cannot grow a column on its own, so a check on it would
   // be true by construction and could never report the change it claims to
   // guard.
+  // -------------------------------------------------------------------------
+  // BK-08 CHANGES THIS MATRIX. BK-07 rendered a null customer stamp as either a
+  // warning or "Not applicable"; since manual entries can now send a
+  // confirmation, "Not applicable" on an admin row WITH an email is simply
+  // false. The third neutral state, `none`, is what the detail page renders
+  // there, and `failed` stays web-only so the list page's red marker keeps
+  // meaning "the system did not do its job".
+  // -------------------------------------------------------------------------
+  for (const source of ['web', 'admin'] as const) {
+    for (const email of ['dana@example.com', null]) {
+      for (const confirmation of [STAMP, null]) {
+        for (const internal of [STAMP, null]) {
+          const row = appt({
+            source,
+            email,
+            confirmation_sent_at: confirmation,
+            internal_notified_at: internal,
+          });
+          const label = `source=${source} email=${email ? 'yes' : 'no'} confirmation=${
+            confirmation ? 'sent' : 'null'
+          } internal=${internal ? 'sent' : 'null'}`;
+
+          const expectedCustomer = confirmation
+            ? 'sent'
+            : source === 'web' && email
+              ? 'failed'
+              : email
+                ? 'none'
+                : 'not-applicable';
+          check(
+            customerStampState(row) === expectedCustomer,
+            `${label} → customer stamp ${expectedCustomer}, got ${customerStampState(row)}`,
+          );
+
+          const expectedInternal = internal ? 'sent' : source === 'web' ? 'failed' : 'not-applicable';
+          check(
+            internalStampState(row) === expectedInternal,
+            `${label} → office stamp ${expectedInternal}, got ${internalStampState(row)}`,
+          );
+
+          // The states that raise a warning are exactly the states the list
+          // page marks. Tying them together here is what stops the two drifting
+          // into a detail page that shouts and a list that is silent.
+          check(
+            (customerStampState(row) === 'failed' || internalStampState(row) === 'failed') ===
+              hasNotificationWarning(row),
+            `${label} → the list marker agrees with the stamp states`,
+          );
+        }
+      }
+    }
+  }
+
+  // The one cell BK-08 flipped, restated so a failure names the rule rather
+  // than a coordinate in the matrix above.
+  check(
+    customerStampState(
+      appt({ source: 'admin', email: 'dana@example.com', confirmation_sent_at: null }),
+    ) === 'none',
+    'an office-entered row with an email reads "none sent", not "not applicable"',
+  );
+  check(
+    customerStampState(appt({ source: 'admin', email: null, confirmation_sent_at: null })) ===
+      'not-applicable',
+    'but with no email address there was never anything to send',
+  );
+  check(
+    !hasNotificationWarning(
+      appt({ source: 'admin', email: 'dana@example.com', confirmation_sent_at: null }),
+    ),
+    'and it still raises no warning — an admin row was never owed a confirmation',
+  );
+  check(
+    customerStampState(appt({ source: 'web', email: 'dana@example.com', confirmation_sent_at: null })) ===
+      'failed',
+    'while a web booking owed a confirmation and never sent one is still a failure',
+  );
+
   const helperSource = readFileSync(resolve(root, 'src/lib/booking-admin.ts'), 'utf8');
   const body = helperSource.slice(
     helperSource.indexOf('export function notificationFlags'),
@@ -368,6 +570,10 @@ console.log('\nThe two new pages (AC2, AC6)');
     'src/pages/admin/appointments/[id].astro',
     // Renders on every admin page, and this ticket rewrote it.
     'src/layouts/AdminLayout.astro',
+    // BK-08's two new pages. Both render dates, so both are in scope for the
+    // zone rule; neither may leak a Blob location either.
+    'src/pages/admin/appointments/new.astro',
+    'src/pages/admin/blackouts.astro',
   ];
 
   for (const page of PAGES) {

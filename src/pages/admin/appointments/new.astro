@@ -1,0 +1,258 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import {
+  ADMIN_APPOINTMENTS_PATH,
+  ADMIN_APPOINTMENT_CREATE_ENDPOINT,
+} from '../../../lib/booking-admin';
+import { ADMIN_ENTRY_FIELD_LABELS } from '../../../lib/booking-admin-entry';
+import { SLOT_START_TIMES, TIMEZONE } from '../../../lib/booking-config';
+import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { localDateKey, zonedTimeToUtc } from '../../../lib/booking-time';
+import { SERVICE_LABELS } from '../../../lib/db';
+
+// A static route sits ahead of `[id].astro` in Astro's priority order, and
+// `[id].astro` rejects anything non-numeric anyway — so `/admin/appointments/new/`
+// cannot be read as an appointment id.
+
+// Field ERROR CODES come back through the redirect; typed values never do. A
+// booking carries a name, an address and insurance identifiers, and a query
+// string is written into platform request logs. Unknown codes are dropped
+// rather than rendered, so a hand-crafted `?err=` puts nothing on the page.
+const errParam = Astro.url.searchParams.get('err') ?? '';
+const errorFields = errParam
+  .split(',')
+  .map((f) => f.trim())
+  // `hasOwn`, not `in`: `'toString' in {}` is true, so `?err=toString` would
+  // survive the filter and render a native function into the error box. Escaped
+  // and behind the login, but it would falsify the claim this filter exists to
+  // make — that a hand-crafted `?err=` puts nothing on the page.
+  .filter((f) => Object.hasOwn(ADMIN_ENTRY_FIELD_LABELS, f));
+
+const dbError = errParam === 'db' || errParam === 'form';
+const slotTaken = Astro.url.searchParams.get('taken') === '1';
+
+// Today in Edmonton, not in the server's zone — on Vercel that is UTC, and
+// after 17:00 local it is already tomorrow there.
+const today = localDateKey(new Date());
+
+// Labels read off the instants rather than reformatted from the constants, so a
+// broken conversion shows here instead of being papered over by the string it
+// was supposed to produce.
+const times = SLOT_START_TIMES.map((time) => ({
+  value: time,
+  label: new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(zonedTimeToUtc(today, time)),
+}));
+
+const services = Object.entries(SERVICE_LABELS);
+
+const fieldClass =
+  'w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-amber-500 focus:outline-none';
+const labelClass = 'block text-zinc-400 text-xs uppercase tracking-wide mb-1.5';
+
+function invalid(field: string) {
+  return errorFields.includes(field) ? ' border-red-700' : '';
+}
+---
+
+<AdminLayout title="Add appointment">
+  <div class="mb-5">
+    <a href={ADMIN_APPOINTMENTS_PATH} class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
+      ← All Appointments
+    </a>
+  </div>
+
+  <h1 class="text-white text-xl font-bold mb-1">Add appointment</h1>
+  <p class="text-zinc-500 text-xs mb-6">
+    Phone-in emergencies and follow-ups. All times {TIMEZONE_NOTE}. The office can book any
+    day and any past or future date — only the five start times and the no-double-booking
+    rule still apply.
+  </p>
+
+  {slotTaken && (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-5">
+      That slot is already booked. Nothing was saved — pick another time.
+    </div>
+  )}
+
+  {dbError && (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-5">
+      Could not save the appointment. Nothing was written.
+    </div>
+  )}
+
+  {errorFields.length > 0 && (
+    <div class="bg-amber-900/30 border border-amber-800/70 rounded-lg px-4 py-3 text-amber-200 text-sm mb-5">
+      <p class="font-medium">Check these fields and submit again:</p>
+      <p class="mt-1 text-amber-300/90">
+        {errorFields.map((f) => ADMIN_ENTRY_FIELD_LABELS[f]).join(' · ')}
+      </p>
+      <p class="mt-2 text-amber-300/60 text-xs">
+        The form is deliberately not refilled — customer details are not put into a URL.
+      </p>
+    </div>
+  )}
+
+  <form method="POST" action={ADMIN_APPOINTMENT_CREATE_ENDPOINT} class="space-y-6">
+    <!-- When -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+      <h2 class="text-white font-semibold mb-4">When</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class={labelClass} for="slot_date">Date</label>
+          <input
+            type="date"
+            id="slot_date"
+            name="slot_date"
+            value={today}
+            required
+            class={fieldClass + invalid('slot_date')}
+          />
+        </div>
+        <div>
+          <label class={labelClass} for="slot_time">Start time</label>
+          <select id="slot_time" name="slot_time" required class={fieldClass + invalid('slot_time')}>
+            {times.map(t => <option value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Customer -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+      <h2 class="text-white font-semibold mb-4">Customer</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class={labelClass} for="name">Name</label>
+          <input type="text" id="name" name="name" required class={fieldClass + invalid('name')} />
+        </div>
+        <div>
+          <label class={labelClass} for="phone">Phone</label>
+          <input type="tel" id="phone" name="phone" required placeholder="780-555-0142" class={fieldClass + invalid('phone')} />
+        </div>
+        <div>
+          <label class={labelClass} for="email">Email <span class="text-zinc-600 normal-case">(optional)</span></label>
+          <input type="email" id="email" name="email" class={fieldClass + invalid('email')} />
+        </div>
+        <div>
+          <label class={labelClass} for="service">Service</label>
+          <select id="service" name="service" required class={fieldClass + invalid('service')}>
+            {services.map(([key, label]) => <option value={key}>{label}</option>)}
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class={labelClass} for="address">Address</label>
+          <input type="text" id="address" name="address" required class={fieldClass + invalid('address')} />
+        </div>
+        <div>
+          <label class={labelClass} for="city">City</label>
+          <input type="text" id="city" name="city" value="Edmonton" class={fieldClass + invalid('city')} />
+        </div>
+        <div>
+          <label class={labelClass} for="postal_code">Postal code <span class="text-zinc-600 normal-case">(optional)</span></label>
+          <input type="text" id="postal_code" name="postal_code" class={fieldClass + invalid('postal_code')} />
+        </div>
+        <div class="sm:col-span-2">
+          <label class={labelClass} for="description">What happened <span class="text-zinc-600 normal-case">(optional)</span></label>
+          <textarea id="description" name="description" rows="3" class={fieldClass + invalid('description')}></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      Payment route. Both insurance fields are always rendered — there is no
+      client JS on this page at all. The server validates per route and the
+      parser DROPS the insurance values on the private route rather than
+      storing whatever was typed before the radio was switched.
+    -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+      <h2 class="text-white font-semibold mb-1">Payment route</h2>
+      <p class="text-zinc-600 text-xs mb-4">
+        Insurance details are ignored and not stored on a private-pay job.
+      </p>
+
+      <div class="flex flex-wrap gap-5 mb-5 text-sm">
+        <label class="flex items-center gap-2 text-white">
+          <input type="radio" name="payment_route" value="private" checked class="accent-amber-500" />
+          Private pay
+        </label>
+        <label class="flex items-center gap-2 text-white">
+          <input type="radio" name="payment_route" value="insurance" class="accent-amber-500" />
+          Insurance claim
+        </label>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label class={labelClass} for="insurer_name">Insurance company</label>
+          <input type="text" id="insurer_name" name="insurer_name" class={fieldClass + invalid('insurer_name')} />
+        </div>
+        <div>
+          <label class={labelClass} for="policy_number">Policy number</label>
+          <input type="text" id="policy_number" name="policy_number" class={fieldClass + invalid('policy_number')} />
+        </div>
+        <div>
+          <label class={labelClass} for="claim_number">Claim number</label>
+          <input type="text" id="claim_number" name="claim_number" class={fieldClass + invalid('claim_number')} />
+        </div>
+      </div>
+    </div>
+
+    <!-- Office -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+      <h2 class="text-white font-semibold mb-4">Office</h2>
+
+      <div class="mb-5">
+        <label class={labelClass} for="admin_notes">Notes <span class="text-zinc-600 normal-case">(optional, internal)</span></label>
+        <textarea id="admin_notes" name="admin_notes" rows="2" class={fieldClass + invalid('admin_notes')}></textarea>
+      </div>
+
+      <!--
+        CASL. The timestamp IS the consent, so this box is unchecked by default
+        and is never ticked on the customer's behalf. Tick it only when they
+        said yes on the phone.
+      -->
+      <label class="flex items-start gap-3 text-sm text-white mb-4">
+        <input type="checkbox" name="sms_consent" value="1" class="mt-0.5 accent-amber-500" />
+        <span>
+          They agreed on the phone to receive text messages
+          <span class="block text-zinc-500 text-xs mt-0.5">
+            Leave unticked unless they said yes. Without this, no reminder text is ever sent.
+          </span>
+        </span>
+      </label>
+
+      <!--
+        Default ON, per the user's decision: a manual entry normally deserves a
+        confirmation. Untick it for an after-the-fact record entry. The office
+        notification is never sent from here.
+      -->
+      <label class="flex items-start gap-3 text-sm text-white">
+        <input type="checkbox" name="send_confirmation" value="1" checked class="mt-0.5 accent-amber-500" />
+        <span>
+          Email them the confirmation
+          <span class="block text-zinc-500 text-xs mt-0.5">
+            Only if an email address is entered. Untick when recording a visit after the fact.
+          </span>
+        </span>
+      </label>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button
+        type="submit"
+        class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+      >
+        Save appointment
+      </button>
+      <a href={ADMIN_APPOINTMENTS_PATH} class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+</AdminLayout>

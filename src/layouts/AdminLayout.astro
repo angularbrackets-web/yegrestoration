@@ -15,6 +15,7 @@ const { title, refresh } = Astro.props;
 const NAV = [
   { href: '/admin/', label: 'Leads', exact: ['/admin/'], prefixes: ['/admin/leads/'] },
   { href: '/admin/appointments/', label: 'Appointments', exact: [], prefixes: ['/admin/appointments/'] },
+  { href: '/admin/blackouts/', label: 'Blackouts', exact: ['/admin/blackouts/'], prefixes: [] },
 ] as const;
 
 // Compare on the slashed pathname so `/admin` and `/admin/` agree.

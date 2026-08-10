@@ -66,6 +66,14 @@ when the token is minted.
   BK-07's fix deliberately did not touch them (severity: low, a redirect per
   click; owner: **BK-10**, which rewrites the leads path and already owns
   "fix the 308"). Found by BK-07's implementation review.
+  **BK-08 found a fourth site in the same family:** `api/admin/reply.ts`'s
+  three `Location` headers (`/admin?error=validation`, `/admin/leads/${id}?…`)
+  are unslashed too, so every reply redirect costs an extra hop. Same
+  severity, same owner; left alone because BK-08's slash scan deliberately
+  covers only the files BK-08 wrote — widening it would have made this ticket
+  fix BK-10's path inline. `booking-admin.ts` now holds the slashed path
+  constants and `scripts/verify-booking-admin.ts` enforces the rule over any
+  file added to its list, so BK-10's fix is a one-line addition to that list.
 - **`appointment_files.size_bytes` is typed `number` but the driver returns a
   string.** It is `BIGINT`, which `@neondatabase/serverless` deserializes as a
   string the way `pg` does — `upload-token.ts` already wraps the same column in
@@ -325,7 +333,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | ✅ committed |
-| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | draft — in plan review |
+| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | ✅ committed |
 | BK-09 | Authenticated proxy for private Blob files | Reviewed | not started |
 
 ### P5 — Cutover

@@ -40,6 +40,14 @@ export type CommitResult = { id: number; files: number };
  *
  * Returns null when the slot was taken between the caller's check and this
  * insert. That is the only real double-booking guard in the system.
+ *
+ * `adminNotes` is BK-08's one addition: the manual-entry form carries an office
+ * note, and the alternative — inserting, then UPDATEing the note — would leave
+ * a window where a saved appointment has lost the note the office typed with
+ * it, for no gain. It is a trailing optional parameter and the public route
+ * does not pass it, so that path's statement is byte-identical to before apart
+ * from one NULL parameter. There is no `admin_notes` on `BookingPayload`
+ * because it is not the customer's field.
  */
 export async function insertBooking(
   sql: Sql,
@@ -47,19 +55,20 @@ export async function insertBooking(
   draftId: string | null,
   now: Date,
   source: 'web' | 'admin' = 'web',
+  adminNotes: string | null = null,
 ): Promise<CommitResult | null> {
   const rows = (await sql`
     WITH new_appt AS (
       INSERT INTO appointments (
         name, phone, email, service, description, address, city, postal_code,
         payment_route, insurer_name, policy_number, claim_number,
-        slot_start, source, sms_consent_at
+        slot_start, source, sms_consent_at, admin_notes
       ) VALUES (
         ${p.name}, ${p.phone}, ${p.email}, ${p.service}, ${p.description},
         ${p.address}, ${p.city}, ${p.postal_code},
         ${p.payment_route}, ${p.insurer_name}, ${p.policy_number}, ${p.claim_number},
         ${p.slotStart.toISOString()}, ${source},
-        ${p.smsConsent ? now.toISOString() : null}
+        ${p.smsConsent ? now.toISOString() : null}, ${adminNotes}
       )
       ON CONFLICT (slot_start) WHERE status <> 'cancelled' DO NOTHING
       RETURNING id
