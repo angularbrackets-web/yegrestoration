@@ -45,6 +45,23 @@ when the token is minted.
 
 ## Known traps
 
+- **Admin login is a redirect loop in production — `/admin` has been
+  unreachable since ~2026-07-04.** `middleware.ts`'s `PUBLIC_PATHS` holds
+  unslashed paths (`/admin/login`), but production 308-normalizes every
+  request to the slashed form, which then fails the exact-match lookup and
+  302s back to the unslashed form: an infinite GET loop, and the login POST
+  308s into the middleware's 401. Confirmed by curl against the live site
+  during BK-07 plan review (2026-08-10); the 30-day cookie means no
+  pre-existing session survives either. The trailing-slash Known trap below
+  was recorded for API fetches only — this is the same trap biting page
+  paths (severity: **high**, the whole admin surface including leads is dead;
+  owner: **BK-07**, fix in scope as item 0).
+- **The leads pages render dates with bare `toLocale*` and no `timeZone`** —
+  `admin/index.astro` and `admin/leads/[id].astro` show `created_at` in the
+  server's zone (UTC on Vercel), a few hours off. Cosmetic for created-at;
+  the pattern becomes a wrong-day defect if ever copied onto a slot time,
+  which is why BK-07 bans it in the appointments pages (severity: low;
+  owner: BK-10, which already rewrites the leads path).
 - **`trailingSlash: 'always'` applies to API routes.** Generated Vercel patterns
   are `^/api/booking/draft/$`; the unslashed form 308-redirects. Client fetches and
   the vercel.json cron path must include the trailing slash. Constants exist in
@@ -288,7 +305,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-07 | Appointments list + detail in `/admin` | Reviewed | not started |
+| BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | plan-reviewed |
 | BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | not started |
 | BK-09 | Authenticated proxy for private Blob files | Reviewed | not started |
 
