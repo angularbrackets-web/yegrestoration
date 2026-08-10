@@ -132,14 +132,15 @@ when the token is minted.
   both files into `process.env` and passes that environment to the dev server it
   spawns — so the scripted gate is the reproducible path, and a hand-started
   `npx astro dev` is the one that needs `export`s.
-- **`PUBLIC_AW_BOOKING_LABEL` is unset, so booked assessments report to GA4 but
-  not to Google Ads.** Added in BK-04. It needs a *new conversion action* in the
-  client's Ads account (runbook Step 6) as well as the Vercel variable, so it is
-  not a copy-paste of an existing value. Until both exist the booking funnel is
-  invisible to Ads bidding while looking tracked in GA4 — which is the failure
-  mode worth naming, because nothing is broken enough to notice (severity:
-  medium, it is the conversion the whole booking system exists to produce;
-  owner: BK-11).
+- ~~**`PUBLIC_AW_BOOKING_LABEL` is unset, so booked assessments report to GA4
+  but not to Google Ads.**~~ **Resolved 2026-08-08**: the user created the
+  "Assessment booked" conversion action in the client's Ads account and set
+  `PUBLIC_AW_BOOKING_LABEL` (with the rest of `PUBLIC_AW_*`) in Vercel,
+  Production-only, verified as real values in the dashboard. The Ads-side
+  conversion count stays 0 until a real ad click books — that is correct, not
+  a misfire; the action's status reads "Misconfigured"/"No recent conversions"
+  until then and only matters if it persists 24–48 h *after* ad traffic
+  resumes. BK-11 still owns the final launch check.
 - **`import.meta.env.PUBLIC_*` must be read as a literal expression, never
   through a helper.** Vite substitutes these at build time by matching the
   source text, so `readEnv('PUBLIC_AW_ID')` or `env[name]` compiles to a lookup
@@ -265,6 +266,23 @@ port those two practices; skip prompt-weight tiers and standing third reviews.
 | --- | --- | --- | --- |
 | BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | ✅ committed |
 | BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number in verification |
+
+**→ /book/ went live on production — 2026-08-10.** The merge hold ended with
+BK-05: booking is on `main`, deployed, and migration 003 is applied to
+production (`migrate:status`: 001–003 all ✓). Verified end to end with a real
+test booking, #19 (mold, insurance route, ZZTEST fixture policy/claim, Sun
+Aug 23 15:30): the confirmation page showed the slot, reference number, and
+emailed-copy line; the customer confirmation reached a real Outlook inbox
+carrying the full settled copy list and **no** policy or claim number (the
+locked PII rule, checked against production, not just the verify script); the
+internal notification reached `info@yegrestoration.ca` carrying insurer,
+policy, and claim; and the production row had both `confirmation_sent_at` and
+`internal_notified_at` stamped. The test row was then deleted (0
+`appointment_files`, no stray ZZTEST rows, production back to 0 appointments).
+This is go-live for the booking page, **not** the P5 cutover — the contact
+form still exists until BK-10. The booking conversion reports to GA4; the
+Ads-side count stays 0 until real ad-click traffic books (see the resolved
+`PUBLIC_AW_BOOKING_LABEL` entry in Known traps).
 
 ### P4 — Admin
 
