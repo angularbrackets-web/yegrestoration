@@ -56,6 +56,23 @@ when the token is minted.
   was recorded for API fetches only — this is the same trap biting page
   paths (severity: **high**, the whole admin surface including leads is dead;
   owner: **BK-07**, fix in scope as item 0).
+- **The leads pages still link unslashed, and each click eats a 308.**
+  `admin/index.astro`'s `/admin/leads/${id}`, `admin/leads/[id].astro`'s
+  `href="/admin"`, and its reply form's `action="/api/admin/reply"`. None is
+  broken — a 308 preserves method and body, so the reply POST still lands —
+  but they are the same spelling that made the login loop possible, and
+  BK-07's fix deliberately did not touch them (severity: low, a redirect per
+  click; owner: **BK-10**, which rewrites the leads path and already owns
+  "fix the 308"). Found by BK-07's implementation review.
+- **`appointment_files.size_bytes` is typed `number` but the driver returns a
+  string.** It is `BIGINT`, which `@neondatabase/serverless` deserializes as a
+  string the way `pg` does — `upload-token.ts` already wraps the same column in
+  `Number(...)` and types its own row as `string | number`, but `db.ts`'s
+  `AppointmentFile` says `number`, so `size_bytes / 1024` typechecks and
+  produces `NaN`. BK-07's `formatFileSize` coerces defensively and its verify
+  script pins the string case, so nothing is broken today (severity: low,
+  doc-level, same family as the `Lead` timestamp entry below; owner: **BK-09**,
+  the next ticket to touch `appointment_files`).
 - **The leads pages render dates with bare `toLocale*` and no `timeZone`** —
   `admin/index.astro` and `admin/leads/[id].astro` show `created_at` in the
   server's zone (UTC on Vercel), a few hours off. Cosmetic for created-at;

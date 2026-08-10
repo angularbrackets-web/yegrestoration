@@ -8,7 +8,7 @@ export const POST: APIRoute = async () => {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: '/admin/login',
+      Location: '/admin/login/',
       'Set-Cookie': cookie,
     },
   });

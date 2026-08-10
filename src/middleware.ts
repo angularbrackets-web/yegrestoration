@@ -1,7 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { isValidToken, COOKIE_NAME } from './lib/auth';
-
-const PUBLIC_PATHS = new Set(['/admin/login', '/api/admin/login', '/api/admin/logout']);
+import { ADMIN_LOGIN_PATH, COOKIE_NAME, isPublicAdminPath, isValidToken } from './lib/auth';
 
 export const onRequest = defineMiddleware(async ({ url, cookies }, next) => {
   const { pathname } = url;
@@ -10,7 +8,7 @@ export const onRequest = defineMiddleware(async ({ url, cookies }, next) => {
   const isAdminApi = pathname.startsWith('/api/admin');
 
   if (!isAdminPage && !isAdminApi) return next();
-  if (PUBLIC_PATHS.has(pathname)) return next();
+  if (isPublicAdminPath(pathname)) return next();
 
   const token = cookies.get(COOKIE_NAME)?.value;
   const password = import.meta.env.ADMIN_PASSWORD;
@@ -24,7 +22,7 @@ export const onRequest = defineMiddleware(async ({ url, cookies }, next) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    return Response.redirect(new URL('/admin/login', url));
+    return Response.redirect(new URL(ADMIN_LOGIN_PATH, url));
   }
 
   return next();

@@ -1,0 +1,288 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import {
+  formatAdminTimestamp,
+  formatFileSize,
+  notificationFlags,
+  PAYMENT_ROUTE_LABELS,
+  PIPELINE_STAGE_LABELS,
+  STATUS_LABELS,
+} from '../../../lib/booking-admin';
+import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { formatSlot } from '../../../lib/booking-time';
+import { getDb, SERVICE_LABELS, type Appointment, type AppointmentFile } from '../../../lib/db';
+
+// Validate before querying. The driver parameterizes, so this is defense in
+// depth — its visible job is turning /admin/appointments/abc into a clean 404
+// instead of a 500 from Postgres rejecting the cast. The upper bound is int4's:
+// `id` is a SERIAL, and a larger number is a 22003 error, not a missing row.
+// No leading zeros: /admin/appointments/0000000012/ is a second URL for the
+// same row, and the canonical one is one character away.
+const raw = Astro.params.id;
+const id = typeof raw === 'string' && /^[1-9][0-9]{0,9}$/.test(raw) ? Number(raw) : null;
+if (id === null || id < 1 || id > 2147483647) {
+  return new Response('Not found', { status: 404 });
+}
+
+let appointment: Appointment | null = null;
+let files: AppointmentFile[] = [];
+let dbError: string | null = null;
+
+try {
+  const sql = getDb();
+  const rows = (await sql`SELECT * FROM appointments WHERE id = ${id}`) as Appointment[];
+  appointment = rows[0] ?? null;
+
+  if (appointment) {
+    files = (await sql`
+      SELECT * FROM appointment_files WHERE appointment_id = ${id} ORDER BY id
+    `) as AppointmentFile[];
+  }
+} catch (e) {
+  dbError = 'Could not load appointment.';
+  console.error(e);
+}
+
+// A row that does not exist is a 404, the same answer a bad id gets. A database
+// that is down is not — that renders the error card below.
+if (!appointment && !dbError) {
+  return new Response('Not found', { status: 404 });
+}
+
+const flags = appointment
+  ? notificationFlags(appointment)
+  : { internalMissing: false, customerMissing: false };
+
+function statusClasses(status: Appointment['status']) {
+  if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
+  if (status === 'cancelled') return 'bg-zinc-800 text-zinc-500 border-zinc-700';
+  if (status === 'no_show') return 'bg-red-900/40 text-red-300 border-red-800';
+  return 'bg-blue-900/40 text-blue-300 border-blue-800';
+}
+---
+
+<AdminLayout title={appointment ? `${appointment.name} — Appointment` : 'Appointment'}>
+  <div class="mb-5">
+    <a href="/admin/appointments/" class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
+      ← All Appointments
+    </a>
+  </div>
+
+  {dbError && (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">{dbError}</div>
+  )}
+
+  {appointment && (
+    <div class="space-y-5">
+      <!-- Visit -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <div class="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h1 class="text-white text-xl font-bold">{formatSlot(appointment.slot_start)}</h1>
+            <p class="text-zinc-500 text-xs mt-1">
+              {TIMEZONE_NOTE} · {appointment.duration_minutes} minutes · booking #{appointment.id}
+            </p>
+          </div>
+          <span class={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium border shrink-0 ${statusClasses(appointment.status)}`}>
+            {STATUS_LABELS[appointment.status]}
+          </span>
+        </div>
+
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Service</dt>
+            <dd class="text-white">{SERVICE_LABELS[appointment.service] ?? appointment.service}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Pipeline stage</dt>
+            <dd class="text-white">{PIPELINE_STAGE_LABELS[appointment.pipeline_stage]}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Payment route</dt>
+            <dd class="text-white">{PAYMENT_ROUTE_LABELS[appointment.payment_route]}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Source</dt>
+            <dd class="text-white">{appointment.source === 'admin' ? 'Entered by office' : 'Booked online'}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Booked</dt>
+            <dd class="text-white">{formatAdminTimestamp(appointment.created_at)}</dd>
+          </div>
+          {appointment.cancelled_at && (
+            <div>
+              <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Cancelled</dt>
+              <dd class="text-red-300">{formatAdminTimestamp(appointment.cancelled_at)}</dd>
+            </div>
+          )}
+        </dl>
+      </div>
+
+      <!-- Customer -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h2 class="text-white font-semibold mb-4">Customer</h2>
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Name</dt>
+            <dd class="text-white">{appointment.name}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Phone</dt>
+            <dd class="text-white">
+              <a href={`tel:${appointment.phone}`} class="hover:text-amber-400 transition-colors">{appointment.phone}</a>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Email</dt>
+            <dd class="text-white">
+              {appointment.email
+                ? <a href={`mailto:${appointment.email}`} class="hover:text-amber-400 transition-colors">{appointment.email}</a>
+                : <span class="text-zinc-600">Not provided</span>
+              }
+            </dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Address</dt>
+            <dd class="text-white">
+              {appointment.address}<br />
+              {appointment.city}{appointment.postal_code ? ` ${appointment.postal_code}` : ''}
+            </dd>
+          </div>
+          {appointment.description && (
+            <div class="sm:col-span-2">
+              <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">What happened</dt>
+              <dd class="text-white whitespace-pre-wrap bg-zinc-800/50 rounded-lg p-3 text-sm leading-relaxed">
+                {appointment.description}
+              </dd>
+            </div>
+          )}
+        </dl>
+      </div>
+
+      <!--
+        Insurance — the sanctioned admin surface for these identifiers
+        (002-booking: "email and the admin panel only"). Absent entirely on the
+        private route, rather than rendered empty.
+      -->
+      {appointment.payment_route === 'insurance' && (
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <h2 class="text-white font-semibold mb-4">Insurance</h2>
+          <dl class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Insurer</dt>
+              <dd class="text-white">{appointment.insurer_name ?? <span class="text-zinc-600">Not provided</span>}</dd>
+            </div>
+            <div>
+              <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Policy number</dt>
+              <dd class="text-white font-mono text-xs">{appointment.policy_number ?? <span class="text-zinc-600 font-sans text-sm">Not provided</span>}</dd>
+            </div>
+            <div>
+              <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Claim number</dt>
+              <dd class="text-white font-mono text-xs">{appointment.claim_number ?? <span class="text-zinc-600 font-sans text-sm">Not provided</span>}</dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
+      <!--
+        Notifications. The two BK-05 stamps are the only ones that can be a
+        FAILURE; consent and reminder are neutral states by design — a null
+        consent is "no consent" (the timestamp is the consent), and a null
+        reminder is expected on every row until BK-06 ships.
+      -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h2 class="text-white font-semibold mb-4">Notifications</h2>
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Office notified</dt>
+            <dd>
+              {appointment.internal_notified_at ? (
+                <span class="text-white">{formatAdminTimestamp(appointment.internal_notified_at)}</span>
+              ) : flags.internalMissing ? (
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-red-900/40 text-red-300 border-red-800">
+                  Never sent — the office was not told
+                </span>
+              ) : (
+                <span class="text-zinc-600">Not applicable</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Customer confirmation</dt>
+            <dd>
+              {appointment.confirmation_sent_at ? (
+                <span class="text-white">{formatAdminTimestamp(appointment.confirmation_sent_at)}</span>
+              ) : flags.customerMissing ? (
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-amber-900/30 text-amber-300 border-amber-800/70">
+                  Never sent
+                </span>
+              ) : (
+                <span class="text-zinc-600">Not applicable</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">SMS consent</dt>
+            <dd class="text-white">
+              {appointment.sms_consent_at
+                ? formatAdminTimestamp(appointment.sms_consent_at)
+                : <span class="text-zinc-500">No consent</span>
+              }
+            </dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Reminder</dt>
+            <dd class="text-white">
+              {appointment.reminder_sent_at
+                ? formatAdminTimestamp(appointment.reminder_sent_at)
+                : <span class="text-zinc-500">Not sent</span>
+              }
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      <!--
+        Files: names and sizes only. The Blob store is private and enforces it
+        at the store level, so a URL here would 403 anyway — viewing needs the
+        authenticated proxy in BK-09. Pathnames and URLs are not rendered even
+        as text.
+      -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h2 class="text-white font-semibold mb-1">
+          Files <span class="text-zinc-600 font-normal text-sm">({files.length})</span>
+        </h2>
+        <p class="text-zinc-600 text-xs mb-4">Viewing uploads is not built yet (BK-09).</p>
+
+        {files.length === 0 ? (
+          <p class="text-zinc-600 text-sm">No files attached.</p>
+        ) : (
+          <ul class="divide-y divide-zinc-800/60 text-sm">
+            {files.map(file => (
+              <li class="py-2.5 flex items-center justify-between gap-4">
+                <span class="text-white truncate">{file.original_name ?? 'Unnamed file'}</span>
+                <span class="text-zinc-500 text-xs shrink-0">
+                  {formatFileSize(file.size_bytes)}
+                  {file.upload_state === 'pending' && ' · upload not confirmed'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <!-- Notes — read-only here; editing is BK-08. -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h2 class="text-white font-semibold mb-4">Office notes</h2>
+        {appointment.admin_notes ? (
+          <p class="text-white whitespace-pre-wrap bg-zinc-800/50 rounded-lg p-3 text-sm leading-relaxed">
+            {appointment.admin_notes}
+          </p>
+        ) : (
+          <p class="text-zinc-600 text-sm">No notes.</p>
+        )}
+      </div>
+    </div>
+  )}
+</AdminLayout>

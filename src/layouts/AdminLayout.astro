@@ -6,6 +6,24 @@ interface Props {
   refresh?: number;
 }
 const { title, refresh } = Astro.props;
+
+// Slashed hrefs throughout: `trailingSlash: 'always'` means the unslashed form
+// costs a 308 on every click.
+// A section is a set of prefixes rather than the href alone, so a detail page
+// keeps its list highlighted. `/admin/` is exact — as a prefix it would match
+// every admin page there is.
+const NAV = [
+  { href: '/admin/', label: 'Leads', exact: ['/admin/'], prefixes: ['/admin/leads/'] },
+  { href: '/admin/appointments/', label: 'Appointments', exact: [], prefixes: ['/admin/appointments/'] },
+] as const;
+
+// Compare on the slashed pathname so `/admin` and `/admin/` agree.
+const pathname = Astro.url.pathname.endsWith('/') ? Astro.url.pathname : `${Astro.url.pathname}/`;
+function isCurrent(item: (typeof NAV)[number]): boolean {
+  return (
+    item.exact.some((p) => p === pathname) || item.prefixes.some((p) => pathname.startsWith(p))
+  );
+}
 ---
 
 <!doctype html>
@@ -20,9 +38,26 @@ const { title, refresh } = Astro.props;
   </head>
   <body class="bg-zinc-950 min-h-screen text-zinc-300 antialiased">
     <nav class="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur sticky top-0 z-10">
-      <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-        <a href="/admin" class="text-white font-semibold text-sm tracking-wide">YEG Restoration — Admin</a>
-        <form method="POST" action="/api/admin/logout">
+      <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-5 min-w-0">
+          <a href="/admin/" class="text-white font-semibold text-sm tracking-wide shrink-0">YEG Restoration — Admin</a>
+          <div class="flex items-center gap-4">
+            {NAV.map(item => (
+              <a
+                href={item.href}
+                aria-current={isCurrent(item) ? 'page' : undefined}
+                class={`text-sm transition-colors ${
+                  isCurrent(item)
+                    ? 'text-amber-400 font-medium'
+                    : 'text-zinc-500 hover:text-zinc-200'
+                }`}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
+        </div>
+        <form method="POST" action="/api/admin/logout/">
           <button
             type="submit"
             class="text-zinc-500 hover:text-zinc-200 text-sm transition-colors"

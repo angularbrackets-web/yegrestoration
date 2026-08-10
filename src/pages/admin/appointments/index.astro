@@ -1,0 +1,225 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import {
+  hasNotificationWarning,
+  notificationFlags,
+  partitionAppointments,
+  PAYMENT_ROUTE_LABELS,
+  STATUS_LABELS,
+} from '../../../lib/booking-admin';
+import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { formatSlot } from '../../../lib/booking-time';
+import { getDb, SERVICE_LABELS, type Appointment } from '../../../lib/db';
+
+let appointments: Appointment[] = [];
+let fileCounts = new Map<number, number>();
+let dbError: string | null = null;
+
+try {
+  const sql = getDb();
+
+  // `SELECT *` matches the leads page. The table stays small — one crew, five
+  // slots a day, a 14-day window — so there is no pagination and no column
+  // list to keep chasing the schema (BK-05's stamp columns would have broken
+  // one already).
+  appointments = (await sql`
+    SELECT * FROM appointments ORDER BY slot_start DESC
+  `) as Appointment[];
+
+  // Counted, not joined: a LEFT JOIN on a one-to-many would multiply the
+  // appointment rows. Claimed rows count regardless of `upload_state`, which
+  // is the same rule the commit path claims by — `onUploadCompleted` never
+  // fires on localhost, so 'pending' is a normal state for a real file.
+  const counts = (await sql`
+    SELECT appointment_id, COUNT(*)::int AS file_count
+    FROM appointment_files
+    WHERE appointment_id IS NOT NULL
+    GROUP BY appointment_id
+  `) as { appointment_id: number; file_count: number }[];
+  fileCounts = new Map(counts.map((row) => [row.appointment_id, row.file_count]));
+} catch (e) {
+  dbError = 'Could not load appointments. Is DATABASE_URL configured?';
+  console.error(e);
+}
+
+const { upcoming, past } = partitionAppointments(appointments, new Date());
+const warningCount = upcoming.filter(hasNotificationWarning).length;
+
+function serviceLabel(service: string) {
+  return SERVICE_LABELS[service] ?? service;
+}
+
+function statusClasses(status: Appointment['status']) {
+  if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
+  if (status === 'cancelled') return 'bg-zinc-800 text-zinc-500 border-zinc-700';
+  if (status === 'no_show') return 'bg-red-900/40 text-red-300 border-red-800';
+  return 'bg-blue-900/40 text-blue-300 border-blue-800';
+}
+
+/** A `booked` row sitting in Past has simply elapsed — nobody has closed it out. */
+function pastStatusLabel(appointment: Appointment) {
+  return appointment.status === 'booked' ? 'Elapsed' : STATUS_LABELS[appointment.status];
+}
+---
+
+<AdminLayout title="Appointments" refresh={30}>
+  {dbError ? (
+    <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">
+      {dbError}
+    </div>
+  ) : (
+    <>
+      <div class="flex items-start justify-between mb-6 gap-4">
+        <div>
+          <h1 class="text-white text-xl font-bold">Appointments</h1>
+          <p class="text-zinc-500 text-xs mt-0.5">All times {TIMEZONE_NOTE}.</p>
+          {warningCount > 0 && (
+            <p class="text-red-400 text-sm mt-1">
+              {warningCount} upcoming {warningCount === 1 ? 'appointment' : 'appointments'} with a
+              notification that never sent
+            </p>
+          )}
+        </div>
+        <span class="text-zinc-600 text-sm shrink-0">{appointments.length} total</span>
+      </div>
+
+      <section class="mb-10">
+        <h2 class="text-white text-sm font-semibold uppercase tracking-wide mb-3">
+          Upcoming <span class="text-zinc-600 font-normal">({upcoming.length})</span>
+        </h2>
+
+        {upcoming.length === 0 ? (
+          <div class="text-center py-12 text-zinc-600 text-sm">Nothing booked.</div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-zinc-500 text-left border-b border-zinc-800 text-xs uppercase tracking-wide">
+                  <th class="pb-3 pr-6 font-medium">Slot</th>
+                  <th class="pb-3 pr-6 font-medium">Name</th>
+                  <th class="pb-3 pr-6 font-medium">Phone</th>
+                  <th class="pb-3 pr-6 font-medium">Service</th>
+                  <th class="pb-3 pr-6 font-medium">City</th>
+                  <th class="pb-3 pr-6 font-medium">Route</th>
+                  <th class="pb-3 pr-6 font-medium">Files</th>
+                  <th class="pb-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/60">
+                {upcoming.map(appointment => {
+                  const flags = notificationFlags(appointment);
+                  return (
+                    <tr class="hover:bg-zinc-900/60 transition-colors text-zinc-400">
+                      <td class="py-3.5 pr-6 whitespace-nowrap">
+                        <a
+                          href={`/admin/appointments/${appointment.id}/`}
+                          class="text-white font-medium hover:text-amber-400 transition-colors"
+                        >
+                          {formatSlot(appointment.slot_start)}
+                        </a>
+                        {(flags.internalMissing || flags.customerMissing) && (
+                          <div class="mt-1 flex flex-wrap gap-1">
+                            {flags.internalMissing && (
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border bg-red-900/40 text-red-300 border-red-800">
+                                Office never notified
+                              </span>
+                            )}
+                            {flags.customerMissing && (
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border bg-amber-900/30 text-amber-300 border-amber-800/70">
+                                No confirmation sent
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td class="py-3.5 pr-6 text-white">{appointment.name}</td>
+                      <td class="py-3.5 pr-6 whitespace-nowrap">
+                        <a href={`tel:${appointment.phone}`} class="hover:text-amber-400 transition-colors">
+                          {appointment.phone}
+                        </a>
+                      </td>
+                      <td class="py-3.5 pr-6">{serviceLabel(appointment.service)}</td>
+                      <td class="py-3.5 pr-6">{appointment.city}</td>
+                      <td class="py-3.5 pr-6">
+                        <span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${
+                          appointment.payment_route === 'insurance'
+                            ? 'bg-indigo-900/40 text-indigo-300 border-indigo-800'
+                            : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                        }`}>
+                          {PAYMENT_ROUTE_LABELS[appointment.payment_route]}
+                        </span>
+                      </td>
+                      <td class="py-3.5 pr-6 text-zinc-500">{fileCounts.get(appointment.id) ?? 0}</td>
+                      <td class="py-3.5">
+                        <a
+                          href={`/admin/appointments/${appointment.id}/`}
+                          class="text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors"
+                        >
+                          View →
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2 class="text-zinc-500 text-sm font-semibold uppercase tracking-wide mb-3">
+          Past <span class="text-zinc-600 font-normal">({past.length})</span>
+        </h2>
+
+        {past.length === 0 ? (
+          <div class="text-center py-8 text-zinc-700 text-sm">Nothing yet.</div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-zinc-600 text-left border-b border-zinc-800/60 text-xs uppercase tracking-wide">
+                  <th class="pb-3 pr-6 font-medium">Slot</th>
+                  <th class="pb-3 pr-6 font-medium">Name</th>
+                  <th class="pb-3 pr-6 font-medium">Service</th>
+                  <th class="pb-3 pr-6 font-medium">Status</th>
+                  <th class="pb-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/40">
+                {past.map(appointment => (
+                  <tr class="hover:bg-zinc-900/40 transition-colors text-zinc-500">
+                    <td class="py-3 pr-6 whitespace-nowrap">
+                      <a
+                        href={`/admin/appointments/${appointment.id}/`}
+                        class="hover:text-amber-400 transition-colors"
+                      >
+                        {formatSlot(appointment.slot_start)}
+                      </a>
+                    </td>
+                    <td class="py-3 pr-6">{appointment.name}</td>
+                    <td class="py-3 pr-6">{serviceLabel(appointment.service)}</td>
+                    <td class="py-3 pr-6">
+                      <span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${statusClasses(appointment.status)}`}>
+                        {pastStatusLabel(appointment)}
+                      </span>
+                    </td>
+                    <td class="py-3">
+                      <a
+                        href={`/admin/appointments/${appointment.id}/`}
+                        class="text-zinc-600 hover:text-amber-300 text-xs font-medium transition-colors"
+                      >
+                        View →
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  )}
+</AdminLayout>

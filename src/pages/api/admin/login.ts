@@ -11,7 +11,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (!expected || password !== expected) {
     return new Response(null, {
       status: 302,
-      headers: { Location: '/admin/login?error=1' },
+      headers: { Location: '/admin/login/?error=1' },
     });
   }
 
@@ -22,7 +22,7 @@ export const POST: APIRoute = async ({ request }) => {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: '/admin',
+      Location: '/admin/',
       'Set-Cookie': cookie,
     },
   });
