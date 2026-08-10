@@ -45,17 +45,19 @@ when the token is minted.
 
 ## Known traps
 
-- **Admin login is a redirect loop in production — `/admin` has been
-  unreachable since ~2026-07-04.** `middleware.ts`'s `PUBLIC_PATHS` holds
-  unslashed paths (`/admin/login`), but production 308-normalizes every
-  request to the slashed form, which then fails the exact-match lookup and
-  302s back to the unslashed form: an infinite GET loop, and the login POST
-  308s into the middleware's 401. Confirmed by curl against the live site
-  during BK-07 plan review (2026-08-10); the 30-day cookie means no
-  pre-existing session survives either. The trailing-slash Known trap below
-  was recorded for API fetches only — this is the same trap biting page
-  paths (severity: **high**, the whole admin surface including leads is dead;
-  owner: **BK-07**, fix in scope as item 0).
+- ~~**Admin login is a redirect loop in production — `/admin` has been
+  unreachable since ~2026-07-04.**~~ **Fixed in BK-07** (`ef6d76e`, deployed
+  2026-08-10): `GET /admin/login/` answers 200 where it 302-looped, and every
+  protected path redirects there in one hop. The cause, kept because it is the
+  general shape of the trap: `middleware.ts`'s `PUBLIC_PATHS` held unslashed
+  paths (`/admin/login`) while production 308-normalizes every request to the
+  slashed form, which then failed the exact-match lookup and 302'd back to the
+  unslashed form — an infinite GET loop, with the login POST 308ing into the
+  middleware's 401. **Path matching against a literal is a trailing-slash bug
+  waiting to happen**; `isPublicAdminPath` in `src/lib/auth.ts` is now the one
+  place that comparison is made, it normalizes exactly one trailing slash
+  before an exact match, and `scripts/verify-booking-admin.ts` pins both it
+  and the middleware call site (reverting either is red).
 - **The leads pages still link unslashed, and each click eats a 308.**
   `admin/index.astro`'s `/admin/leads/${id}`, `admin/leads/[id].astro`'s
   `href="/admin"`, and its reply form's `action="/api/admin/reply"`. None is
@@ -322,7 +324,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | plan-reviewed |
+| BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | ✅ committed |
 | BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | not started |
 | BK-09 | Authenticated proxy for private Blob files | Reviewed | not started |
 
