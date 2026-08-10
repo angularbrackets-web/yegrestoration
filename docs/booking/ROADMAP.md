@@ -325,7 +325,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | ✅ committed |
-| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | not started |
+| BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | draft — in plan review |
 | BK-09 | Authenticated proxy for private Blob files | Reviewed | not started |
 
 ### P5 — Cutover
