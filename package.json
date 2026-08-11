@@ -22,7 +22,8 @@
     "verify:booking:smoke": "tsx scripts/verify-booking-smoke.ts",
     "verify:booking:admin": "tsx scripts/verify-booking-admin.ts",
     "verify:booking:admin:entry": "tsx scripts/verify-booking-admin-entry.ts",
-    "verify:booking:admin:db": "tsx scripts/verify-booking-admin-db.ts"
+    "verify:booking:admin:db": "tsx scripts/verify-booking-admin-db.ts",
+    "verify:booking:files": "tsx scripts/verify-booking-files.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.2",

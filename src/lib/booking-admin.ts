@@ -27,6 +27,9 @@ export const ADMIN_APPOINTMENTS_PATH = '/admin/appointments/';
 export const ADMIN_APPOINTMENT_NEW_PATH = '/admin/appointments/new/';
 export const ADMIN_BLACKOUTS_PATH = '/admin/blackouts/';
 
+/** BK-09's authenticated file proxy. `/api/admin/files/7/` redirects to a signed URL. */
+export const ADMIN_FILE_ENDPOINT = '/api/admin/files/';
+
 export const ADMIN_APPOINTMENT_CREATE_ENDPOINT = '/api/admin/appointments/create/';
 export const ADMIN_APPOINTMENT_UPDATE_ENDPOINT = '/api/admin/appointments/update/';
 export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend/';
@@ -36,6 +39,17 @@ export const ADMIN_BLACKOUT_DELETE_ENDPOINT = '/api/admin/blackouts/delete/';
 /** `/admin/appointments/12/` — the one place that URL is spelled. */
 export function adminAppointmentPath(id: number): string {
   return `${ADMIN_APPOINTMENTS_PATH}${id}/`;
+}
+
+/**
+ * `/api/admin/files/7/` — an `appointment_files.id`, never a pathname.
+ *
+ * The id is the entire request input by design: the route reads the pathname
+ * off the row, so nothing the browser sends can influence which blob gets
+ * signed.
+ */
+export function adminFilePath(fileId: number): string {
+  return `${ADMIN_FILE_ENDPOINT}${fileId}/`;
 }
 
 /**

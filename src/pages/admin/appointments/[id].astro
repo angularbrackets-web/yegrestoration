@@ -5,6 +5,7 @@ import {
   ADMIN_APPOINTMENTS_PATH,
   ADMIN_APPOINTMENT_RESEND_ENDPOINT,
   ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
+  adminFilePath,
   customerStampState,
   formatAdminTimestamp,
   formatFileSize,
@@ -335,16 +336,24 @@ function statusClasses(status: Appointment['status']) {
       </div>
 
       <!--
-        Files: names and sizes only. The Blob store is private and enforces it
-        at the store level, so a URL here would 403 anyway — viewing needs the
-        authenticated proxy in BK-09. Pathnames and URLs are not rendered even
-        as text.
+        Files. The Blob store is private and enforces it at the store level, so
+        a direct URL here would 403 — each name links to the authenticated proxy
+        instead, which 302s to a signed URL that dies after a few minutes.
+        Pathnames and URLs are still not rendered even as text: the link carries
+        the row id and nothing else.
+
+        Pending rows render unlinked. Their bytes may not exist yet — the
+        upload-completed webhook never fires against localhost — and a link that
+        opens a CDN 404 is worse than no link. The ROUTE does not 404 them; this
+        is presentation.
       -->
       <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <h2 class="text-white font-semibold mb-1">
           Files <span class="text-zinc-600 font-normal text-sm">({files.length})</span>
         </h2>
-        <p class="text-zinc-600 text-xs mb-4">Viewing uploads is not built yet (BK-09).</p>
+        <p class="text-zinc-600 text-xs mb-4">
+          Links open in a new tab and expire after a few minutes. Click again for a fresh one.
+        </p>
 
         {files.length === 0 ? (
           <p class="text-zinc-600 text-sm">No files attached.</p>
@@ -352,7 +361,18 @@ function statusClasses(status: Appointment['status']) {
           <ul class="divide-y divide-zinc-800/60 text-sm">
             {files.map(file => (
               <li class="py-2.5 flex items-center justify-between gap-4">
-                <span class="text-white truncate">{file.original_name ?? 'Unnamed file'}</span>
+                {file.upload_state === 'pending' ? (
+                  <span class="text-zinc-400 truncate">{file.original_name ?? 'Unnamed file'}</span>
+                ) : (
+                  <a
+                    href={adminFilePath(file.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-amber-400 hover:text-amber-300 truncate transition-colors"
+                  >
+                    {file.original_name ?? 'Unnamed file'}
+                  </a>
+                )}
                 <span class="text-zinc-500 text-xs shrink-0">
                   {formatFileSize(file.size_bytes)}
                   {file.upload_state === 'pending' && ' · upload not confirmed'}

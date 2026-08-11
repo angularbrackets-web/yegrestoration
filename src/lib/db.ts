@@ -84,7 +84,15 @@ export type AppointmentFile = {
   pathname: string;
   url: string | null;
   content_type: string;
-  size_bytes: number | null;
+  /**
+   * `BIGINT`, which `@neondatabase/serverless` deserializes as a STRING the way
+   * `pg` does — a bigint does not fit a JS number, so the driver refuses to
+   * guess. Typed `number` this column let `size_bytes / 1024` typecheck and
+   * produce `NaN`; `formatFileSize` and `upload-token.ts` both already coerce.
+   * See the note above on timestamp columns: same class of bug, opposite
+   * direction.
+   */
+  size_bytes: string | number | null;
   original_name: string | null;
   upload_state: 'pending' | 'uploaded';
   created_at: Date;

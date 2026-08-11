@@ -74,15 +74,26 @@ when the token is minted.
   fix BK-10's path inline. `booking-admin.ts` now holds the slashed path
   constants and `scripts/verify-booking-admin.ts` enforces the rule over any
   file added to its list, so BK-10's fix is a one-line addition to that list.
-- **`appointment_files.size_bytes` is typed `number` but the driver returns a
-  string.** It is `BIGINT`, which `@neondatabase/serverless` deserializes as a
-  string the way `pg` does — `upload-token.ts` already wraps the same column in
-  `Number(...)` and types its own row as `string | number`, but `db.ts`'s
-  `AppointmentFile` says `number`, so `size_bytes / 1024` typechecks and
-  produces `NaN`. BK-07's `formatFileSize` coerces defensively and its verify
-  script pins the string case, so nothing is broken today (severity: low,
-  doc-level, same family as the `Lead` timestamp entry below; owner: **BK-09**,
-  the next ticket to touch `appointment_files`).
+- ~~**`appointment_files.size_bytes` is typed `number` but the driver returns a
+  string.**~~ **Closed in BK-09.** `db.ts`'s `AppointmentFile.size_bytes` is now
+  `string | number | null`, which is what the `BIGINT` column actually
+  deserializes to — a bigint does not fit a JS number, so
+  `@neondatabase/serverless` hands back a string the way `pg` does, and the old
+  type let `size_bytes / 1024` typecheck into an `NaN`. Both halves of the claim
+  are now pinned: `verify-booking-admin-db.ts` asserts the *driver's* behaviour
+  against a real dev-branch row, and `verify-booking-files.ts` carries a
+  compile-time tie (`const _: AppointmentFile['size_bytes'] = '5242880'`) so
+  narrowing the type back stops `npm run typecheck` rather than going quietly
+  wrong. The runtime assert alone could never have gone red — it pins Postgres,
+  not this repo.
+- **`AbortSignal.timeout()` does not keep the Node event loop alive.** Its
+  timer is unref'd by design, so a `tsx` script whose only pending work is a
+  promise waiting on that signal exits with "Detected unsettled top-level
+  await" instead of failing — which turns a red-first break into a *silent
+  pass*. `verify-booking-files.ts` therefore races its abort assertion against
+  a deliberately ref'd watchdog. Found while red-observing BK-09's
+  `BLOB_ISSUE_TIMEOUT_MS` (severity: low, but it is the "assertion that cannot
+  fail" shape this project keeps paying for; owner: none, documented here).
 - **The leads pages render dates with bare `toLocale*` and no `timeZone`** —
   `admin/index.astro` and `admin/leads/[id].astro` show `created_at` in the
   server's zone (UTC on Vercel), a few hours off. Cosmetic for created-at;
@@ -334,7 +345,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | --- | --- | --- | --- |
 | BK-07 | Appointments list + detail in `/admin`; fix admin login loop | Reviewed | ✅ committed |
 | BK-08 | Manual entry (grid-snapped), status/stage edits, blackout dates | Reviewed | ✅ committed |
-| BK-09 | Authenticated proxy for private Blob files | Reviewed | draft — in plan review |
+| BK-09 | Authenticated proxy for private Blob files | Reviewed | ✅ committed |
 
 ### P5 — Cutover
 

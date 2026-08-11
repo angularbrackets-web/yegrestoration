@@ -83,6 +83,34 @@ export const UPLOAD_EXTENSIONS: Record<string, string> = {
 /** Uploads not claimed by a booking within this window are deleted by the cleanup cron. */
 export const UPLOAD_ORPHAN_TTL_HOURS = 24;
 
+/**
+ * How long an admin file link stays usable.
+ *
+ * The Blob store is private, so `/api/admin/files/<id>/` answers a 302 to a
+ * presigned CDN URL. That URL is a CAPABILITY: whoever holds it can fetch that
+ * one blob, with no cookie and no session, until it expires. Five minutes is
+ * long enough to open a 100 MB walkthrough video and short enough that a URL
+ * pasted into a chat log is dead before anyone reads it. Re-clicking the link
+ * mints a fresh one, so shortening this costs the office nothing.
+ */
+export const FILE_LINK_TTL_MS = 5 * 60_000;
+
+/**
+ * Wall-clock ceiling on the one Blob control-API call an admin file link makes.
+ *
+ * Read off the installed SDK (@vercel/blob 2.6.1, `dist/chunk-*.js`):
+ * `requestApi` wraps every call in `async-retry` with `retries: 10`, and both
+ * network errors and 5xx responses re-throw into that loop. A down control API
+ * therefore keeps `issueSignedToken` pending well past the platform function
+ * limit, and the office gets a platform 504 instead of this route's 502. The
+ * same source shows the escape: an `AbortError` from the in-flight fetch calls
+ * `bail(new BlobRequestAbortedError())`, which ends the retry loop immediately
+ * rather than counting as another failure. So an `AbortSignal.timeout` on the
+ * issue call is what makes "Blob API down → 502" true rather than merely
+ * intended. Fast-bail failures (a bad token, any 4xx) never reach it.
+ */
+export const BLOB_ISSUE_TIMEOUT_MS = 4000;
+
 /** Draft tokens expire this long after being issued — an upper bound on how long a form sits open. */
 export const DRAFT_TOKEN_TTL_HOURS = 6;
 

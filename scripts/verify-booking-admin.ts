@@ -30,7 +30,9 @@ import {
   ADMIN_BLACKOUTS_PATH,
   ADMIN_BLACKOUT_ADD_ENDPOINT,
   ADMIN_BLACKOUT_DELETE_ENDPOINT,
+  ADMIN_FILE_ENDPOINT,
   adminAppointmentPath,
+  adminFilePath,
   customerStampState,
   formatAdminTimestamp,
   formatFileSize,
@@ -157,12 +159,17 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
     ['ADMIN_APPOINTMENT_RESEND_ENDPOINT', ADMIN_APPOINTMENT_RESEND_ENDPOINT],
     ['ADMIN_BLACKOUT_ADD_ENDPOINT', ADMIN_BLACKOUT_ADD_ENDPOINT],
     ['ADMIN_BLACKOUT_DELETE_ENDPOINT', ADMIN_BLACKOUT_DELETE_ENDPOINT],
+    // BK-09's file proxy. It carries more than a redirect: it mints a
+    // credential for the private Blob store, so "still needs a session" is the
+    // assertion that matters most in this list.
+    ['ADMIN_FILE_ENDPOINT', ADMIN_FILE_ENDPOINT],
   ];
   for (const [name, value] of PATHS) {
     check(value.endsWith('/'), `${name} (${value}) ends with a slash`);
     check(value.startsWith('/'), `${name} is root-relative`);
   }
   check(adminAppointmentPath(12) === '/admin/appointments/12/', 'a detail path is built slashed');
+  check(adminFilePath(7) === '/api/admin/files/7/', 'and a file link is built slashed (BK-09)');
 
   // Every one of them is behind the middleware, and none accidentally became
   // public. The gate normalizes exactly one trailing slash, so a new public path
@@ -171,6 +178,10 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
     check(!isPublicAdminPath(value), `${value} still needs a session`);
   }
   check(!isPublicAdminPath(adminAppointmentPath(12)), 'and so does an appointment detail page');
+  check(
+    !isPublicAdminPath(adminFilePath(7)),
+    'and a file link — the one path that mints a Blob credential — is not public',
+  );
 
   // Now the source. Every `/admin/...` or `/api/admin/...` string literal in the
   // new pages and routes must end in a slash — that is the general shape of the

@@ -2,6 +2,11 @@
 //
 //   npm run verify:booking:admin:db
 //
+// BK-09 extended this with the read side: the admin file proxy's claimed-only
+// lookup and its 404/502 arms. Same reason as everything below — the rule is
+// `AND appointment_id IS NOT NULL` inside a SQL statement, and no amount of
+// pure-function testing can execute it.
+//
 // scripts/verify-booking-admin-entry.ts covers the parsers, but it hands pure
 // functions hand-built records — so it structurally cannot catch the three ways
 // these routes can be wrong: the SQL itself (an untyped `CASE WHEN <boolean>`
@@ -81,6 +86,8 @@ const { POST: resendRoute } = await import('../src/pages/api/admin/appointments/
 const { POST: blackoutAdd } = await import('../src/pages/api/admin/blackouts/add');
 const { POST: blackoutDelete } = await import('../src/pages/api/admin/blackouts/delete');
 const { GET: availability } = await import('../src/pages/api/booking/availability');
+const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
+const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { stampNotifications } = await import('../src/lib/booking-commit');
 const { planForAppointment, sendConfirmationAndStamp } = await import(
   '../src/lib/booking-admin-notify'
@@ -95,6 +102,16 @@ const MARKER = 'BK-08 verification — safe to delete';
 const createdIds: number[] = [];
 /** Every blackout day this run touches. */
 const touchedDays: string[] = [];
+
+/**
+ * BK-09's `appointment_files` fixtures, tracked separately because NOTHING ELSE
+ * WILL REMOVE THEM. The FK cascade off `appointments` reaches only the claimed
+ * row, the orphan cron runs against production and never the dev branch, and
+ * `pathname` is UNIQUE — so a leaked unclaimed row makes the next run's insert
+ * fail rather than merely leaving litter.
+ */
+const FILE_PREFIX = 'bk09-verify/';
+const createdFileIds: number[] = [];
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -176,10 +193,21 @@ function entryFields(over: Record<string, string> = {}): Record<string, string> 
 }
 
 /** Deletes by id AND by marker, retrying. Either alone would leak a row. */
-async function cleanup(attempts = 3): Promise<{ appointments: number; blackouts: number }> {
+async function cleanup(
+  attempts = 3,
+): Promise<{ appointments: number; blackouts: number; files: number }> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
+      // Files first. The cascade off `appointments` would take the claimed rows
+      // with it, but never the unclaimed one — and that is the row the
+      // claimed-only query exists to hide, so leaking it is exactly the case
+      // that would poison the next run.
+      const f = (await sql`
+        DELETE FROM appointment_files
+        WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}
+        RETURNING id
+      `) as { id: number }[];
       const a = (await sql`
         DELETE FROM appointments
         WHERE id = ANY(${createdIds}::int[]) OR admin_notes LIKE ${`${MARKER}%`}
@@ -190,13 +218,14 @@ async function cleanup(attempts = 3): Promise<{ appointments: number; blackouts:
         WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}
         RETURNING day
       `) as { day: string }[];
-      return { appointments: a.length, blackouts: b.length };
+      return { appointments: a.length, blackouts: b.length, files: f.length };
     } catch (err) {
       lastErr = err;
       console.error(`  cleanup attempt ${i + 1} failed, retrying:`, err);
     }
   }
   console.error('  ✗ CLEANUP FAILED. Remove the rows by hand:');
+  console.error(`      DELETE FROM appointment_files WHERE pathname LIKE '${FILE_PREFIX}%';`);
   console.error(`      DELETE FROM appointments   WHERE admin_notes LIKE '${MARKER}%';`);
   console.error(`      DELETE FROM blackout_dates WHERE reason      LIKE '${MARKER}%';`);
   console.error(`      DELETE FROM appointments   WHERE id IN (${createdIds.join(', ') || 'none'});`);
@@ -217,7 +246,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 // Leftovers from an interrupted earlier run would make the first insert report
 // a taken slot, which reads as a failure of this run rather than of that one.
-await cleanup().catch(() => ({ appointments: 0, blackouts: 0 }));
+await cleanup().catch(() => ({ appointments: 0, blackouts: 0, files: 0 }));
 seeded = true;
 
 try {
@@ -599,20 +628,147 @@ try {
     const bad = await call(blackoutDelete, { day: '25-12-2026' });
     check(bad.includes('err='), `a malformed day is rejected, got "${bad}"`);
   }
+
+  // -------------------------------------------------------------------------
+  console.log('The file proxy serves claimed rows and nothing else (BK-09 AC2)');
+  // -------------------------------------------------------------------------
+  // Two fixtures that differ in ONE column. `appointment_id IS NOT NULL` is the
+  // entire access rule for the admin file proxy, and it is checked here against
+  // real rows because it lives in SQL — `scripts/verify-booking-files.ts` drives
+  // the signing logic with fakes and never sees a database.
+  //
+  // Both the route and this script call the SAME `claimedFilePathname`. That is
+  // the plan-review blocker: a script-side copy of the query would stay green
+  // while the production statement lost its claimed-only clause, which is the
+  // one regression this section exists to catch.
+  const claimedPath = `${FILE_PREFIX}claimed.jpg`;
+  const unclaimedPath = `${FILE_PREFIX}unclaimed.jpg`;
+  const DRAFT_ID = '9f1c8a20-3c4e-4f1a-9c1e-2b7d5a6e4f30';
+
+  const [claimedRow] = (await sql`
+    INSERT INTO appointment_files
+      (appointment_id, draft_id, pathname, content_type, size_bytes, original_name, upload_state)
+    VALUES
+      (${idA}, ${DRAFT_ID}::uuid, ${claimedPath}, 'image/jpeg', 2048, 'claimed.jpg', 'uploaded')
+    RETURNING id
+  `) as { id: number }[];
+  createdFileIds.push(claimedRow.id);
+
+  const [unclaimedRow] = (await sql`
+    INSERT INTO appointment_files
+      (appointment_id, draft_id, pathname, content_type, size_bytes, original_name, upload_state)
+    VALUES
+      (NULL, ${DRAFT_ID}::uuid, ${unclaimedPath}, 'image/jpeg', 4096, 'unclaimed.jpg', 'uploaded')
+    RETURNING id
+  `) as { id: number }[];
+  createdFileIds.push(unclaimedRow.id);
+
+  check(
+    (await claimedFilePathname(sql, claimedRow.id)) === claimedPath,
+    'a claimed file resolves to its pathname',
+  );
+  check(
+    (await claimedFilePathname(sql, unclaimedRow.id)) === null,
+    'an UNCLAIMED draft upload is invisible to the proxy — it belongs to no booking',
+  );
+  check(
+    (await claimedFilePathname(sql, 2147483647)) === null,
+    'and an id that matches nothing resolves to nothing',
+  );
+
+  // BIGINT arrives from the driver as a string however db.ts types it. Pinned
+  // here against a real row, because this ticket owns that correction and the
+  // pure scripts hand-build their fixtures.
+  const [sizeRow] = (await sql`
+    SELECT size_bytes FROM appointment_files WHERE id = ${claimedRow.id}
+  `) as { size_bytes: unknown }[];
+  check(
+    typeof sizeRow.size_bytes === 'string',
+    `size_bytes comes back as a string, got ${typeof sizeRow.size_bytes} — db.ts must not type it number`,
+  );
+
+  // Now the route itself, which contributes the id parse, the 404 mapping and
+  // the wiring. The id is its ENTIRE input: there is no pathname to pass.
+  async function getFile(id: string): Promise<Response> {
+    return fileRoute({ params: { id } } as never);
+  }
+
+  for (const [label, badId] of [
+    ['non-numeric', 'abc'],
+    ['empty', ''],
+    ['zero', '0'],
+    ['negative', '-3'],
+    ['past int4', '9999999999'],
+  ] as const) {
+    const res = await getFile(badId);
+    check(res.status === 404, `a ${label} id 404s rather than reaching Postgres, got ${res.status}`);
+  }
+
+  // Leading zeros, checked against THIS RUN'S CLAIMED ROW rather than a made-up
+  // number. `/api/admin/files/0000000012/` and `.../12/` would otherwise be two
+  // URLs for one file, and a link a shared cache has already stored under one
+  // spelling is a capability that outlives the other. Pinned to a row that
+  // definitely exists because the red pass showed the made-up-id version passes
+  // for the wrong reason — a loosened parser plus an id nothing matches also
+  // 404s, so the assert was contingent on the dev branch's contents.
+  const paddedRes = await getFile(`0${claimedRow.id}`);
+  check(
+    paddedRes.status === 404,
+    `a zero-padded id for a REAL claimed row still 404s, got ${paddedRes.status}`,
+  );
+
+  check((await getFile('2147483647')).status === 404, 'an unknown id 404s');
+
+  const unclaimedRes = await getFile(String(unclaimedRow.id));
+  check(
+    unclaimedRes.status === 404,
+    `an unclaimed file 404s rather than being signed, got ${unclaimedRes.status}`,
+  );
+  check(
+    !unclaimedRes.headers.get('Location'),
+    'and answers no Location — a 404 that still redirected would be the whole bug',
+  );
+
+  // The unset-token 502, driven for a CLAIMED row so the 404 arms above cannot
+  // be what produces it. Under tsx there is no import.meta.env, so removing the
+  // process.env value is enough to make readEnv report it unset.
+  const savedToken = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  try {
+    const res = await getFile(String(claimedRow.id));
+    check(
+      res.status === 502,
+      `an unconfigured store token is a 502, not a 500 and not a 404, got ${res.status}`,
+    );
+    check(!res.headers.get('Location'), 'and nothing is redirected to');
+  } finally {
+    if (savedToken !== undefined) process.env.BLOB_READ_WRITE_TOKEN = savedToken;
+  }
+  check(
+    process.env.BLOB_READ_WRITE_TOKEN === savedToken,
+    'and the token is restored for anything that runs after this',
+  );
+
+  // The live 302 is deliberately NOT driven here: it would call the Blob
+  // control API for real, and this script's contract is the dev database.
+  // `verify:booking:files` covers the signing arguments; the post-deploy check
+  // in the ticket covers the round trip.
 } finally {
-  const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1 }));
+  const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1 }));
   seeded = false;
   console.log(
-    `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s)`,
+    `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s), ${removed.files} file row(s)`,
   );
   const left = (await sql`
     SELECT
       (SELECT COUNT(*)::int FROM appointments
         WHERE id = ANY(${createdIds}::int[]) OR admin_notes LIKE ${`${MARKER}%`}) AS appointments,
       (SELECT COUNT(*)::int FROM blackout_dates
-        WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}) AS blackouts
-  `) as { appointments: number; blackouts: number }[];
-  const stillThere = left[0].appointments + left[0].blackouts;
+        WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}) AS blackouts,
+      (SELECT COUNT(*)::int FROM appointment_files
+        WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}) AS files
+  `) as { appointments: number; blackouts: number; files: number }[];
+  const stillThere = left[0].appointments + left[0].blackouts + left[0].files;
   if (stillThere > 0) {
     console.error(`  ✗ ${stillThere} seeded row(s) survived cleanup — remove them manually.`);
     failures++;
