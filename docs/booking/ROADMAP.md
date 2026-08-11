@@ -352,7 +352,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-13 | Soft launch — navbar CTA (desktop + drawer) points at `/book/` | Light | ✅ committed |
-| BK-10 | Booking replaces the contact form; `leads` read-only; fix the 308 | Reviewed | not started |
+| BK-10 | Cutover: booking = the quote path; form demoted to messages (client-amended 2026-08-11 — `leads` stays writable); fix the 308s | Reviewed | plan-reviewed |
 | BK-11 | Production launch checks — env vars, cron secret, tracking | Light | not started |
 
 ## Open questions for the client
