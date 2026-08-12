@@ -3,24 +3,66 @@ import Layout from '../layouts/Layout.astro';
 import Navbar from '../components/Navbar.svelte';
 import Footer from '../components/Footer.astro';
 import BookingForm from '../components/BookingForm.svelte';
+import { BUSINESS } from '../data/services';
+import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
 
 const title = 'Book a Free Assessment | YEG Restoration Edmonton';
 const description =
   'Pick a time for a free on-site restoration assessment in Edmonton. About 30 minutes, no obligation.';
+
+// INDEXED as of BK-10 — note the absence of `noindex={true}` below. This is
+// the site's quote path now, so it wants to rank; the layout's noindex and the
+// sitemap exclusion in astro.config.mjs came off together. `/book/confirmed/`
+// keeps BOTH, permanently and for a different reason: it renders nothing at
+// all without a session, so it has nothing to rank for.
+const schemas = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: 'Book a Free Assessment',
+    description,
+    url: `${BUSINESS.url}/book/`,
+    mainEntity: { '@id': BUSINESS_ID },
+  },
+  breadcrumbSchema([{ name: 'Home', url: `${BUSINESS.url}/` }, { name: 'Book an Assessment' }]),
+];
 ---
 
-<!--
-  Unannounced until BK-10 cuts the contact form over: noindex here, and
-  excluded from the sitemap in astro.config.mjs. Both come off together.
--->
-<Layout title={title} description={description} noindex={true}>
+<Layout title={title} description={description}>
   <div class="grain-overlay"></div>
   <div class="concrete-texture"></div>
 
   <Navbar client:load />
 
-  <main class="pt-28 pb-20">
+  <!-- WebPage + Breadcrumb JSON-LD (valid anywhere in document per Google guidelines) -->
+  {schemas.map((schema) => (
+    <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  ))}
+
+  <main id="main-content" class="pt-28 pb-20">
     <div class="max-w-3xl mx-auto px-6">
+      <!-- Breadcrumb -->
+      <nav aria-label="Breadcrumb" class="mb-6">
+        <ol class="flex items-center gap-2 text-xs text-yeg-text-secondary">
+          <li>
+            <a href="/" class="hover:text-yeg-amber-deep transition-colors duration-200">Home</a>
+          </li>
+          <li aria-hidden="true" class="text-yeg-text-secondary/50">&rsaquo;</li>
+          <li><span aria-current="page" class="text-yeg-text">Book an Assessment</span></li>
+        </ol>
+      </nav>
+
+      <!-- Emergency escape, deliberately above the form -->
+      <div class="rounded-xl border border-yeg-signal/30 bg-yeg-signal/5 px-5 py-4 mb-8">
+        <p class="text-yeg-text font-semibold">Water coming in right now? Don't book.</p>
+        <p class="text-yeg-text-secondary text-sm mt-1">
+          Call
+          <a class="text-yeg-amber-deep font-semibold whitespace-nowrap" href={BUSINESS.phoneHref}>
+            {BUSINESS.phone}
+          </a> — we answer live, 24/7, and dispatch a crew the same hour.
+        </p>
+      </div>
+
       <header class="mb-8">
         <p class="text-xs uppercase tracking-wider text-yeg-text-secondary mb-2">
           Free assessment
@@ -30,10 +72,11 @@ const description =
         </h1>
         <p class="text-yeg-text-secondary">
           An IICRC-certified tech comes out, looks at the damage, and tells you what it takes to
-          put it right. About 30 minutes, no obligation. Flooding right now?
-          <a class="text-yeg-amber-deep font-semibold" href="tel:+17804793285">
-            Call (780) 479-3285
-          </a> — we answer 24/7.
+          put it right. About 30 minutes, no obligation.
+        </p>
+        <p class="text-yeg-text-secondary text-sm mt-2">
+          Serving Edmonton and the surrounding communities — outside the area? Call first and we'll
+          tell you honestly whether we can get to you.
         </p>
       </header>
 
@@ -42,6 +85,14 @@ const description =
         above the fold, and its submit button stays disabled until hydration.
       -->
       <BookingForm client:load />
+
+      <!-- Escape hatch for anyone not ready to commit -->
+      <p class="text-sm text-yeg-text-secondary text-center mt-6">
+        Not ready to book? Call
+        <a class="text-yeg-amber-deep font-semibold whitespace-nowrap" href={BUSINESS.phoneHref}>
+          {BUSINESS.phone}
+        </a> or <a class="text-yeg-amber-deep font-semibold" href="/contact/">send us a message</a>.
+      </p>
     </div>
   </main>
 

@@ -73,7 +73,7 @@ const DISABLE_FLAG = 'BOOKING_NOTIFY_DISABLED';
  * `console.warn` as the entire trace. Failing toward *sending* is right, because
  * an unwanted email is recoverable and a customer who was never told is not.
  */
-function notificationsDisabled(): boolean {
+export function mailDisabled(): boolean {
   const value = readEnv(DISABLE_FLAG)?.trim().toLowerCase();
   return value === '1' || value === 'true';
 }
@@ -81,11 +81,19 @@ function notificationsDisabled(): boolean {
 /**
  * The real send. Reads the error off the resolved value, never off a catch.
  *
- * `idempotencyKey` is the SDK's documented `Idempotency-Key` header: if this
- * function is ever retried for the same booking, Resend collapses the duplicate
- * rather than mailing the customer twice.
+ * **This is the only place in the codebase that calls `resend.emails.send`.**
+ * BK-10 pulled it out of `api/contact.ts` and `api/admin/reply.ts`, both of
+ * which had their own copy wrapped in a `try/catch` that could not fire.
+ *
+ * `idempotencyKey` is the SDK's documented `Idempotency-Key` header, and it is
+ * a *prefix* the caller supplies rather than something derived here, because
+ * only the caller knows what "the same message" means. A booking passes
+ * `booking-<id>`, so a retry collapses instead of mailing the customer twice.
+ * `null` passes no header at all, which is what the contact form and the lead
+ * reply need: their recipient is a fixed office address, so any fixed key
+ * would make Resend collapse every subsequent message into the first one.
  */
-function resendSender(apiKey: string, bookingId: number) {
+export function createResendSender(apiKey: string, keyPrefix: string | null) {
   const resend = new Resend(apiKey);
 
   return async (message: Message): Promise<SendResult> => {
@@ -98,7 +106,7 @@ function resendSender(apiKey: string, bookingId: number) {
         html: message.html,
         text: message.text,
       },
-      { idempotencyKey: `booking-${bookingId}:${message.to}` },
+      keyPrefix ? { idempotencyKey: `${keyPrefix}:${message.to}` } : {},
     );
 
     if (error) return { ok: false, error: `${error.name}: ${error.message}` };
@@ -106,6 +114,7 @@ function resendSender(apiKey: string, bookingId: number) {
     return { ok: true };
   };
 }
+
 
 /** Wraps one send so a throw from an injected fake cannot escape either. */
 async function deliver(
@@ -151,7 +160,7 @@ export async function sendBookingNotifications(
   plan: NotificationPlan,
   deps: NotifyDeps = {},
 ): Promise<NotificationResult> {
-  if (notificationsDisabled()) {
+  if (mailDisabled()) {
     // error, not warn: in a deployed environment this is a misconfiguration
     // that silently stops every customer confirmation.
     console.error(`${DISABLE_FLAG} is set — booking ${plan.bookingId} was not notified.`);
@@ -166,7 +175,7 @@ export async function sendBookingNotifications(
       console.error('RESEND_API_KEY is not configured — booking notifications were not sent.');
       return { customer: 'failed', internal: 'failed' };
     }
-    send = resendSender(apiKey, plan.bookingId);
+    send = createResendSender(apiKey, `booking-${plan.bookingId}`);
   }
 
   const [customer, internal] = await Promise.all([
@@ -192,7 +201,7 @@ export async function sendBookingNotifications(
  *
  * It exists because the existing seam could not express this (plan-review
  * blocker 1): `sendBookingNotifications` delivers `plan.internal`
- * unconditionally, and `resendSender`/`deliver` are module-private, so "just
+ * unconditionally, and `deliver` is module-private, so "just
  * don't send the internal one" was not buildable from outside. Everything that
  * matters is shared with it rather than re-implemented — the disable flag, the
  * key lookup, the adapter, and `deliver`'s never-throws contract — so a fix to
@@ -212,7 +221,7 @@ export async function sendCustomerConfirmation(
   // No email address on the appointment: nothing to send, and not a failure.
   if (!plan.customer) return 'skipped';
 
-  if (notificationsDisabled()) {
+  if (mailDisabled()) {
     console.error(`${DISABLE_FLAG} is set — booking ${plan.bookingId} was not notified.`);
     return 'skipped';
   }
@@ -224,7 +233,7 @@ export async function sendCustomerConfirmation(
       console.error('RESEND_API_KEY is not configured — the confirmation was not sent.');
       return 'failed';
     }
-    send = resendSender(apiKey, plan.bookingId);
+    send = createResendSender(apiKey, `booking-${plan.bookingId}`);
   }
 
   return deliver(send, plan.customer, 'confirmation', plan.bookingId);

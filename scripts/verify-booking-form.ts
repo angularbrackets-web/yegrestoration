@@ -10,6 +10,7 @@ import {
   MAX_TOTAL_BYTES,
 } from '../src/lib/booking-config';
 import {
+  applyPrefill,
   assembleBookingPayload,
   checkFileAcceptance,
   createDraftSession,
@@ -459,6 +460,71 @@ console.log('\nSingle-flight submit guard');
   check(guard.inFlight === false, 'the guard clears when the request finishes');
   check(guard.begin() === true, 'a later submit is allowed again');
   console.log('  one in-flight submit at a time');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nQuery-param prefill trusts nothing (BK-10 AC4)');
+// ---------------------------------------------------------------------------
+{
+  // BK-10 points every service page's CTA at /book/?service=<id> and the
+  // insurance page's at /book/?route=insurance, so a visitor who has already
+  // declared their intent does not declare it twice.
+  const base = emptyFormValues();
+
+  const service = applyPrefill(base, '?service=mold', SERVICES);
+  check(service.service === 'mold', `a known service is selected, got "${service.service}"`);
+  check(service.payment_route === base.payment_route, 'and nothing else moves');
+
+  const route = applyPrefill(base, '?route=insurance', SERVICES);
+  check(route.payment_route === 'insurance', `?route=insurance switches the route, got ${route.payment_route}`);
+  check(route.service === '', 'and leaves the service alone');
+
+  const both = applyPrefill(base, '?service=fire&route=insurance', SERVICES);
+  check(both.service === 'fire' && both.payment_route === 'insurance', 'both together');
+
+  check(
+    applyPrefill(base, '?route=private', SERVICES).payment_route === 'private',
+    'the other real route works too',
+  );
+
+  // Nothing is trusted. Each of these can only ever select an option the form
+  // already offers; anything else leaves the field at its default.
+  const IGNORED: [string, string][] = [
+    ['?service=garbage', 'an unknown service id'],
+    ['?service=', 'an empty service'],
+    ['?service=MOLD', 'the wrong case — the ids are the allow-list, verbatim'],
+    ['?service=mold%20', 'a trailing space'],
+    ['?service=<script>alert(1)</script>', 'an injection attempt'],
+    ['?service[]=mold', 'an array-ish parameter name'],
+  ];
+  for (const [search, label] of IGNORED) {
+    const result = applyPrefill(base, search, SERVICES);
+    check(result.service === '', `${label} is ignored, got "${result.service}"`);
+  }
+
+  for (const search of ['?route=insurances', '?route=INSURANCE', '?route=', '?route=other']) {
+    check(
+      applyPrefill(base, search, SERVICES).payment_route === 'private',
+      `${search} leaves the payment route at its default`,
+    );
+  }
+
+  check(
+    applyPrefill(base, '', SERVICES).service === '' &&
+      applyPrefill(base, '?', SERVICES).service === '',
+    'an absent query string changes nothing',
+  );
+
+  // Pure: the caller's values object is not mutated under it. A Svelte $state
+  // proxy mutated in place would work by accident and then not.
+  const original = emptyFormValues();
+  applyPrefill(original, '?service=mold&route=insurance', SERVICES);
+  check(
+    original.service === '' && original.payment_route === 'private',
+    'the caller\'s values are left untouched',
+  );
+
+  console.log('  ?service= and ?route= select only what already exists');
 }
 
 if (failures > 0) {

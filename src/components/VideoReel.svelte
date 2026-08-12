@@ -90,15 +90,34 @@
           Every project tells a story. Watch our teams respond, remediate, and rebuild — returning
           homes and businesses to better than before.
         </p>
-        <a href="#contact" class="cta-primary">Get Emergency Help</a>
+        <a href="/book/" class="cta-primary">Book a Free Assessment</a>
       </div>
 
       <!-- Right: Video Accordion -->
       <div class="w-full lg:w-3/5">
         <div class="flex flex-row gap-2 h-[500px] overflow-hidden rounded-2xl">
           {#each videoItems as item, i}
+            <!--
+              role/tabindex/keyboard, not just hover: the panels were a static
+              <div> with a mouseenter handler, so the reel was unreachable
+              without a pointer. A real <button> is not available here — the
+              overlay and accent bars are <div>s, which a button may not
+              contain — so this is the honest shape.
+            -->
             <div
+              role="button"
+              tabindex="0"
+              aria-pressed={i === activeIndex}
+              aria-label={item.label}
               onmouseenter={() => handlePanelEnter(i)}
+              onfocus={() => handlePanelEnter(i)}
+              onclick={() => handlePanelEnter(i)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handlePanelEnter(i);
+                }
+              }}
               style:flex={i === activeIndex ? '5 1 0%' : '0.5 1 0%'}
               class="relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-700 ease-in-out"
             >

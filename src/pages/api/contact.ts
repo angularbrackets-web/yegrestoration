@@ -1,25 +1,21 @@
+/**
+ * `POST /api/contact/` — the message form's endpoint.
+ *
+ * A shell, deliberately. Parse, wire the real dependencies, map the outcome to
+ * a Response: every decision this route used to make now lives in
+ * `src/lib/contact-message.ts`, where a script can drive all four arms of the
+ * truth table with an injected sender. The reasoning — including why a send
+ * failure is a 500 even when the row landed — is documented there.
+ */
+
 import type { APIRoute } from 'astro';
 
-export const prerender = false;
-import { Resend } from 'resend';
-import { z } from 'zod';
+import { createResendSender } from '../../lib/booking-notify';
+import { handleContactMessage, parseContactSubmission } from '../../lib/contact-message';
+import { readEnv } from '../../lib/env';
 import { getDb, SERVICE_LABELS } from '../../lib/db';
 
-const schema = z.object({
-  name: z.string().min(2),
-  phone: z.string().min(7),
-  email: z.string().email().optional().or(z.literal('')),
-  service: z.string().min(1),
-  message: z.string().optional(),
-});
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+export const prerender = false;
 
 function json(data: object, status: number) {
   return new Response(JSON.stringify(data), {
@@ -36,71 +32,29 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: 'Invalid request' }, 400);
   }
 
-  const result = schema.safeParse(body);
-  if (!result.success) return json({ error: 'Validation failed' }, 422);
+  const parsed = parseContactSubmission(body);
+  if (!parsed.ok) return json({ error: 'Validation failed' }, 422);
 
-  const { name, phone, email, service, message } = result.data;
-  const serviceLabel = SERVICE_LABELS[service] ?? service;
+  // `readEnv`, not a bare `import.meta.env` read: the latter is undefined under
+  // plain Node, which blocks the tsx-driven verification outright, and it is
+  // the BK-12 rule for every server-side variable. (`PUBLIC_*` is the exact
+  // opposite and must stay a literal expression — see the ROADMAP.)
+  const apiKey = readEnv('RESEND_API_KEY');
 
-  // Write to DB first — if email fails, the lead is still captured
-  try {
-    const sql = getDb();
-    await sql`
-      INSERT INTO leads (name, phone, email, service, message)
-      VALUES (${name}, ${phone}, ${email || null}, ${service}, ${message || null})
-    `;
-  } catch (err) {
-    console.error('DB write failed:', err);
-  }
+  const outcome = await handleContactMessage(parsed.message, {
+    labelFor: (service) => SERVICE_LABELS[service] ?? service,
+    insert: async (message) => {
+      const sql = getDb();
+      await sql`
+        INSERT INTO leads (name, phone, email, service, message)
+        VALUES (${message.name}, ${message.phone}, ${message.email}, ${message.service}, ${message.message})
+      `;
+    },
+    // Null when the key is unset. The lib logs that as its own arm rather than
+    // letting `new Resend(undefined)` throw somewhere less legible.
+    send: apiKey ? createResendSender(apiKey, null) : null,
+  });
 
-  const apiKey = import.meta.env.RESEND_API_KEY;
-  if (!apiKey) return json({ error: 'Server configuration error' }, 500);
-
-  const resend = new Resend(apiKey);
-  try {
-    await resend.emails.send({
-      from: 'YEG Restoration <noreply@yegrestoration.ca>',
-      to: ['info@yegrestoration.ca'],
-      replyTo: email || undefined,
-      subject: `New Quote Request — ${serviceLabel}`,
-      html: `
-        <h2 style="font-family:sans-serif;margin-bottom:16px;">New Quote Request</h2>
-        <table style="font-family:sans-serif;border-collapse:collapse;width:100%;max-width:500px;">
-          <tr>
-            <td style="padding:8px 12px;background:#f5f5f5;font-weight:600;width:100px;">Name</td>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(name)}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 12px;background:#f5f5f5;font-weight:600;">Phone</td>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(phone)}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 12px;background:#f5f5f5;font-weight:600;">Email</td>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee;">${email ? escapeHtml(email) : '—'}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 12px;background:#f5f5f5;font-weight:600;">Service</td>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(serviceLabel)}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 12px;background:#f5f5f5;font-weight:600;vertical-align:top;">Message</td>
-            <td style="padding:8px 12px;">${message ? escapeHtml(message).replace(/\n/g, '<br>') : '—'}</td>
-          </tr>
-        </table>
-      `,
-      text: [
-        `New Quote Request — ${serviceLabel}`,
-        '',
-        `Name:    ${name}`,
-        `Phone:   ${phone}`,
-        `Email:   ${email || '—'}`,
-        `Service: ${serviceLabel}`,
-        `Message: ${message || '—'}`,
-      ].join('\n'),
-    });
-    return json({ ok: true }, 200);
-  } catch (err) {
-    console.error('Resend error:', err);
-    return json({ error: 'Failed to send email' }, 500);
-  }
+  if (outcome.ok) return json({ ok: true }, 200);
+  return json({ error: 'Failed to send message' }, 500);
 };

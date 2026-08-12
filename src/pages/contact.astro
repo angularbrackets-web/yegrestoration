@@ -8,8 +8,11 @@ import { BUSINESS } from '../data/services';
 import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
 
 const title = 'Contact YEG Restoration | 24/7 Emergency Line Edmonton';
+// Reframed at the BK-10 cutover: this page is the question channel, not the
+// quote channel. Booking a free assessment happens at /book/, and the copy here
+// must not compete with it or the funnel grows a second quote door.
 const description =
-  'Reach YEG Restoration any hour — call (780) 479-3285 for emergencies or send the form for a free assessment. We respond within 15 minutes, 24/7.';
+  'Reach YEG Restoration any hour — call (780) 479-3285 for emergencies, or send us a message and we’ll answer the same business day. Booking a free assessment? Pick a time at /book/.';
 
 const schemas = [
   {
@@ -65,13 +68,18 @@ const schemas = [
             href={BUSINESS.phoneHref}
             class="font-semibold text-yeg-text hover:text-yeg-amber-deep transition-colors whitespace-nowrap"
           >{BUSINESS.phone}</a>
-          — a specialist answers live, any hour. For everything else, use the form below and
-          we&rsquo;ll respond within 15 minutes.
+          — a specialist answers live, any hour. Want a free on-site assessment?
+          <a
+            href="/book/"
+            class="font-semibold text-yeg-text hover:text-yeg-amber-deep transition-colors"
+          >Pick a time</a> and you&rsquo;re confirmed on the spot. For anything else &mdash; a
+          question, a second opinion, a quote you want in writing &mdash; send us a message below
+          and we&rsquo;ll answer the same business day.
         </p>
       </div>
     </section>
 
-    <ContactSection />
+    <ContactSection showForm={true} />
     <LocationsSection />
   </main>
 

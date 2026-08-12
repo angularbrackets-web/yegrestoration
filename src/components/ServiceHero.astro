@@ -78,10 +78,10 @@ const { page } = service;
             <span class="font-bold">Call {BUSINESS.phone}</span>
           </a>
           <a
-            href="#quote"
+            href={`/book/?service=${service.id}`}
             class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
           >
-            Get Free Assessment
+            Book Free Assessment
             <span aria-hidden="true">&rarr;</span>
           </a>
         </div>

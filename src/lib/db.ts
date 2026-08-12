@@ -7,11 +7,19 @@ export type Lead = {
   name: string;
   phone: string;
   email: string | null;
-  service: string;
+  /**
+   * NULL since migration 004: the contact form is a general message channel
+   * (BK-10), so "which service?" is optional and an absent one is a real,
+   * expected value. Every render site must guard it — `SERVICE_LABELS[null]`
+   * is `undefined`, and a template that falls back to the raw column prints
+   * the word "null" into an admin page or, worse, a customer's email.
+   */
+  service: string | null;
   message: string | null;
   status: 'new' | 'read' | 'replied';
-  replied_at: string | null;
-  created_at: string;
+  /** `timestamptz` — the driver hands back a `Date`. See the note below. */
+  replied_at: Date | null;
+  created_at: Date;
 };
 
 /**
@@ -30,9 +38,11 @@ export type Lead = {
  * project it as `day::text` and use `BlackoutDayRow`.
  * `src/pages/api/booking/availability.ts` is the worked example.
  *
- * `Lead` below predates this and still says `string`. Its consumers all wrap
- * the value in `new Date(...)`, which accepts either, so it is a documentation
- * bug rather than a live one — left alone here to keep BK-01's diff honest.
+ * `Lead` above said `string` from BK-01 until BK-10 corrected it. It was a
+ * documentation bug rather than a live one — every consumer wrapped the value
+ * in `new Date(...)`, which takes either — but the corrected type is what the
+ * driver returns, and `formatAdminTimestamp` takes a `Date`, so the leads
+ * pages now hand it the column directly instead of re-parsing a lie.
  */
 
 /** Where a job sits in the restoration process. Independent of `AppointmentStatus`. */

@@ -17,18 +17,16 @@ export default defineConfig({
   compressHTML: true,
   integrations: [
     svelte(),
-    // /book is live but unannounced — the contact form is still the advertised
-    // path, and a booking page that ranks before cutover splits the funnel.
-    // BK-10 removes this alongside the layout's noindex.
-    // /book/confirmed/ is excluded for a different reason and permanently: it
-    // renders nothing at all without a session, so it has nothing to rank for.
-    // Exact matches, not a substring: `includes('/book')` would silently also
+    // /book/ is IN the sitemap as of BK-10: it is the site's quote path now,
+    // and its noindex came off in the same change — the two always move
+    // together, which is why they were commented as a pair.
+    // /book/confirmed/ stays excluded, permanently and for a different reason:
+    // it renders nothing at all without a session, so it has nothing to rank
+    // for, and it keeps its own noindex.
+    // Exact match, not a substring: `includes('/book')` would silently also
     // exclude any future /bookings… path.
     sitemap({
-      filter: (page) =>
-        !page.includes('/admin') &&
-        !page.endsWith('/book/') &&
-        !page.endsWith('/book/confirmed/'),
+      filter: (page) => !page.includes('/admin') && !page.endsWith('/book/confirmed/'),
     }),
     mdx(),
   ],

@@ -9,12 +9,15 @@ What you get once it's live:
 - **Call conversions** — Google swaps the phone number shown on the site for
   visitors who clicked an ad, so calls are attributed to the exact campaign,
   ad group, and keyword.
-- **Form conversions** — every quote-form submission is reported to Google Ads.
-- **Booking conversions** — every completed booking on `/book/` is reported as
-  its own action, separate from form leads, so the two can be bid on apart.
+- **Booking conversions** — every completed booking on `/book/` is reported to
+  Google Ads. Since the 2026-08-11 cutover this is the site's *only* form-side
+  conversion: `/book/` is the quote path, and the contact form became a general
+  message channel that reports nothing to Ads (see "Cutover note" below).
 - **GA4 analytics** — page views plus a `click_to_call` event for every tap on
-  a phone link, a `generate_lead` event (tagged with the service requested) for
-  every form submission, and a `booking_confirmed` event for every booking.
+  a phone link, a `generate_lead` event for every message sent through the
+  contact form (tagged with the service, when one was picked), a
+  `booking_confirmed` event for every booking, and two funnel-failure events,
+  `booking_availability_error` and `booking_availability_empty`.
 
 ---
 
@@ -36,7 +39,8 @@ What you get once it's live:
 ## Step 3 — Find your Google Ads conversion ID
 
 1. In Google Ads: **Tools & settings → Measurement → Conversions**.
-2. You'll create three conversion actions (steps 4, 5 and 6). All share one
+2. You'll create two conversion actions (steps 4 and 6 — step 5 is retained
+   for history only). Both share one
    **conversion ID** that looks like `AW-XXXXXXXXXX` — you'll see it in the tag
    setup screen of either action. This is `PUBLIC_AW_ID`.
 
@@ -61,15 +65,17 @@ What you get once it's live:
 > The site already renders the snippet for you — you only need the ID + label.
 > Do **not** paste Google's code snippet into the site.
 
-## Step 5 — Create the form conversion action
+## Step 5 — The form conversion action (RETIRED 2026-08-11 — do not create)
 
-1. Conversions → **+ New conversion action** → **Website**.
-2. Enter `https://yegrestoration.ca`, then create the action manually:
-   - Category: **Submit lead form**.
-   - Conversion name: `Quote form submit`.
-   - Count: **One**.
-3. Again choose "install yourself" and note the conversion **label** →
-   `PUBLIC_AW_FORM_LABEL` (the `AW-` ID is the same one from Step 4).
+**Skip this step on a new setup.** The contact form no longer reports a
+conversion: BK-10 made `/book/` the quote path and demoted the form to a
+general message channel, so the tag was removed from the site and
+`PUBLIC_AW_FORM_LABEL` no longer exists.
+
+On the existing account the `Quote form submit` action is set to **Secondary**
+— **not deleted**. Deleting it destroys the historical data and makes
+before/after comparison impossible; Secondary keeps the history while taking it
+out of Smart Bidding.
 
 ## Step 6 — Create the booking conversion action
 
@@ -93,14 +99,13 @@ Google Ads nothing — no broken or empty conversion is sent in the meantime.
 
 ## Step 7 — Set the env vars
 
-Five variables, same names everywhere:
+Four variables, same names everywhere:
 
 | Variable | Example value | From |
 |---|---|---|
 | `PUBLIC_GA4_ID` | `G-XXXXXXXXXX` | Step 1 |
 | `PUBLIC_AW_ID` | `AW-XXXXXXXXXX` | Step 3/4 |
 | `PUBLIC_AW_CALL_LABEL` | `AbC-D_efGhIjKlMnOp` | Step 4 |
-| `PUBLIC_AW_FORM_LABEL` | `QrS-T_uvWxYzAbCdEf` | Step 5 |
 | `PUBLIC_AW_BOOKING_LABEL` | `UvW-X_yzAbCdEfGhIj` | Step 6 |
 
 **Vercel (production):**
@@ -109,7 +114,6 @@ Five variables, same names everywhere:
 vercel env add PUBLIC_GA4_ID production
 vercel env add PUBLIC_AW_ID production
 vercel env add PUBLIC_AW_CALL_LABEL production
-vercel env add PUBLIC_AW_FORM_LABEL production
 vercel env add PUBLIC_AW_BOOKING_LABEL production
 ```
 
@@ -117,7 +121,7 @@ vercel env add PUBLIC_AW_BOOKING_LABEL production
 **Production only** — leaving preview/dev unset keeps test traffic out of your
 conversion data.
 
-**Local testing (optional):** add the same five lines to `.env.local`
+**Local testing (optional):** add the same four lines to `.env.local`
 (see `.env.example`), run `npm run dev`, and check that the gtag script loads.
 
 ## Step 8 — Redeploy
@@ -137,9 +141,11 @@ or push any commit to `main`.
 2. **Tag Assistant**: install the [Tag Assistant Companion](https://tagassistant.google.com)
    extension, connect to the site — you should see the GA4 tag and the
    Google Ads tag fire on page load.
-3. **Form event**: submit a test lead → in browser devtools console run
-   `dataLayer` → the array should contain a `conversion` and a `generate_lead`
-   event. In GA4: Reports → Realtime shows `generate_lead`.
+3. **Message event**: send a test message from `/contact/` → in browser
+   devtools console run `dataLayer` → the array should contain a
+   `generate_lead` event and **no** `conversion` event (the form's Ads tag is
+   gone; a `conversion` here would mean the cutover was reverted). In GA4:
+   Reports → Realtime shows `generate_lead`.
 4. **Booking event**: complete a test booking → you land on `/book/confirmed/`
    → run `dataLayer` in the console: it should contain a `conversion` and a
    `booking_confirmed` event. **Reload the page** — neither should appear a
@@ -185,6 +191,22 @@ looks like now, plus gotchas hit during the real setup:
 - **GA4 property check**: verify timezone/currency (Admin → Property details).
   This property was created with America/Los_Angeles + USD and had to be
   corrected to Edmonton + CAD.
+
+## Cutover note — 2026-08-11 (BK-10)
+
+Booking replaced the contact form as the site's quote path. What changed for
+measurement:
+
+- The form's Google Ads `conversion` tag was **removed from the site**;
+  `PUBLIC_AW_FORM_LABEL` was deleted from `env.d.ts` and `.env.example`.
+- The `Quote form submit` action in Google Ads is **Secondary, not deleted**.
+- `Assessment booked` is the **Primary** action and should carry a value
+  meaningfully above the call action's $1.
+- GA4's `generate_lead` **kept its name** across the reframe. It means "someone
+  sent a message" now, not "someone requested a quote". Renaming it would have
+  broken every existing report for a purity win; a GA4 property annotation
+  dated the change instead.
+- Expect a **1–2 week Smart Bidding learning period** after the tag change.
 
 ## Troubleshooting
 

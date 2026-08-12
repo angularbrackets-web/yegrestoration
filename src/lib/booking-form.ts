@@ -79,6 +79,40 @@ export function emptyFormValues(): FormValues {
 }
 
 /**
+ * Apply `?service=` / `?route=` to a fresh set of values.
+ *
+ * BK-10 points every service page's CTA at `/book/?service=<id>` and the
+ * insurance page's at `/book/?route=insurance`, so a visitor who has already
+ * said what they need does not say it twice.
+ *
+ * **NOTHING HERE IS TRUSTED.** Each parameter can only ever select an option
+ * the form already offers: an unknown service id, a misspelled route, or an
+ * injected string is ignored and the field keeps its default. No write path
+ * reads these — the server re-validates `service` against its own allow-list
+ * (`booking-payload.ts`) regardless of what the form did — so this is a
+ * convenience, not an input channel.
+ *
+ * Pure, and takes the query string rather than reading `location`, so
+ * `verify-booking-form.ts` can drive it.
+ */
+export function applyPrefill(
+  values: FormValues,
+  search: string,
+  allowedServices: ReadonlySet<string>,
+): FormValues {
+  const params = new URLSearchParams(search);
+  const next = { ...values };
+
+  const service = params.get('service');
+  if (service !== null && allowedServices.has(service)) next.service = service;
+
+  const route = params.get('route');
+  if (route === 'insurance' || route === 'private') next.payment_route = route;
+
+  return next;
+}
+
+/**
  * Which step owns which field, for routing a server 422 back to the input the
  * visitor can actually see. Server field names, not local ones — this map is
  * read against `parseBookingPayload`'s error output.

@@ -29,11 +29,16 @@
   } from '../lib/booking-config';
   import type { Confirmation } from '../lib/booking-confirmation';
   import { EMAILED_LINE } from '../lib/booking-copy';
-  import { reportBookingConversion, storeConfirmation } from '../lib/booking-handoff';
+  import {
+    reportBookingConversion,
+    reportBookingFunnelEvent,
+    storeConfirmation,
+  } from '../lib/booking-handoff';
   import type { AvailableDate, AvailableSlot } from '../lib/booking-availability';
   import { MAX_FIELD_LENGTHS } from '../lib/booking-payload';
   import { buildUploadPathname, formatBytes } from '../lib/booking-uploads';
   import {
+    applyPrefill,
     assembleBookingPayload,
     checkFileAcceptance,
     createDraftSession,
@@ -130,8 +135,23 @@
   const selectedDay = $derived(dates.find((d) => d.date === selectedDate) ?? null);
   const busy = $derived(submitting || leaving || uploadsInFlight > 0);
 
+  /**
+   * Every day in the window is full — a different state from "nothing open on
+   * the day you clicked", and the one that used to render as "try another day"
+   * when there was no other day to try.
+   */
+  const allDaysFull = $derived(
+    !loadingAvailability &&
+      !availabilityError &&
+      dates.length > 0 &&
+      dates.every((d) => d.slots.length === 0),
+  );
+
   onMount(() => {
     hydrated = true;
+    // Prefill before the first paint of step 2. Only ever selects an option
+    // the form already offers; anything else is ignored. See `applyPrefill`.
+    values = applyPrefill(values, window.location.search, SERVICE_IDS);
     void loadAvailability();
   });
 
@@ -151,9 +171,16 @@
       if (!outcome.ok) {
         dates = [];
         availabilityError = outcome.message;
+        // The funnel event, not a conversion: with the form demoted, a
+        // visitor who cannot see any times is a lost quote that leaves no
+        // other trace. No parameters, no PII.
+        reportBookingFunnelEvent('booking_availability_error');
         return;
       }
       dates = outcome.dates as AvailableDate[];
+      if (dates.length > 0 && dates.every((d) => d.slots.length === 0)) {
+        reportBookingFunnelEvent('booking_availability_empty');
+      }
       const stillThere = dates.some((d) => d.date === selectedDate && d.slots.length > 0);
       if (!stillThere) selectedDate = dates.find((d) => d.slots.length > 0)?.date ?? null;
       if (values.slotStart && !dates.some((d) => d.slots.some((s) => s.start === values.slotStart))) {
@@ -162,6 +189,7 @@
     } catch {
       dates = [];
       availabilityError = `We could not load available times. Please call us at ${PHONE_DISPLAY}.`;
+      reportBookingFunnelEvent('booking_availability_error');
     } finally {
       loadingAvailability = false;
     }
@@ -499,6 +527,21 @@
                 Try again
               </button>
             </div>
+          {:else if allDaysFull}
+            <!--
+              Every day in the window is full. The generic "try another day"
+              below is actively wrong here — there is no other day — so this is
+              its own state, and it hands over to the two channels that can
+              still take the job.
+            -->
+            <div class="rounded-lg border border-yeg-signal/30 bg-yeg-signal/5 p-4">
+              <p class="text-sm text-yeg-text mb-2">
+                We're fully booked for the next two weeks — call or send a message and we'll fit
+                you in.
+              </p>
+              <a class="cta-primary text-sm" href={PHONE_HREF}>Call {PHONE_DISPLAY}</a>
+              <a class="cta-secondary underline ml-4" href="/contact/">Send a message</a>
+            </div>
           {:else}
             <div class="flex gap-2 overflow-x-auto pb-2 mb-5">
               {#each dates as d (d.date)}
@@ -542,6 +585,15 @@
                 <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{PHONE_DISPLAY}</a>.
               </p>
             {/if}
+
+            <!--
+              Friday is closed by configuration, not by a blackout row, so the
+              column simply is not there. Said out loud, the gap reads as
+              policy; unsaid, it reads as a bug in the calendar.
+            -->
+            <p class="text-xs text-yeg-text-secondary mt-4">
+              We're closed Fridays — every other day, including Sunday, is open.
+            </p>
           {/if}
 
           {#if errors.slot_start}
@@ -591,9 +643,16 @@
                 {#each services as s (s.id)}
                   <option value={s.id}>{s.name}</option>
                 {/each}
-                <option value="other">Other Emergency</option>
+                <option value="other">Other / not sure</option>
               </select>
               {#if errors.service}<p class="text-red-500 text-xs mt-1">{errors.service}</p>{/if}
+              {#if values.service === 'other'}
+                <p class="text-xs text-yeg-text-secondary mt-2">
+                  Not sure is fine — describe it below and we'll work it out on site. If this
+                  can't wait,
+                  <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>call now</a>.
+                </p>
+              {/if}
             </div>
 
             <div>
@@ -611,6 +670,9 @@
                   type="text" bind:value={values.city}
                   maxlength={MAX_FIELD_LENGTHS.city} autocomplete="address-level2" />
                 {#if errors.city}<p class="text-red-500 text-xs mt-1">{errors.city}</p>{/if}
+                <p class="text-xs text-yeg-text-secondary mt-1">
+                  Edmonton and area. Further out? Call first.
+                </p>
               </div>
               <div>
                 <label class={LABEL_CLASS} for="bk-postal">Postal code <span class="normal-case">(optional)</span></label>
@@ -645,6 +707,15 @@
                   <span class="text-sm">Insurance claim</span>
                 </label>
               </div>
+              <!--
+                Renters are the case neither option describes: the policy is
+                usually the landlord's, and picking "paying privately" is how a
+                tenant ends up personally invoiced for a covered loss.
+              -->
+              <p class="text-xs text-yeg-text-secondary mt-3">
+                Renting? Choose insurance and mention it in the description below — we'll sort out
+                whose policy it is.
+              </p>
             </fieldset>
 
             {#if values.payment_route === 'insurance'}

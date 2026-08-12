@@ -1,7 +1,21 @@
+/**
+ * `POST /api/admin/reply/` — the office replying to a lead.
+ *
+ * A shell over `sendReplyAndStamp`, which owns the send-then-stamp ordering
+ * and every failure arm. All four `Location` headers below are slashed and
+ * built from `booking-admin.ts`'s constants: an unslashed redirect costs a 308
+ * per click, and the same spelling is what made `/admin` unreachable for a
+ * month (BK-07).
+ */
+
 import type { APIRoute } from 'astro';
-import { Resend } from 'resend';
 import { z } from 'zod';
+
+import { adminLeadPath, ADMIN_LEADS_PATH } from '../../../lib/booking-admin';
+import { createResendSender } from '../../../lib/booking-notify';
 import { getDb, type Lead } from '../../../lib/db';
+import { readEnv } from '../../../lib/env';
+import { sendReplyAndStamp } from '../../../lib/lead-reply';
 
 export const prerender = false;
 
@@ -11,12 +25,8 @@ const schema = z.object({
   body: z.string().min(1),
 });
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function redirect(location: string): Response {
+  return new Response(null, { status: 302, headers: { Location: location } });
 }
 
 export const POST: APIRoute = async ({ request }) => {
@@ -28,43 +38,34 @@ export const POST: APIRoute = async ({ request }) => {
   };
 
   const result = schema.safeParse(raw);
-  if (!result.success) {
-    return new Response(null, { status: 302, headers: { Location: '/admin?error=validation' } });
-  }
+  if (!result.success) return redirect(`${ADMIN_LEADS_PATH}?error=validation`);
 
   const { leadId, subject, body } = result.data;
+  const id = Number(leadId);
 
   const sql = getDb();
-  const rows = (await sql`SELECT * FROM leads WHERE id = ${leadId}`) as Lead[];
+  const rows = (await sql`SELECT * FROM leads WHERE id = ${id}`) as Lead[];
   const lead = rows[0];
 
-  if (!lead) {
-    return new Response(null, { status: 302, headers: { Location: '/admin' } });
-  }
-  if (!lead.email) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: `/admin/leads/${leadId}?error=noemail` },
-    });
-  }
+  if (!lead) return redirect(ADMIN_LEADS_PATH);
+  if (!lead.email) return redirect(`${adminLeadPath(id)}?error=noemail`);
 
-  const apiKey = import.meta.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error('RESEND_API_KEY not set');
+  // `readEnv`, not `import.meta.env`: the latter is undefined under plain Node,
+  // which is what the verification runs on. The missing-key case is a logged
+  // `failed` inside the helper, not the bare `throw` this route used to do.
+  const apiKey = readEnv('RESEND_API_KEY');
 
-  const resend = new Resend(apiKey);
-  await resend.emails.send({
-    from: 'YEG Restoration <info@yegrestoration.ca>',
-    to: [lead.email],
-    replyTo: 'info@yegrestoration.ca',
-    subject,
-    html: `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;white-space:pre-wrap;max-width:600px;">${escapeHtml(body)}</div>`,
-    text: body,
-  });
+  const outcome = await sendReplyAndStamp(
+    sql,
+    { leadId: id, to: lead.email, subject, body },
+    // No idempotency key: a reply the office sends twice is two deliberate
+    // messages, and a fixed key would make Resend return the first attempt's
+    // result — including its failure — forever.
+    { send: apiKey ? createResendSender(apiKey, null) : null },
+  );
 
-  await sql`UPDATE leads SET status = 'replied', replied_at = NOW() WHERE id = ${leadId}`;
-
-  return new Response(null, {
-    status: 302,
-    headers: { Location: `/admin/leads/${leadId}?success=1` },
-  });
+  // `skipped` is the mute, and it counts as success on purpose: it is
+  // test-only, and the route-level verification needs the success path.
+  if (outcome === 'failed') return redirect(`${adminLeadPath(id)}?error=sendfailed`);
+  return redirect(`${adminLeadPath(id)}?success=1`);
 };

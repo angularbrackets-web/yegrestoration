@@ -2,11 +2,18 @@
 import { BUSINESS } from '../data/services';
 
 interface Props {
-  /** Where "Get Help Now" points — #quote on service pages, #contact on homepage. */
-  formAnchor?: string;
+  /**
+   * Where the second button goes. `/book/` everywhere since BK-10 — pages that
+   * already know the visitor's intent add a prefill (`?service=`, `?route=`).
+   *
+   * The old default was the `#quote` anchor, which stopped existing as a form
+   * at cutover; a default that points at a section that may not be on the page
+   * is how a CTA silently becomes a no-op, so the default is now a real URL.
+   */
+  bookHref?: string;
 }
 
-const { formAnchor = '#quote' } = Astro.props;
+const { bookHref = '/book/' } = Astro.props;
 ---
 
 <!-- Spacer so the fixed bar never covers the footer's last content -->
@@ -39,10 +46,10 @@ const { formAnchor = '#quote' } = Astro.props;
       <span>Call Now — 24/7</span>
     </a>
     <a
-      href={formAnchor}
+      href={bookHref}
       class="flex items-center justify-center gap-2 h-14 bg-yeg-text text-yeg-bg font-bold text-sm"
     >
-      <span>Get Help Now</span>
+      <span>Book Assessment</span>
       <span aria-hidden="true">&rarr;</span>
     </a>
   </div>

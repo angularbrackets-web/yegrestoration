@@ -31,19 +31,26 @@ import {
   ADMIN_BLACKOUT_ADD_ENDPOINT,
   ADMIN_BLACKOUT_DELETE_ENDPOINT,
   ADMIN_FILE_ENDPOINT,
+  ADMIN_LEADS_PATH,
+  ADMIN_REPLY_ENDPOINT,
   adminAppointmentPath,
   adminFilePath,
+  adminLeadPath,
   customerStampState,
   formatAdminTimestamp,
   formatFileSize,
   hasNotificationWarning,
   internalStampState,
+  LEAD_SERVICE_UNSPECIFIED,
+  leadServiceLabel,
   notificationFlags,
   partitionAppointments,
   type NotifiableAppointment,
   type PartitionableAppointment,
 } from '../src/lib/booking-admin';
-import type { Appointment, AppointmentStatus } from '../src/lib/db';
+import { SUPPORT_PHONE } from '../src/lib/booking-config';
+import type { Appointment, AppointmentStatus, Lead } from '../src/lib/db';
+import { fillTemplate, REPLY_TEMPLATES, SERVICE_FALLBACK } from '../src/lib/reply-templates';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -163,6 +170,11 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
     // credential for the private Blob store, so "still needs a session" is the
     // assertion that matters most in this list.
     ['ADMIN_FILE_ENDPOINT', ADMIN_FILE_ENDPOINT],
+    // BK-10's two. The leads surface outlived the plan to retire it, so its
+    // paths are constants on the same list rather than hand-spelled strings
+    // that each cost a 308 per click.
+    ['ADMIN_LEADS_PATH', ADMIN_LEADS_PATH],
+    ['ADMIN_REPLY_ENDPOINT', ADMIN_REPLY_ENDPOINT],
   ];
   for (const [name, value] of PATHS) {
     check(value.endsWith('/'), `${name} (${value}) ends with a slash`);
@@ -170,6 +182,8 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
   }
   check(adminAppointmentPath(12) === '/admin/appointments/12/', 'a detail path is built slashed');
   check(adminFilePath(7) === '/api/admin/files/7/', 'and a file link is built slashed (BK-09)');
+  check(adminLeadPath(12) === '/admin/leads/12/', 'and a lead detail path too (BK-10)');
+  check(!isPublicAdminPath(adminLeadPath(12)), 'a lead detail page still needs a session');
 
   // Every one of them is behind the middleware, and none accidentally became
   // public. The gate normalizes exactly one trailing slash, so a new public path
@@ -199,6 +213,11 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
     'src/pages/api/admin/blackouts/delete.ts',
     'src/lib/booking-admin.ts',
     'src/layouts/AdminLayout.astro',
+    // BK-10. These three carried the four unslashed literals the ROADMAP had
+    // owed since BK-07, and they are the reason the regex below was widened.
+    'src/pages/admin/index.astro',
+    'src/pages/admin/leads/[id].astro',
+    'src/pages/api/admin/reply.ts',
   ];
   for (const file of NEW_SOURCES) {
     const path = resolve(root, file);
@@ -217,9 +236,26 @@ console.log('\nEvery admin path BK-08 added is slashed (BK-08 AC9)');
     // see — so the one form this rule most needs to cover would have been the
     // one it missed. Newlines are excluded so a long template body cannot make
     // the match run away.
-    for (const match of source.matchAll(/['"`](\/(?:api\/)?admin\/[^'"`?#\n]*)['"`]/g)) {
+    //
+    // BK-10 WIDENED THIS, and the old shape is worth stating because the
+    // ROADMAP claimed adding a file to the list above was all that was needed.
+    // It was not. The previous pattern required `/admin/` — a literal slash
+    // after `admin` — so `href="/admin"` was invisible; and it excluded `?`
+    // and `#` from the path body, so `'/admin?error=validation'` and
+    // `` `/admin/leads/${id}?success=1` `` matched nothing at all rather than
+    // matching and failing. Those were the exact four literals this ticket
+    // fixed: adding the files without this change would have produced a green
+    // scan over unslashed paths.
+    //
+    // Now the whole literal is captured, the query/fragment is stripped, and
+    // the PATH part is what must end in a slash.
+    for (const match of source.matchAll(/['"`](\/(?:api\/)?admin[^'"`\n]*)['"`]/g)) {
       const literal = match[1];
-      check(literal.endsWith('/'), `${file}: ${literal} must end with a slash`);
+      const path = literal.split(/[?#]/)[0];
+      check(
+        path.endsWith('/'),
+        `${file}: ${literal} — the path part (${path}) must end with a slash`,
+      );
     }
   }
 }
@@ -573,51 +609,78 @@ console.log('\nFile sizes');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\nThe two new pages (AC2, AC6)');
+console.log('\nEvery admin page renders dates in Edmonton time (AC2, AC6)');
+// ---------------------------------------------------------------------------
+/**
+ * A bare `toLocale*` renders the SERVER's zone — UTC on Vercel, six or seven
+ * hours off. Slots go through `formatSlot` and everything else through
+ * `formatAdminTimestamp`, so no admin page should call one at all; if one ever
+ * does, it must name its `timeZone`.
+ *
+ * Extracted into a function by BK-10 so the LEADS pages can be held to the
+ * same rule as the appointments pages. They were the last two sites of the
+ * wrong-day pattern, and the ROADMAP had owed the fix since BK-07.
+ */
+function checkZoneAwareDates(page: string) {
+  const path = resolve(root, page);
+  // Without this the scan passes vacuously on a file that does not exist.
+  check(existsSync(path), `${page} exists`);
+  if (!existsSync(path)) return;
+  const source = readFileSync(path, 'utf8');
+
+  for (const match of source.matchAll(/\.toLocale[A-Za-z]*\s*\(/g)) {
+    const start = match.index ?? 0;
+    let depth = 0;
+    let end = source.length;
+    for (let i = start + match[0].length - 1; i < source.length; i++) {
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const call = source.slice(start, end + 1);
+    check(
+      call.includes('timeZone'),
+      `${page}: ${match[0]} passes no timeZone — it would render the server's zone`,
+    );
+  }
+}
+
+for (const page of [
+  'src/pages/admin/index.astro',
+  'src/pages/admin/leads/[id].astro',
+  'src/pages/admin/appointments/index.astro',
+  'src/pages/admin/appointments/[id].astro',
+  'src/pages/admin/appointments/new.astro',
+  'src/pages/admin/blackouts.astro',
+  'src/layouts/AdminLayout.astro',
+]) {
+  checkZoneAwareDates(page);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nNo admin page leaks a Blob location (BK-09)');
 // ---------------------------------------------------------------------------
 {
   const PAGES = [
     'src/pages/admin/appointments/index.astro',
     'src/pages/admin/appointments/[id].astro',
-    // Renders on every admin page, and this ticket rewrote it.
+    // Renders on every admin page, and BK-07 rewrote it.
     'src/layouts/AdminLayout.astro',
-    // BK-08's two new pages. Both render dates, so both are in scope for the
-    // zone rule; neither may leak a Blob location either.
+    // BK-08's two new pages.
     'src/pages/admin/appointments/new.astro',
     'src/pages/admin/blackouts.astro',
   ];
 
   for (const page of PAGES) {
     const path = resolve(root, page);
-    // Without this the scans below pass vacuously on a file that does not exist.
     check(existsSync(path), `${page} exists`);
     if (!existsSync(path)) continue;
     const source = readFileSync(path, 'utf8');
-
-    // A bare toLocale* renders the SERVER's zone — UTC on Vercel, six or seven
-    // hours off. Slots go through formatSlot and everything else through
-    // formatAdminTimestamp, so neither page should call one at all; if one
-    // ever does, it must name its timeZone.
-    for (const match of source.matchAll(/\.toLocale[A-Za-z]*\s*\(/g)) {
-      const start = match.index ?? 0;
-      let depth = 0;
-      let end = source.length;
-      for (let i = start + match[0].length - 1; i < source.length; i++) {
-        if (source[i] === '(') depth++;
-        else if (source[i] === ')') {
-          depth--;
-          if (depth === 0) {
-            end = i;
-            break;
-          }
-        }
-      }
-      const call = source.slice(start, end + 1);
-      check(
-        call.includes('timeZone'),
-        `${page}: ${match[0]} passes no timeZone — it would render the server's zone`,
-      );
-    }
 
     // The Blob store is private and 403s an unauthenticated GET, so a URL here
     // would be useless as well as a leak; viewing arrives with BK-09. Pathnames
@@ -637,6 +700,169 @@ console.log('\nThe two new pages (AC2, AC6)');
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe leads surface: every redirect is built, not typed (BK-10 AC6)');
+// ---------------------------------------------------------------------------
+{
+  const source = readFileSync(resolve(root, 'src/pages/api/admin/reply.ts'), 'utf8');
+
+  // The ROADMAP said three Location headers; there were four, and this ticket
+  // added a fifth (`?error=sendfailed`). Rather than pin a count that will be
+  // wrong again the next time someone adds an arm, every redirect target must
+  // be BUILT from the constants — which is the property that actually matters.
+  const targets = [...source.matchAll(/return redirect\(([^\n]*)\)/g)].map((m) => m[1]);
+  check(targets.length >= 4, `reply.ts issues at least four redirects, found ${targets.length}`);
+  for (const target of targets) {
+    check(
+      target.includes('ADMIN_LEADS_PATH') || target.includes('adminLeadPath('),
+      `reply.ts redirect target is built from a constant, got ${target}`,
+    );
+  }
+  check(
+    !/['"`]\/admin(?![^'"`]*\/['"`])/.test(source.replace(/^\s*\*.*$/gm, '')),
+    'and reply.ts holds no hand-typed /admin literal of its own',
+  );
+
+  // The send is not the route's job any more, and neither is the stamp order.
+  check(
+    source.includes('sendReplyAndStamp'),
+    'reply.ts goes through the extracted send-then-stamp helper',
+  );
+  check(
+    !source.includes('resend.emails.send'),
+    'and calls the Resend SDK nowhere — createResendSender is the only site',
+  );
+  check(source.includes("readEnv('RESEND_API_KEY')"), 'the key comes through readEnv (BK-12 rule)');
+  check(
+    !source.includes('throw new Error'),
+    'and a missing key is a logged redirect, not a throw that 500s a redirect-only page',
+  );
+  check(
+    source.includes('error=sendfailed'),
+    'a failed send redirects to ?error=sendfailed rather than reporting success',
+  );
+
+  const detail = readFileSync(resolve(root, 'src/pages/admin/leads/[id].astro'), 'utf8');
+  check(detail.includes("'sendfailed'"), 'and the detail page renders that arm');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nA lead with no service reads as something (BK-10 AC1)');
+// ---------------------------------------------------------------------------
+{
+  const labels = { mold: 'Mold Removal' };
+
+  check(
+    leadServiceLabel(null, labels) === LEAD_SERVICE_UNSPECIFIED,
+    `a NULL service reads as "${LEAD_SERVICE_UNSPECIFIED}"`,
+  );
+  check(leadServiceLabel('', labels) === LEAD_SERVICE_UNSPECIFIED, 'and so does an empty one');
+  check(leadServiceLabel(undefined, labels) === LEAD_SERVICE_UNSPECIFIED, 'and an absent one');
+  check(leadServiceLabel('mold', labels) === 'Mold Removal', 'a known service reads as its label');
+  check(
+    leadServiceLabel('sinkhole', labels) === 'sinkhole',
+    'and an unknown one falls back to the key rather than to nothing',
+  );
+  for (const input of [null, '', undefined, 'mold', 'sinkhole'] as const) {
+    const rendered = leadServiceLabel(input, labels);
+    check(rendered.trim() !== '', `${String(input)} never renders as an empty cell`);
+    check(!rendered.includes('null'), `${String(input)} never renders the word "null"`);
+  }
+
+  for (const page of ['src/pages/admin/index.astro', 'src/pages/admin/leads/[id].astro']) {
+    const source = readFileSync(resolve(root, page), 'utf8');
+    check(source.includes('leadServiceLabel('), `${page} renders the service through the guard`);
+  }
+
+  // A compile-time tie: `service` must stay nullable, or the guard above is
+  // solving a problem the type says cannot happen and will be "tidied" away.
+  const _nullableService: Lead['service'] = null;
+  void _nullableService;
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nReply templates: the right phone number, and never "null" (BK-10 AC1)');
+// ---------------------------------------------------------------------------
+{
+  // The defect this closes: every template told customers to call
+  // (780) 244-4747, a number the client does not recognize, and every reply
+  // sent since they shipped carried it.
+  const WRONG_NUMBERS = ['244-4747', '2444747'];
+
+  check(REPLY_TEMPLATES.length > 0, 'there are templates to check');
+  check(SUPPORT_PHONE === '(780) 479-3285', `SUPPORT_PHONE is the advertised line, got ${SUPPORT_PHONE}`);
+
+  let templatesWithAPhone = 0;
+  for (const template of REPLY_TEMPLATES) {
+    const whole = `${template.subject}\n${template.body}`;
+    for (const wrong of WRONG_NUMBERS) {
+      check(!whole.includes(wrong), `template "${template.id}" no longer carries ${wrong}`);
+    }
+    if (whole.includes(SUPPORT_PHONE)) templatesWithAPhone++;
+    // Any phone-shaped string in a template must BE the advertised line.
+    for (const match of whole.matchAll(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]\d{4}/g)) {
+      check(
+        match[0] === SUPPORT_PHONE,
+        `template "${template.id}" carries the number ${match[0]}, which is not ${SUPPORT_PHONE}`,
+      );
+    }
+    check(
+      !/quote request/i.test(whole),
+      `template "${template.id}" is reframed off "Quote Request" — quotes go through /book/ now`,
+    );
+  }
+  check(templatesWithAPhone >= 4, `most templates still offer the phone, got ${templatesWithAPhone}`);
+
+  // The null guard, over every template, with no service picked — which is now
+  // the ordinary case rather than an edge one.
+  for (const template of REPLY_TEMPLATES) {
+    for (const [label, service] of [
+      ['null', null],
+      ['undefined', undefined],
+      ['empty', ''],
+    ] as const) {
+      const subject = fillTemplate(template.subject, { name: 'Dana', serviceLabel: service });
+      const body = fillTemplate(template.body, { name: 'Dana', serviceLabel: service });
+      for (const [where, text] of [
+        ['subject', subject],
+        ['body', body],
+      ] as const) {
+        check(
+          !/\bnull\b/.test(text),
+          `template "${template.id}" ${where} with a ${label} service contains no "null"`,
+        );
+        check(
+          !/\bundefined\b/.test(text),
+          `template "${template.id}" ${where} with a ${label} service contains no "undefined"`,
+        );
+        check(
+          !text.includes('{{'),
+          `template "${template.id}" ${where} has no unsubstituted placeholder left`,
+        );
+      }
+      check(
+        !template.body.includes('{{service}}') || body.includes(SERVICE_FALLBACK),
+        `template "${template.id}" falls back to "${SERVICE_FALLBACK}"`,
+      );
+    }
+  }
+
+  const filled = fillTemplate('Hi {{name}}, about {{service}}.', {
+    name: 'Dana',
+    serviceLabel: 'Mold Removal',
+  });
+  check(filled === 'Hi Dana, about Mold Removal.', `a real label is used, got "${filled}"`);
+
+  // The browser used to run its own copy of these regexes, which is how the
+  // guard could exist in the module and still never reach a customer.
+  const detail = readFileSync(resolve(root, 'src/pages/admin/leads/[id].astro'), 'utf8');
+  check(detail.includes('fillTemplate('), 'the detail page fills templates server-side');
+  check(
+    !detail.includes('.replace(/\\{\\{'),
+    'and its inline script keeps no second, unguarded substitution of its own',
+  );
 }
 
 // ---------------------------------------------------------------------------

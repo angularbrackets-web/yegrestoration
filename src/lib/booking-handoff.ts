@@ -52,6 +52,26 @@ export function loadConfirmation(): Confirmation | null {
 }
 
 /**
+ * The two ways the booking funnel can fail before a booking exists.
+ *
+ * Added by BK-10 so a post-cutover CPA regression is not a black box: with the
+ * form demoted, `/book/` is the only quote path, and "availability would not
+ * load" or "every day is full" are the two states that lose a visitor without
+ * leaving any other trace. Neither event carries parameters — there is no PII
+ * here and nothing to key on beyond the count.
+ *
+ * GA4 only, deliberately: these are diagnostics, not conversions, and Google
+ * Ads has no business bidding on them.
+ */
+export type BookingFunnelEvent = 'booking_availability_error' | 'booking_availability_empty';
+
+export function reportBookingFunnelEvent(event: BookingFunnelEvent): void {
+  const gtag = window.gtag;
+  if (typeof gtag !== 'function') return;
+  gtag('event', event);
+}
+
+/**
  * Report a booked assessment to Google Ads and GA4, at most once per booking.
  *
  * Safe to call on every load of the confirmed page: the marker is what makes a

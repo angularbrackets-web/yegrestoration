@@ -1,8 +1,14 @@
 ---
 export const prerender = false;
 import AdminLayout from '../../../layouts/AdminLayout.astro';
+import {
+  ADMIN_LEADS_PATH,
+  ADMIN_REPLY_ENDPOINT,
+  formatAdminTimestamp,
+  leadServiceLabel,
+} from '../../../lib/booking-admin';
 import { getDb, SERVICE_LABELS, type Lead } from '../../../lib/db';
-import { REPLY_TEMPLATES } from '../../../lib/reply-templates';
+import { fillTemplate, REPLY_TEMPLATES } from '../../../lib/reply-templates';
 
 const { id } = Astro.params;
 let lead: Lead | null = null;
@@ -31,12 +37,41 @@ function statusClasses(status: Lead['status']) {
   return 'bg-blue-900/40 text-blue-300 border-blue-800';
 }
 
-const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
+/** What the page shows in the Service row. "Not specified" when there is none. */
+const serviceLabel = lead ? leadServiceLabel(lead.service, SERVICE_LABELS) : '';
+
+/**
+ * What `{{service}}` becomes in a reply — a *customer-facing* string, so it is
+ * NOT `serviceLabel`. "Not specified" is fine in an admin table and wrong in a
+ * sentence like "your patience while we assessed …"; `fillTemplate` handles
+ * the fallback, and passing null is how it is told there is nothing to fill.
+ * The old code passed the raw column through `String.replace`, which wrote the
+ * literal word "null" into customer emails.
+ */
+const templateServiceLabel = lead?.service
+  ? (SERVICE_LABELS[lead.service] ?? lead.service)
+  : null;
+
+/**
+ * The templates, already filled, server-side.
+ *
+ * The browser used to do the substitution with its own inline copy of the
+ * regexes — which is how the null guard could be added to `reply-templates.ts`
+ * and still not reach a customer. One implementation, one place to check.
+ */
+const filledTemplates = REPLY_TEMPLATES.map((t) => ({
+  id: t.id,
+  subject: fillTemplate(t.subject, {
+    name: lead?.name ?? '',
+    serviceLabel: templateServiceLabel,
+  }),
+  body: fillTemplate(t.body, { name: lead?.name ?? '', serviceLabel: templateServiceLabel }),
+}));
 ---
 
 <AdminLayout title={lead ? `${lead.name} — Lead` : 'Lead'}>
   <div class="mb-5">
-    <a href="/admin" class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">← All Leads</a>
+    <a href={ADMIN_LEADS_PATH} class="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">← All Leads</a>
   </div>
 
   {dbError && (
@@ -79,16 +114,12 @@ const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
           </div>
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Submitted</dt>
-            <dd class="text-white">
-              {new Date(lead.created_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
-            </dd>
+            <dd class="text-white">{formatAdminTimestamp(lead.created_at)}</dd>
           </div>
           {lead.replied_at && (
             <div>
               <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Replied</dt>
-              <dd class="text-green-400">
-                {new Date(lead.replied_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
-              </dd>
+              <dd class="text-green-400">{formatAdminTimestamp(lead.replied_at)}</dd>
             </div>
           )}
           {lead.message && (
@@ -117,12 +148,17 @@ const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
             )}
             {replyError && (
               <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm mb-4">
-                Failed to send reply. Please try again.
+                {/* `noemail` is not a case here: this block only renders when the
+                    lead HAS an email, and that redirect is what the branch
+                    above shows instead. */}
+                {replyError === 'sendfailed'
+                  ? 'The email did not send, so this lead is still marked unanswered — nothing was recorded. Try again.'
+                  : 'Failed to send reply. Please try again.'}
               </div>
             )}
 
             <div class="mb-4">
-              <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="template">
+              <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="template-select">
                 Template
               </label>
               <select
@@ -137,10 +173,10 @@ const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
               </select>
             </div>
 
-            <form method="POST" action="/api/admin/reply" class="space-y-4">
+            <form method="POST" action={ADMIN_REPLY_ENDPOINT} class="space-y-4">
               <input type="hidden" name="leadId" value={lead.id} />
               <div>
-                <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="subject">
+                <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="reply-subject">
                   Subject
                 </label>
                 <input
@@ -152,7 +188,7 @@ const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
                 />
               </div>
               <div>
-                <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="body">
+                <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="reply-body">
                   Message
                 </label>
                 <textarea
@@ -180,23 +216,17 @@ const serviceLabel = lead ? (SERVICE_LABELS[lead.service] ?? lead.service) : '';
   )}
 </AdminLayout>
 
-<script define:vars={{ templates: REPLY_TEMPLATES, leadName: lead?.name ?? '', leadService: serviceLabel }}>
+<script define:vars={{ templates: filledTemplates }}>
   const sel = document.getElementById('template-select');
   const subj = document.getElementById('reply-subject');
   const body = document.getElementById('reply-body');
-
-  function fill(str) {
-    return str
-      .replace(/\{\{name\}\}/g, leadName)
-      .replace(/\{\{service\}\}/g, leadService);
-  }
 
   sel?.addEventListener('change', () => {
     const id = sel.value;
     if (!id || id === '_custom') return;
     const tpl = templates.find(t => t.id === id);
     if (!tpl) return;
-    subj.value = fill(tpl.subject);
-    body.value = fill(tpl.body);
+    subj.value = tpl.subject;
+    body.value = tpl.body;
   });
 </script>

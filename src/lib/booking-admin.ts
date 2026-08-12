@@ -23,6 +23,17 @@ import type { Appointment } from './db';
 // again.
 // ---------------------------------------------------------------------------
 
+/**
+ * The leads list, which is the admin root. Added by BK-10 along with the two
+ * below: the leads surface outlived the plan to retire it (the contact form is
+ * a message channel now, not a quote form), so its paths join the same list
+ * the appointments surface uses rather than staying hand-spelled — each of
+ * them was costing a 308 per click.
+ */
+export const ADMIN_LEADS_PATH = '/admin/';
+
+export const ADMIN_REPLY_ENDPOINT = '/api/admin/reply/';
+
 export const ADMIN_APPOINTMENTS_PATH = '/admin/appointments/';
 export const ADMIN_APPOINTMENT_NEW_PATH = '/admin/appointments/new/';
 export const ADMIN_BLACKOUTS_PATH = '/admin/blackouts/';
@@ -35,6 +46,11 @@ export const ADMIN_APPOINTMENT_UPDATE_ENDPOINT = '/api/admin/appointments/update
 export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend/';
 export const ADMIN_BLACKOUT_ADD_ENDPOINT = '/api/admin/blackouts/add/';
 export const ADMIN_BLACKOUT_DELETE_ENDPOINT = '/api/admin/blackouts/delete/';
+
+/** `/admin/leads/12/` — the one place that URL is spelled. */
+export function adminLeadPath(id: number): string {
+  return `${ADMIN_LEADS_PATH}leads/${id}/`;
+}
 
 /** `/admin/appointments/12/` — the one place that URL is spelled. */
 export function adminAppointmentPath(id: number): string {
@@ -203,6 +219,32 @@ export function formatAdminTimestamp(instant: Date, tz: string = TIMEZONE): stri
     minute: '2-digit',
     hour12: true,
   }).format(instant);
+}
+
+/**
+ * What an unpicked service reads as on the leads pages.
+ *
+ * `leads.service` is nullable since migration 004, and Astro renders `null` as
+ * nothing — so a bare `{lead.service}` would leave a silently empty cell, and
+ * `SERVICE_LABELS[lead.service] ?? lead.service` renders the empty string too.
+ * Neither is the word "null", but neither says anything either. This does.
+ */
+export const LEAD_SERVICE_UNSPECIFIED = 'Not specified';
+
+/**
+ * A lead's service as a human reads it: the label, the raw id if it is not one
+ * we know, or "Not specified" when there is none.
+ *
+ * `labels` is injected rather than imported: `SERVICE_LABELS` lives in `db.ts`
+ * beside the Neon client, and this module's whole contract is that it can be
+ * imported with no database and no environment.
+ */
+export function leadServiceLabel(
+  service: string | null | undefined,
+  labels: Record<string, string>,
+): string {
+  if (!service) return LEAD_SERVICE_UNSPECIFIED;
+  return labels[service] ?? service;
 }
 
 /** Human label for `payment_route`. */

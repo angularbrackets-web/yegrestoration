@@ -18,7 +18,10 @@ export async function GET(context: APIContext) {
   );
   const otherServices = services
     .filter((s) => !s.page)
-    .map((s) => `- ${s.name}: ${s.cardDescription} (request via ${site}/contact/)`);
+    // /book/ and not /contact/: this is a quote pointer, and quotes have one
+    // door since BK-10. BookingForm's dropdown covers every service plus
+    // "other", so an unpaged service lands somewhere that can take the job.
+    .map((s) => `- ${s.name}: ${s.cardDescription} (book at ${site}/book/)`);
 
   const postLines = posts.map(
     (p) => `- [${p.data.title}](${site}/blog/${p.id}/): ${p.data.description}`
@@ -48,7 +51,8 @@ ${otherServices.join('\n')}
 
 - [Insurance Claims Guide](${site}/insurance-claims/): How the insurance claim process works with restoration, and how direct billing removes the paperwork burden.
 - [About](${site}/about/): Who we are, certifications, and how we work.
-- [Contact](${site}/contact/): Request a free assessment or emergency dispatch.
+- [Book an Assessment](${site}/book/): Pick a time for a free on-site assessment — about 30 minutes, confirmed instantly. This is the way to request a quote.
+- [Contact](${site}/contact/): Send a message with a question, or reach the 24/7 emergency line.
 
 ## Blog
 

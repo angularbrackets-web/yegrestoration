@@ -9,7 +9,6 @@ import WorkGallerySlots from '../components/WorkGallerySlots.astro';
 import TrustStrip from '../components/TrustStrip.astro';
 import FaqSection from '../components/FaqSection.astro';
 import RelatedServices from '../components/RelatedServices.astro';
-import ContactForm from '../components/ContactForm.svelte';
 import MobileCallBar from '../components/MobileCallBar.astro';
 import { pagedServices, BUSINESS } from '../data/services';
 import { serviceSchema, faqPageSchema, breadcrumbSchema } from '../lib/seo';
@@ -62,27 +61,38 @@ const schemas = [
     <TrustStrip />
     <FaqSection faqs={page.faqs} />
 
-    <!-- Quote form -->
+    <!-- Booking CTA (was the quote form until BK-10; #quote id kept for stale links) -->
     <section id="quote" class="relative bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28 overflow-hidden">
       <div class="absolute bg-word opacity-[0.05]" style="left: 4vw; top: 6vh;">
         RESPONSE
       </div>
       <div class="relative z-10 px-6 lg:px-[8vw]">
-        <div class="max-w-2xl mx-auto">
-          <div class="text-center mb-10">
-            <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3">
-              Free Assessment
-            </p>
-            <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
-              Get Help With {service.shortName}
-            </h2>
-            <p class="text-yeg-text-secondary text-lg">
-              Tell us what happened — we'll call you back within 15 minutes. Or call
-              <a href={BUSINESS.phoneHref} class="font-semibold text-yeg-text hover:text-yeg-amber-deep transition-colors whitespace-nowrap">{BUSINESS.phone}</a>
-              now and skip the form.
-            </p>
+        <div class="max-w-2xl mx-auto text-center">
+          <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3">
+            Free Assessment
+          </p>
+          <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
+            Get Help With {service.shortName}
+          </h2>
+          <p class="text-yeg-text-secondary text-lg mb-8">
+            Pick a time and an IICRC-certified tech comes out, looks at the damage, and tells you
+            what it takes to put it right. About 30 minutes, no obligation. Water coming in right
+            now? Call
+            <a href={BUSINESS.phoneHref} class="font-semibold text-yeg-text hover:text-yeg-amber-deep transition-colors whitespace-nowrap">{BUSINESS.phone}</a>
+            instead — we answer live, 24/7.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-4">
+            <a href={`/book/?service=${service.id}`} class="cta-primary">
+              <span>Book a Free Assessment</span>
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+            <a
+              href="/contact/"
+              class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
+            >
+              Just have a question?
+            </a>
           </div>
-          <ContactForm client:visible defaultService={service.id} />
         </div>
       </div>
     </section>
@@ -91,5 +101,5 @@ const schemas = [
   </main>
 
   <Footer />
-  <MobileCallBar formAnchor="#quote" />
+  <MobileCallBar bookHref={`/book/?service=${service.id}`} />
 </Layout>

@@ -7,9 +7,14 @@ import type { Migration } from './types';
  * recorded in `schema_migrations` purely so the ledger describes the whole
  * schema rather than starting halfway through.
  *
- * `leads` is not being migrated into `appointments`. The two coexist; the
- * admin panel shows them as separate sections and `leads` goes read-only once
- * the old contact form is retired.
+ * `leads` is not being migrated into `appointments`. The two coexist, and
+ * `leads` STAYS WRITABLE indefinitely — BK-10's client-decided amendment
+ * (2026-08-11) demoted the contact form to a general message channel rather
+ * than deleting it, so this table is the message inbox, not a read-only
+ * archive. The earlier plan for it to go read-only at cutover is dead.
+ *
+ * `service NOT NULL` below is the schema as first shipped; `004` drops it,
+ * because a message form cannot demand a service.
  */
 export const migration: Migration = {
   name: '001-leads',

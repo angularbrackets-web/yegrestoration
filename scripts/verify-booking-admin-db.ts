@@ -93,6 +93,11 @@ const { planForAppointment, sendConfirmationAndStamp } = await import(
   '../src/lib/booking-admin-notify'
 );
 const { localDateKey, zonedTimeToUtc } = await import('../src/lib/booking-time');
+// BK-10's lead-reply path. Same split as the appointment resend above: the
+// helper's send is injectable (lib-level), the route is driven under the mute
+// (route-level).
+const { sendReplyAndStamp } = await import('../src/lib/lead-reply');
+const { POST: replyRoute } = await import('../src/pages/api/admin/reply');
 
 const sql = neon(DEV_URL);
 console.log(`Target: ${hostOf(DEV_URL)} (dev branch)\n`);
@@ -112,6 +117,10 @@ const touchedDays: string[] = [];
  */
 const FILE_PREFIX = 'bk09-verify/';
 const createdFileIds: number[] = [];
+
+/** BK-10's `leads` fixtures. Nothing else removes them — `leads` has no FK here. */
+const LEAD_MARKER = 'BK-10 reply verification';
+const createdLeadIds: number[] = [];
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -195,7 +204,7 @@ function entryFields(over: Record<string, string> = {}): Record<string, string> 
 /** Deletes by id AND by marker, retrying. Either alone would leak a row. */
 async function cleanup(
   attempts = 3,
-): Promise<{ appointments: number; blackouts: number; files: number }> {
+): Promise<{ appointments: number; blackouts: number; files: number; leads: number }> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -218,7 +227,12 @@ async function cleanup(
         WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}
         RETURNING day
       `) as { day: string }[];
-      return { appointments: a.length, blackouts: b.length, files: f.length };
+      const l = (await sql`
+        DELETE FROM leads
+        WHERE id = ANY(${createdLeadIds}::int[]) OR name LIKE ${`${LEAD_MARKER}%`}
+        RETURNING id
+      `) as { id: number }[];
+      return { appointments: a.length, blackouts: b.length, files: f.length, leads: l.length };
     } catch (err) {
       lastErr = err;
       console.error(`  cleanup attempt ${i + 1} failed, retrying:`, err);
@@ -228,6 +242,7 @@ async function cleanup(
   console.error(`      DELETE FROM appointment_files WHERE pathname LIKE '${FILE_PREFIX}%';`);
   console.error(`      DELETE FROM appointments   WHERE admin_notes LIKE '${MARKER}%';`);
   console.error(`      DELETE FROM blackout_dates WHERE reason      LIKE '${MARKER}%';`);
+  console.error(`      DELETE FROM leads          WHERE name        LIKE '${LEAD_MARKER}%';`);
   console.error(`      DELETE FROM appointments   WHERE id IN (${createdIds.join(', ') || 'none'});`);
   throw lastErr;
 }
@@ -246,7 +261,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 // Leftovers from an interrupted earlier run would make the first insert report
 // a taken slot, which reads as a failure of this run rather than of that one.
-await cleanup().catch(() => ({ appointments: 0, blackouts: 0, files: 0 }));
+await cleanup().catch(() => ({ appointments: 0, blackouts: 0, files: 0, leads: 0 }));
 seeded = true;
 
 try {
@@ -579,6 +594,211 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  console.log('Lead replies: send THEN stamp, never the other way (BK-10 AC2)');
+  // -------------------------------------------------------------------------
+  // The defect this closes shipped for months: `api/admin/reply.ts` awaited an
+  // unchecked `resend.emails.send(...)` and stamped `status = 'replied'` on the
+  // next line — and the SDK RESOLVES on failure rather than throwing. A bounced
+  // key marked the lead answered and showed the office `?success=1`, while the
+  // customer got nothing.
+  //
+  // LIB-LEVEL, through the extracted helper's injected send. The mute is lifted
+  // for this scope alone — with an injected `deps.send` the real adapter is
+  // never constructed, so no key is read and no mail can leave — and restored
+  // in the finally, because the route calls below run under it.
+  const [replyLead] = (await sql`
+    INSERT INTO leads (name, phone, email, service, message)
+    VALUES (${LEAD_MARKER}, '7805550142', 'bk10-verify@example.com', NULL, 'verification')
+    RETURNING id
+  `) as { id: number }[];
+  createdLeadIds.push(replyLead.id);
+
+  // The row is seeded with a NULL service on purpose: post-migration-004 that
+  // is the ordinary case, and it is what the template guard exists for.
+  const seededLead = (await sql`
+    SELECT status, service FROM leads WHERE id = ${replyLead.id}
+  `) as { status: string; service: string | null }[];
+  check(seededLead[0]?.service === null, 'the fixture lead has a NULL service (migration 004)');
+  check(seededLead[0]?.status === 'new', 'and starts unanswered');
+
+  type LeadRow = { status: string; replied_at: Date | null };
+  const readLead = async (id: number): Promise<LeadRow | null> => {
+    const rows = (await sql`SELECT status, replied_at FROM leads WHERE id = ${id}`) as LeadRow[];
+    return rows[0] ?? null;
+  };
+  const resetLead = async () => {
+    await sql`UPDATE leads SET status = 'new', replied_at = NULL WHERE id = ${replyLead.id}`;
+  };
+
+  const replyInput = {
+    leadId: replyLead.id,
+    to: 'bk10-verify@example.com',
+    subject: 'Re: your message',
+    body: 'Hi Dana,\n\nThanks for getting in touch.',
+  };
+
+  {
+    delete process.env.BOOKING_NOTIFY_DISABLED;
+    try {
+      // 1. A successful send stamps, once.
+      await resetLead();
+      const delivered: { to: string; subject: string }[] = [];
+      const sent = await sendReplyAndStamp(sql, replyInput, {
+        send: async (m) => {
+          delivered.push({ to: m.to, subject: m.subject });
+          return { ok: true };
+        },
+      });
+      check(sent === 'sent', `a successful send reports sent, got ${sent}`);
+      check(delivered.length === 1, `exactly one message left, got ${delivered.length}`);
+      check(delivered[0]?.to === 'bk10-verify@example.com', 'addressed to the lead');
+      const afterSent = await readLead(replyLead.id);
+      check(afterSent?.status === 'replied', 'the lead is marked replied');
+      check(afterSent?.replied_at != null, 'and replied_at is stamped');
+
+      // 2. A RESOLVED error stamps NOTHING. This is the mutation the old route
+      //    got wrong: remove the `if (outcome === 'failed') return` guard in
+      //    `sendReplyAndStamp` and this goes red.
+      await resetLead();
+      const failed = await sendReplyAndStamp(sql, replyInput, {
+        send: async () => ({ ok: false, error: 'validation_error: API key is invalid' }),
+      });
+      check(failed === 'failed', `a resolved error reports failed, got ${failed}`);
+      const afterFailed = await readLead(replyLead.id);
+      check(afterFailed?.status === 'new', 'the lead stays unanswered');
+      check(afterFailed?.replied_at === null, 'and replied_at stays NULL');
+
+      // 3. A throwing sender is caught rather than escaping into the route.
+      await resetLead();
+      const threw = await sendReplyAndStamp(sql, replyInput, {
+        send: async () => {
+          throw new Error('socket hang up');
+        },
+      });
+      check(threw === 'failed', `a throwing sender reports failed, got ${threw}`);
+      check((await readLead(replyLead.id))?.replied_at === null, 'and stamps nothing');
+
+      // 4. No key is its own arm — a logged failure, not a throw. The route it
+      //    replaced threw a bare Error here and 500'd a redirect-only page.
+      await resetLead();
+      const noKey = await sendReplyAndStamp(sql, replyInput, { send: null });
+      check(noKey === 'failed', `a missing key reports failed, got ${noKey}`);
+      check((await readLead(replyLead.id))?.status === 'new', 'and leaves the lead unanswered');
+
+      // 5. The mute reports `skipped` and DOES stamp — the pinned test-only row
+      //    that makes the route-level success path below reachable.
+      process.env.BOOKING_NOTIFY_DISABLED = '1';
+      await resetLead();
+      const muted = await sendReplyAndStamp(sql, replyInput, {
+        send: async () => ({ ok: true }),
+      });
+      check(muted === 'skipped', `the mute reports skipped, got ${muted}`);
+      check(
+        (await readLead(replyLead.id))?.status === 'replied',
+        'and a skip still stamps — the pinned row',
+      );
+    } finally {
+      // Restored before anything calls a route again.
+      process.env.BOOKING_NOTIFY_DISABLED = '1';
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('The reply route: slashed redirects and the right flash (BK-10 AC2, AC6)');
+  // -------------------------------------------------------------------------
+  // ROUTE-LEVEL, under the mute — so only the `skipped` arm is reachable, which
+  // is exactly why the arms above live lib-level. What this half contributes is
+  // the parse, the lookup, and every Location header.
+  {
+    await resetLead();
+    const success = await call(replyRoute, {
+      leadId: String(replyLead.id),
+      subject: 'Re: your message',
+      body: 'Hello.',
+    });
+    check(
+      success === `/admin/leads/${replyLead.id}/?success=1`,
+      `a muted send answers a SLASHED success redirect, got "${success}"`,
+    );
+    check((await readLead(replyLead.id))?.status === 'replied', 'and the lead is stamped');
+
+    const validation = await call(replyRoute, { leadId: 'abc', subject: '', body: '' });
+    check(
+      validation === '/admin/?error=validation',
+      `a malformed submit redirects to the SLASHED list, got "${validation}"`,
+    );
+
+    const missing = await call(replyRoute, {
+      leadId: '2147483647',
+      subject: 'Hi',
+      body: 'There.',
+    });
+    check(
+      missing === '/admin/',
+      `a lead that does not exist redirects to the SLASHED list, got "${missing}"`,
+    );
+
+    const [noEmailLead] = (await sql`
+      INSERT INTO leads (name, phone, email, service, message)
+      VALUES (${`${LEAD_MARKER} no-email`}, '7805550143', NULL, NULL, 'verification')
+      RETURNING id
+    `) as { id: number }[];
+    createdLeadIds.push(noEmailLead.id);
+    const noEmail = await call(replyRoute, {
+      leadId: String(noEmailLead.id),
+      subject: 'Hi',
+      body: 'There.',
+    });
+    check(
+      noEmail === `/admin/leads/${noEmailLead.id}/?error=noemail`,
+      `a lead with no email is refused, slashed, got "${noEmail}"`,
+    );
+    check(
+      (await readLead(noEmailLead.id))?.status === 'new',
+      'and is not stamped as replied',
+    );
+
+    // Every Location this route can produce is slashed. Four arms — the ROADMAP
+    // said three, and the count was taken by eye.
+    for (const [label, location] of [
+      ['success', success],
+      ['validation', validation],
+      ['missing', missing],
+      ['no email', noEmail],
+    ] as const) {
+      const path = location.split('?')[0];
+      check(path.endsWith('/'), `the ${label} redirect path is slashed, got "${path}"`);
+    }
+
+    // The FAILED arm at ROUTE level (implementation-review should-fix): under
+    // the mute this route reaches only `skipped`, so its mapping of `failed`
+    // to ?error=sendfailed — and NOT stamping — was unobserved by any gate.
+    // Mute off + no key in reach = `failed` with nothing sendable.
+    await resetLead();
+    delete process.env.BOOKING_NOTIFY_DISABLED;
+    const savedKey = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      const failed = await call(replyRoute, {
+        leadId: String(replyLead.id),
+        subject: 'Re: your message',
+        body: 'This cannot send — no key is reachable.',
+      });
+      check(
+        failed === `/admin/leads/${replyLead.id}/?error=sendfailed`,
+        `a failed send redirects to ?error=sendfailed, slashed, got "${failed}"`,
+      );
+      check(
+        (await readLead(replyLead.id))?.status === 'new',
+        'and the lead is NOT stamped replied — send-then-stamp holds at the route too',
+      );
+    } finally {
+      process.env.BOOKING_NOTIFY_DISABLED = '1';
+      if (savedKey !== undefined) process.env.RESEND_API_KEY = savedKey;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   console.log('Blackout days round-trip through the public availability read (AC8)');
   // -------------------------------------------------------------------------
   const openDay = await findOpenDay();
@@ -754,10 +974,10 @@ try {
   // `verify:booking:files` covers the signing arguments; the post-deploy check
   // in the ticket covers the round trip.
 } finally {
-  const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1 }));
+  const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1, leads: -1 }));
   seeded = false;
   console.log(
-    `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s), ${removed.files} file row(s)`,
+    `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s), ${removed.files} file row(s), ${removed.leads} lead row(s)`,
   );
   const left = (await sql`
     SELECT
@@ -766,9 +986,11 @@ try {
       (SELECT COUNT(*)::int FROM blackout_dates
         WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}) AS blackouts,
       (SELECT COUNT(*)::int FROM appointment_files
-        WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}) AS files
-  `) as { appointments: number; blackouts: number; files: number }[];
-  const stillThere = left[0].appointments + left[0].blackouts + left[0].files;
+        WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}) AS files,
+      (SELECT COUNT(*)::int FROM leads
+        WHERE id = ANY(${createdLeadIds}::int[]) OR name LIKE ${`${LEAD_MARKER}%`}) AS leads
+  `) as { appointments: number; blackouts: number; files: number; leads: number }[];
+  const stillThere = left[0].appointments + left[0].blackouts + left[0].files + left[0].leads;
   if (stillThere > 0) {
     console.error(`  ✗ ${stillThere} seeded row(s) survived cleanup — remove them manually.`);
     failures++;

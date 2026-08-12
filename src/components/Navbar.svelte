@@ -158,16 +158,10 @@
       element.scrollIntoView({ behavior: 'smooth' });
       return;
     }
-    if (href === '#contact') {
-      // Service pages have their own #quote form; otherwise use the contact page.
-      const quote = document.querySelector('#quote');
-      if (quote) {
-        quote.scrollIntoView({ behavior: 'smooth' });
-      } else {
-        window.location.href = '/contact/';
-      }
-      return;
-    }
+    // The `#contact` special case that used to live here is gone with BK-10:
+    // no nav link has passed `#contact` since BK-13 pointed the CTA at
+    // `/book/`, and the `#quote` sections it fell back to are booking CTAs
+    // now, not forms.
     // Not on homepage — navigate there with the hash
     window.location.href = '/' + href;
   }
@@ -228,6 +222,16 @@
   </a>
 {/snippet}
 
+<!--
+  The drawer's Escape/Tab trap listens on the window rather than on the <nav>
+  and the overlay. It was on both, which put keyboard handlers on a
+  non-interactive landmark (a real svelte-check warning) and still missed
+  Escape whenever focus sat outside either element — the window is where a
+  modal's key handling belongs. `handleKeyDown` no-ops unless the drawer is
+  open, so nothing else on the page notices.
+-->
+<svelte:window onkeydown={handleKeyDown} />
+
 <!-- Skip to content -->
 <a
   href="#main-content"
@@ -244,7 +248,6 @@
       : 'bg-transparent'
   }`}
   style="transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1.0);"
-  onkeydown={handleKeyDown}
 >
   <div class="w-full px-6 lg:px-12">
     <div class="flex items-center justify-between min-h-16 h-[4.75rem] lg:h-[5.25rem]">
@@ -378,8 +381,8 @@
   bind:this={mobileMenuRef}
   id="mobile-menu"
   class={`fixed inset-0 z-[1002] xl:hidden transition-all duration-300 ${isMobileMenuOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
-  onkeydown={handleKeyDown}
   role="dialog"
+  tabindex="-1"
   aria-modal="true"
   aria-label="Navigation menu"
 >

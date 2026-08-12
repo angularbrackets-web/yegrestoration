@@ -1,5 +1,23 @@
 ---
 import ContactForm from '../components/ContactForm.svelte';
+
+interface Props {
+  /**
+   * Whether the right column is the real message form or a booking CTA card.
+   *
+   * BK-10 split the two: the form is the site's *question* path and renders on
+   * `/contact/` only, so the homepage — where the intent is "I need help with
+   * damage" — shows a card that leads to `/book/` instead. Two quote doors is
+   * exactly what the cutover exists to remove.
+   *
+   * The left info column (phone, email, hours, service area) renders either
+   * way: it is the homepage's NAP block and local-SEO surface, and only the
+   * form left.
+   */
+  showForm?: boolean;
+}
+
+const { showForm = false } = Astro.props;
 ---
 
 <section
@@ -22,10 +40,14 @@ import ContactForm from '../components/ContactForm.svelte';
       <!-- Left Column — Info -->
       <div data-contact-left class="w-full lg:w-[40%]">
         <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
-          Get a Free Quote
+          {showForm ? 'Send Us a Message' : 'Get a Free Assessment'}
         </h2>
         <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-md mb-10">
-          Tell us what happened. We'll respond within 15 minutes.
+          {
+            showForm
+              ? "Questions get answered the same business day. Emergencies get answered on the first ring."
+              : "Pick a time that works and a certified tech comes out — about 30 minutes, no obligation. Emergency? Call; we answer live."
+          }
         </p>
 
         <!-- Contact Details -->
@@ -211,13 +233,49 @@ import ContactForm from '../components/ContactForm.svelte';
         </div>
       </div>
 
-      <!-- Right Column — Form -->
+      <!-- Right Column — the message form, or the booking CTA card -->
       <div
         data-contact-form
         class="w-full lg:w-[50%] lg:ml-auto"
         style="perspective: 1000px;"
       >
-        <ContactForm client:visible />
+        {
+          showForm ? (
+            <ContactForm client:visible />
+          ) : (
+            <div
+              data-contact-stagger
+              class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
+            >
+              <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3">
+                Free assessment
+              </p>
+              <h3 class="font-display font-bold text-2xl text-yeg-text mb-3">
+                Book a time that works for you
+              </h3>
+              <p class="text-yeg-text-secondary leading-relaxed mb-6">
+                An IICRC-certified tech comes out, looks at the damage, and tells you what it takes
+                to put it right. About 30 minutes, no obligation — you'll see the open times before
+                you give us anything.
+              </p>
+              <ul class="space-y-2 mb-8 text-sm text-yeg-text-secondary">
+                <li>Instant confirmation — no waiting for a callback</li>
+                <li>Photos optional, and they help us arrive ready</li>
+                <li>Insurance claim? We document it the way your adjuster needs</li>
+              </ul>
+              <a href="/book/" class="cta-primary w-full justify-center">
+                <span>Book a Free Assessment</span>
+                <span aria-hidden="true">&rarr;</span>
+              </a>
+              <p class="text-xs text-yeg-text-secondary text-center mt-4">
+                Not ready to book? <a
+                  href="/contact/"
+                  class="text-yeg-amber-deep font-semibold underline underline-offset-2"
+                >Send us a message</a> instead.
+              </p>
+            </div>
+          )
+        }
       </div>
     </div>
   </div>
@@ -232,7 +290,10 @@ import ContactForm from '../components/ContactForm.svelte';
   if (section) {
     const leftCol = section.querySelector('[data-contact-left]');
     const formCard = section.querySelector('[data-contact-form]');
-    const formFields = section.querySelectorAll('.form-field');
+    // `.form-field` is the message form's own hook (/contact/); the second
+    // selector is the booking CTA card that replaces it on the homepage, so
+    // the stagger survives the split rather than silently animating nothing.
+    const formFields = section.querySelectorAll('.form-field, [data-contact-stagger] > *');
 
     const trigger = { trigger: section, start: 'top 85%', once: true };
 

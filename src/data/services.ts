@@ -456,5 +456,12 @@ export const pagedServices = services.filter(
 export const getServiceBySlug = (slug: string) =>
   pagedServices.find((s) => s.page.slug === slug);
 
-/** Where a service's card/link should point: its page if it has one, else contact. */
-export const servicePath = (s: Service) => (s.page ? `/${s.page.slug}/` : '/contact/');
+/**
+ * Where a service's card/link should point: its own page if it has one, else
+ * the booking form.
+ *
+ * `/book/` and not `/contact/` since BK-10: these links are service intent, and
+ * `BookingForm`'s dropdown carries every service plus "other", so an unpaged
+ * service lands somewhere that can actually take the job.
+ */
+export const servicePath = (s: Service) => (s.page ? `/${s.page.slug}/` : '/book/');

@@ -9,10 +9,10 @@ const description = 'Your free on-site restoration assessment is booked.';
 ---
 
 <!--
-  Same treatment /book/ gets, and for the same reasons: noindex here, excluded
-  from the sitemap in astro.config.mjs. A confirmation page has nothing to rank
-  for and renders nothing at all to a crawler, which arrives with no session.
-  Both come off with /book/'s when BK-10 cuts the contact form over.
+  noindex here, excluded from the sitemap in astro.config.mjs — and unlike
+  /book/, PERMANENTLY. A confirmation page has nothing to rank for and renders
+  nothing at all to a crawler, which arrives with no session. BK-10 indexed
+  /book/ and deliberately left this pair alone; they were never one decision.
 -->
 <Layout title={title} description={description} noindex={true}>
   <div class="grain-overlay"></div>

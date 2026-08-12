@@ -1,6 +1,10 @@
 # Booking system — roadmap
 
-Self-service appointment booking, replacing the contact form. Built on the existing
+Self-service appointment booking. It replaces the contact form **as the quote
+path** — the form itself survives, demoted to a general "send us a message"
+channel on `/contact/` (client decision, 2026-08-11, recorded in BK-10). One
+door per intent: quote → `/book/`, question → the message form, emergency →
+the phone. Built on the existing
 Neon + Vercel functions + Resend stack. Cal.com was evaluated and rejected on
 2026-07-28: it brings its own DB, auth, and user model that sit badly beside the
 single-password admin, and covers none of the custom needs (insurance toggle,
@@ -24,7 +28,9 @@ manually via admin. Uploads: 100 MB/file, 10 files, 300 MB total, all enforced
 when the token is minted.
 
 **Data model** — `appointments`, `appointment_files`, `blackout_dates`,
-`rate_limits`, `schema_migrations`. `leads` is untouched and coexists.
+`rate_limits`, `schema_migrations`. `leads` coexists and **stays writable
+indefinitely** — it is the message inbox, not an archive. Migration 004 made
+`leads.service` nullable, because a message form cannot demand a service.
 
 - `pipeline_stage` (assessment|mitigation|restoration) and `status`
   (booked|completed|cancelled|no_show) are independent columns. Neither derives
@@ -58,22 +64,23 @@ when the token is minted.
   place that comparison is made, it normalizes exactly one trailing slash
   before an exact match, and `scripts/verify-booking-admin.ts` pins both it
   and the middleware call site (reverting either is red).
-- **The leads pages still link unslashed, and each click eats a 308.**
-  `admin/index.astro`'s `/admin/leads/${id}`, `admin/leads/[id].astro`'s
-  `href="/admin"`, and its reply form's `action="/api/admin/reply"`. None is
-  broken — a 308 preserves method and body, so the reply POST still lands —
-  but they are the same spelling that made the login loop possible, and
-  BK-07's fix deliberately did not touch them (severity: low, a redirect per
-  click; owner: **BK-10**, which rewrites the leads path and already owns
-  "fix the 308"). Found by BK-07's implementation review.
-  **BK-08 found a fourth site in the same family:** `api/admin/reply.ts`'s
-  three `Location` headers (`/admin?error=validation`, `/admin/leads/${id}?…`)
-  are unslashed too, so every reply redirect costs an extra hop. Same
-  severity, same owner; left alone because BK-08's slash scan deliberately
-  covers only the files BK-08 wrote — widening it would have made this ticket
-  fix BK-10's path inline. `booking-admin.ts` now holds the slashed path
-  constants and `scripts/verify-booking-admin.ts` enforces the rule over any
-  file added to its list, so BK-10's fix is a one-line addition to that list.
+- ~~**The leads pages still link unslashed, and each click eats a 308.**~~
+  **Closed in BK-10.** `ADMIN_LEADS_PATH`, `adminLeadPath(id)` and
+  `ADMIN_REPLY_ENDPOINT` joined `booking-admin.ts`, and every site now builds
+  its URL from them: the list page's row link, the detail page's back link,
+  the reply form's action, and **all four** of `api/admin/reply.ts`'s
+  `Location` headers — the note here said three, and the fourth
+  (`Location: '/admin'` for a lead that no longer exists) is exactly the kind
+  of site a count taken by eye misses.
+  **The scan that now enforces it had to be widened first, and that is the
+  part worth remembering:** `verify-booking-admin.ts`'s regex excluded `?`
+  and `#` from the path body and required at least one character after
+  `/admin`, so `href="/admin"`, `'/admin?error=validation'` and
+  `` `/admin/leads/${id}?success=1` `` were all invisible to it — the exact
+  literals this ticket fixed. The ROADMAP's claim that BK-10's fix was "a
+  one-line addition to that list" was therefore wrong: adding the files
+  without extending the regex would have produced a green scan over
+  unslashed paths. Both halves were red-observed.
 - ~~**`appointment_files.size_bytes` is typed `number` but the driver returns a
   string.**~~ **Closed in BK-09.** `db.ts`'s `AppointmentFile.size_bytes` is now
   `string | number | null`, which is what the `BIGINT` column actually
@@ -94,12 +101,15 @@ when the token is minted.
   a deliberately ref'd watchdog. Found while red-observing BK-09's
   `BLOB_ISSUE_TIMEOUT_MS` (severity: low, but it is the "assertion that cannot
   fail" shape this project keeps paying for; owner: none, documented here).
-- **The leads pages render dates with bare `toLocale*` and no `timeZone`** —
-  `admin/index.astro` and `admin/leads/[id].astro` show `created_at` in the
-  server's zone (UTC on Vercel), a few hours off. Cosmetic for created-at;
-  the pattern becomes a wrong-day defect if ever copied onto a slot time,
-  which is why BK-07 bans it in the appointments pages (severity: low;
-  owner: BK-10, which already rewrites the leads path).
+- ~~**The leads pages render dates with bare `toLocale*` and no `timeZone`**~~
+  **Closed in BK-10.** All three sites (`created_at` on the list page,
+  `created_at` and `replied_at` on the detail page) go through
+  `formatAdminTimestamp`, and both pages joined the zone scan in
+  `verify-booking-admin.ts` — which is what stops the next one being written.
+  **Still open, deliberately: the blog pages' bare `toLocale*` dates.** They
+  are prerendered and date-only, so the server's zone is the build machine's
+  and the value never moves after deploy (severity: low, cosmetic at worst;
+  owner: none, recorded here by BK-10 as out of its scope).
 - **`trailingSlash: 'always'` applies to API routes.** Generated Vercel patterns
   are `^/api/booking/draft/$`; the unslashed form 308-redirects. Client fetches and
   the vercel.json cron path must include the trailing slash. Constants exist in
@@ -158,15 +168,20 @@ when the token is minted.
   svelte-check` and both halves are red-observed. Anyone tempted to simplify
   that script back to one command is removing the only checker that reads the
   booking island.
-- **13 pre-existing `svelte-check` a11y warnings and 23 `astro check` hints.**
-  Warnings, so they do not fail the gate — which is exactly why they will rot.
-  `ContactForm.svelte` (4 labels with no associated control), `Navbar.svelte`
-  (a `<nav>` with mouse/keyboard handlers, a `dialog` role with no tabindex),
-  `VideoReel.svelte` (a static `<div>` with a mouseenter handler); hints are
-  mostly `is:inline` on JSON-LD `<script>` tags, plus an unused import in
-  `blog/[slug].astro` and a deprecated `z.string().email()` in `api/contact.ts`
-  (severity: low, real a11y defects on live pages but none in the booking flow;
-  owner: BK-10, the ticket that already rewrites `ContactForm.svelte`).
+- ~~**13 pre-existing `svelte-check` a11y warnings**~~ **Down to 4 in BK-10.**
+  `ContactForm.svelte` had **5** label warnings, not the 4 recorded here — the
+  count was taken by eye and was wrong, which is its own small lesson about
+  counts in prose. All five are fixed with `for`/`id` pairs; `Navbar.svelte`'s
+  two are fixed by moving the drawer's key handling to `<svelte:window>` and
+  giving the dialog a `tabindex`; `VideoReel.svelte`'s panel is now keyboard
+  reachable (`role="button"`, `tabindex`, Enter/Space, `onfocus`).
+  **The remaining 4 are `BrandLogo.svelte`'s `state_referenced_locally`**, in a
+  file BK-10 does not touch (severity: low, and it is a correctness smell
+  rather than an a11y one; owner: none, recorded here).
+  `astro check` still reports ~24 hints, almost all `is:inline` on JSON-LD
+  `<script>` tags plus an unused import in `blog/[slug].astro`. The deprecated
+  `z.string().email()` hint is gone — `api/contact.ts`'s schema moved to
+  `contact-message.ts` and uses `z.email()` (severity: low; owner: none).
 - **A real value in `.env` does not reach `astro dev` when `.env.local` has the
   same key as `""`.** Vite merges the two into one `import.meta.env` with
   `.env.local` winning, so the blank shadows the real value *before* `readEnv`
@@ -227,14 +242,19 @@ when the token is minted.
   (`resend@6.17.1`, `dist/index.mjs` → `fetchRequest`): a non-2xx response and a
   network failure both come back as a resolved value, and `CreateEmailResponse`
   is a `{data, error}` union. So `try { await resend.emails.send(…) } catch`
-  catches nothing. `api/contact.ts` is written exactly that way and returns
-  `{ ok: true }` on the next line, so a bounced key, a rate limit, or an outage
-  all reach the visitor as "message sent" and are never logged. The one place
-  the SDK *does* throw is `new Resend(key)` with a falsy key — and it silently
-  falls back to `process.env.RESEND_API_KEY` first, which under `astro dev` is
-  empty exactly when `import.meta.env` holds the value (severity: **medium**,
-  the contact form is the advertised conversion path until BK-10 and every lost
-  lead is silent; owner: **BK-10**).
+  catches nothing. The one place the SDK *does* throw is `new Resend(key)` with
+  a falsy key — and it silently falls back to `process.env.RESEND_API_KEY`
+  first, which under `astro dev` is empty exactly when `import.meta.env` holds
+  the value.
+  **The SDK fact stays here permanently; the two call sites that got it wrong
+  were fixed in BK-10.** `api/contact.ts` returned `{ ok: true }` on the line
+  after an unchecked send, so a bounced key reached the visitor as "message
+  sent"; `api/admin/reply.ts` stamped `status = 'replied'` there, so a failed
+  reply marked the lead answered and showed the office `?success=1`. Both now
+  go through `createResendSender` in `booking-notify.ts` — **the only place in
+  the codebase that calls `resend.emails.send`** — which reads the error off
+  the resolved value and takes the key through `readEnv`. Keep it that way: a
+  fresh `new Resend(...)` anywhere else is the whole trap coming back.
 - **`npm run migrate:status` reports production and nothing else.**
   `scripts/migrate.ts` reads `DATABASE_URL` only, and `.env.local`
   (production) wins over `.env`, so there is no flag that aims it at the dev
@@ -243,10 +263,33 @@ when the token is minted.
   bare command has checked one branch and will believe they checked both.
   Found in BK-02, recorded only in that ticket's finding table until BK-05
   promoted it here (severity: **low**, it misleads rather than breaks).
-- **`Lead` timestamp fields are typed `string` but the driver returns `Date`**
-  (severity: doc-level — every consumer wraps them in `new Date(...)`, which
-  takes either; found in BK-01, owner: BK-10, the next ticket that touches
-  `leads`).
+- ~~**`Lead` timestamp fields are typed `string` but the driver returns `Date`**~~
+  **Closed in BK-10.** `created_at` is `Date` and `replied_at` is `Date | null`,
+  which is what `@neondatabase/serverless` actually returns for `timestamptz` —
+  and the pages now hand the column straight to `formatAdminTimestamp(instant:
+  Date)` instead of re-parsing a lie. `Lead.service` became `string | null` in
+  the same change (migration 004).
+
+- **A phone number no one recognized shipped in customer email for months.**
+  All five reply templates in `src/lib/reply-templates.ts` told customers to
+  call **(780) 244-4747**; the client does not recognize that number and the
+  advertised line is (780) 479-3285. Every admin reply sent since the
+  templates shipped carried it. Fixed in BK-10, which imports `SUPPORT_PHONE`
+  from `booking-config.ts` rather than typing the digits. The general trap,
+  and the reason this is recorded rather than just fixed: **copy that states a
+  contact detail — phone, email, address, hours — must be checked against
+  `BUSINESS`/`booking-config.ts`, never written from memory or carried over
+  from a template.** It is the same class as a fabricated constant, and
+  nothing in the type system or the gates can catch it (severity: **medium**,
+  it reached real customers and cost real calls; owner: none, this is the
+  fix).
+- **`booking_availability_error` / `booking_availability_empty` count
+  attempts, not visitors.** Both re-fire on every retry/refetch inside one
+  session, by design — they are diagnostics, not conversions. Anyone reading
+  their GA4 counts as "N visitors hit a full calendar" is overcounting
+  (severity: low, a reading hazard not a defect; owner: **BK-11**, which
+  reads the numbers. Found by BK-10's implementation review as a
+  scope-call).
 
 ## Red-observed — back-catalog pass (2026-08-06)
 
@@ -320,7 +363,7 @@ port those two practices; skip prompt-weight tiers and standing third reviews.
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-05 | Customer confirmation email + internal notification (Resend) | Reviewed | ✅ committed |
-| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number in verification |
+| BK-06 | Reminder job at `REMINDER_LEAD_HOURS`, writes `reminder_sent_at` | Reviewed | blocked — Twilio number **(780) 720-8856** in verification (user, 2026-08-11) |
 
 **→ /book/ went live on production — 2026-08-10.** The merge hold ended with
 BK-05: booking is on `main`, deployed, and migration 003 is applied to
@@ -352,7 +395,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-13 | Soft launch — navbar CTA (desktop + drawer) points at `/book/` | Light | ✅ committed |
-| BK-10 | Cutover: booking = the quote path; form demoted to messages (client-amended 2026-08-11 — `leads` stays writable); fix the 308s | Reviewed | plan-reviewed |
+| BK-10 | Cutover: booking = the quote path; form demoted to messages (client-amended 2026-08-11 — `leads` stays writable); fix the 308s | Reviewed | ✅ committed |
 | BK-11 | Production launch checks — env vars, cron secret, tracking | Light | not started |
 
 ## Open questions for the client
