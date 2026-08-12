@@ -93,6 +93,33 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   narrowing the type back stops `npm run typecheck` rather than going quietly
   wrong. The runtime assert alone could never have gone red — it pins Postgres,
   not this repo.
+- **Two more of the "assertion that cannot fail" family, both found by BK-14's
+  red pass and both fixed there.** They are recorded because neither is
+  specific to calendar invites — each is a technique this repo uses in several
+  scripts.
+  1. **`ics.includes(SENTINEL)` is unfailable on a folded line.** An iCalendar
+     content line folds at 75 octets with a CRLF and a leading space, and every
+     DESCRIPTION this system builds is longer than that — so a policy number
+     placed past the boundary is split across two lines and a substring search
+     on the raw text does not see it. The BK-14 break that planted the policy
+     number in DESCRIPTION left `verify:booking:admin:db` GREEN for exactly
+     this reason. Every PII assertion over an ICS now checks the unfolded text
+     as well as the raw one. **Any future assertion over a folded format needs
+     the same treatment.**
+  2. **A source pin is satisfied by the import line.**
+     `source.includes('sendCalendarInvite')` stayed green after the call was
+     deleted out of the route, because the import above it still names the
+     symbol — which makes the pin green for precisely the "never wired" case it
+     exists to catch. `verify-booking-ics.ts` now strips comments and imports
+     before scanning and requires each route's send helper to appear at least
+     twice (defined and called). The same shape bit a second time in the same
+     pass: `create.ts`'s `slotStart: payload.slotStart` pin also matched
+     `slotStart: payload.slotStart.toISOString()` in the JSON response
+     twenty lines away, so it now reads only the plan's argument block. Both
+     are the general lesson that **a source pin must be read against the code
+     with imports and comments removed, and anchored to the construct it is
+     about** (severity: medium — it silently converts a pin into decoration;
+     owner: none, this is the fix).
 - **`AbortSignal.timeout()` does not keep the Node event loop alive.** Its
   timer is unref'd by design, so a `tsx` script whose only pending work is a
   promise waiting on that signal exits with "Detected unsettled top-level
@@ -402,7 +429,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | plan-reviewed |
+| BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | ✅ committed |
 
 Client-requested 2026-08-11. Level 1 of three offered: invites, not API sync
 (level 2, the recorded upgrade path) and not calendar-blocks-availability

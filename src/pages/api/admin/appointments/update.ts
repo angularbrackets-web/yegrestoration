@@ -7,7 +7,14 @@ import {
   adminAppointmentPath,
 } from '../../../../lib/booking-admin';
 import { parseAppointmentUpdate } from '../../../../lib/booking-admin-entry';
-import { getDb } from '../../../../lib/db';
+import {
+  inviteEventFromAppointment,
+  planCalendarInvite,
+} from '../../../../lib/booking-admin-notify';
+import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
+import type { IcsKind } from '../../../../lib/booking-ics';
+import { sendCalendarInvite, withDeadline } from '../../../../lib/booking-notify';
+import { getDb, SERVICE_LABELS } from '../../../../lib/db';
 
 /** Postgres unique_violation. The partial index on `slot_start` is what raises it. */
 const UNIQUE_VIOLATION = '23505';
@@ -78,6 +85,18 @@ export const POST: APIRoute = async ({ request }) => {
   const now = new Date().toISOString();
 
   try {
+    // ONE STATEMENT, WITH A SELF-JOIN AGAINST A PRE-UPDATE SNAPSHOT, and the
+    // shape is load-bearing rather than clever. BK-14 has to know whether this
+    // edit CROSSED the cancelled boundary — a re-submit of `cancelled` sends
+    // nothing, an actual cancellation sends a CANCEL — and `RETURNING id`
+    // cannot tell those apart, while a SELECT before the UPDATE is the
+    // check-then-act race the docstring above rules out. The subquery is
+    // evaluated against the snapshot the statement began with, so `prev_status`
+    // is the value before this UPDATE and there is no window between the two.
+    //
+    // The same round trip also carries every column the invite needs. They are
+    // all outside the whitelist and therefore unchanged by this UPDATE, so
+    // reading them from the snapshot is the same value as reading them after.
     const rows = (await sql`
       UPDATE appointments
       SET status         = COALESCE(${nextStatus}::text, status),
@@ -95,14 +114,29 @@ export const POST: APIRoute = async ({ request }) => {
                              ELSE NULL
                            END,
           updated_at     = ${now}::timestamptz
-      WHERE id = ${id}
-      RETURNING id
-    `) as { id: number }[];
+      FROM (
+        SELECT id, status AS prev_status, name, phone, address, city,
+               postal_code, service, slot_start
+        FROM appointments
+        WHERE id = ${id}
+      ) old
+      WHERE appointments.id = old.id
+      RETURNING appointments.status AS next_status,
+                old.prev_status, old.id, old.name, old.phone, old.address,
+                old.city, old.postal_code, old.service, old.slot_start
+    `) as UpdatedRow[];
 
     // No row: the id is well-formed but nothing has it. Same answer the detail
     // page gives — send them to the list rather than to a 404 they cannot act
     // on.
     if (rows.length === 0) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
+
+    // Best-effort, and awaited: post-response work is not guaranteed to run on
+    // this platform. Nothing below changes the redirect — the office is
+    // standing at the screen having just cancelled something, and a failed
+    // invite is a line in the function log plus an event they delete by hand,
+    // not a UI state worth inventing.
+    await sendBoundaryInvite(rows[0], new Date());
 
     return redirect(`${detail}?saved=1`);
   } catch (err) {
@@ -116,6 +150,63 @@ export const POST: APIRoute = async ({ request }) => {
     return redirect(`${detail}?saved=error`);
   }
 };
+
+/** What the statement above returns: the new status, and the old row beside it. */
+type UpdatedRow = {
+  next_status: string;
+  prev_status: string;
+  id: number;
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  postal_code: string | null;
+  service: string;
+  /** `timestamptz` — the driver returns a `Date`. */
+  slot_start: Date;
+};
+
+/**
+ * The calendar half of a status edit: which transition, if any, the office just
+ * performed, and the invite it owes the calendar.
+ *
+ * THE RULE IS THE CANCELLED BOUNDARY, not the status names. Into `cancelled`
+ * from anything sends a CANCEL; out of `cancelled` to anything sends a fresh
+ * REQUEST — same UID, and a SEQUENCE that is strictly greater because it comes
+ * from a later clock. Everything else sends nothing: a re-submit that keeps the
+ * status (the office fixing a typo in the notes on a cancelled row), and the
+ * ordinary `booked → completed` / `booked → no_show` edits, which do not change
+ * whether a crew is expected somewhere.
+ *
+ * A 23505 never reaches here — the statement threw, and the row is untouched.
+ *
+ * **Cannot fail its caller.** The status edit has already committed; a calendar
+ * artifact must not turn it into a `?saved=error` for a change that saved.
+ */
+async function sendBoundaryInvite(row: UpdatedRow, now: Date): Promise<void> {
+  const wasCancelled = row.prev_status === 'cancelled';
+  const isCancelled = row.next_status === 'cancelled';
+  if (wasCancelled === isCancelled) return;
+
+  const kind: IcsKind = isCancelled ? 'cancel' : 'request';
+
+  try {
+    const event = inviteEventFromAppointment(
+      row,
+      SERVICE_LABELS[row.service] ?? row.service,
+    );
+    const outcome = await withDeadline(
+      sendCalendarInvite(planCalendarInvite(event, kind, now), { id: row.id, kind, now }),
+      POST_COMMIT_BUDGET_MS,
+      'failed',
+    );
+    if (outcome === 'failed') {
+      console.error(`Admin update ${row.id}: the calendar ${kind} did not send.`);
+    }
+  } catch (err) {
+    console.error(`Admin update ${row.id} calendar ${kind} failed:`, err);
+  }
+}
 
 /**
  * `NeonDbError` carries the SQLSTATE. Read off the installed driver rather than

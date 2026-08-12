@@ -21,6 +21,7 @@
     "verify:booking:form": "tsx scripts/verify-booking-form.ts",
     "verify:booking:confirmation": "tsx scripts/verify-booking-confirmation.ts",
     "verify:booking:email": "tsx scripts/verify-booking-email.ts",
+    "verify:booking:ics": "tsx scripts/verify-booking-ics.ts",
     "verify:booking:smoke": "tsx scripts/verify-booking-smoke.ts",
     "verify:booking:admin": "tsx scripts/verify-booking-admin.ts",
     "verify:booking:admin:entry": "tsx scripts/verify-booking-admin-entry.ts",

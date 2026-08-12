@@ -7,8 +7,20 @@ import {
   adminAppointmentPath,
 } from '../../../../lib/booking-admin';
 import { parseAdminEntry } from '../../../../lib/booking-admin-entry';
-import { planForPayload, sendConfirmationAndStamp } from '../../../../lib/booking-admin-notify';
+import {
+  inviteEventFromPayload,
+  planCalendarInvite,
+  planForPayload,
+  sendConfirmationAndStamp,
+} from '../../../../lib/booking-admin-notify';
 import { insertBooking } from '../../../../lib/booking-commit';
+import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
+import {
+  sendCalendarInvite,
+  withDeadline,
+  type SendOutcome,
+} from '../../../../lib/booking-notify';
+import type { BookingPayload } from '../../../../lib/booking-payload';
 import { getDb, SERVICE_LABELS } from '../../../../lib/db';
 
 /**
@@ -79,23 +91,46 @@ export const POST: APIRoute = async ({ request }) => {
   if (created === null) return back(ADMIN_APPOINTMENT_NEW_PATH, { taken: '1' });
 
   // Past this point the appointment EXISTS. Nothing below may fail the request.
-  let email: 'sent' | 'failed' | 'off' = 'off';
-  if (sendConfirmation && payload.email) {
-    const plan = planForPayload(
-      created.id,
-      payload,
-      // The fallback cannot fire — the parser was handed these very keys — and
-      // exists so the two cannot drift into an `undefined` in a subject line.
-      SERVICE_LABELS[payload.service] ?? payload.service,
-      created.files,
-    );
-    const outcome = await sendConfirmationAndStamp(sql, plan);
-    // 'skipped' is the mute flag, not a failure. Telling the office "it did not
-    // send — try again" would send them to a resend button that will also do
-    // nothing. Test-only today, since the flag is fail-open and unset in
-    // production, but the distinction is free.
-    email = outcome === 'sent' ? 'sent' : outcome === 'skipped' ? 'off' : 'failed';
+  // The fallback cannot fire — the parser was handed these very keys — and
+  // exists so the two cannot drift into an `undefined` in a subject line.
+  const serviceLabel = SERVICE_LABELS[payload.service] ?? payload.service;
+
+  // The two post-commit sends run CONCURRENTLY, each under the same budget,
+  // rather than one after the other. Serially they would stack to two full
+  // POST_COMMIT_BUDGET_MS windows on a request that has already run an insert,
+  // and the platform's function limit is what a stacked pair blows through —
+  // the same reasoning `sendBookingNotifications` uses for its `Promise.all`.
+  const [emailOutcome, inviteOutcome] = await Promise.all([
+    sendConfirmation && payload.email
+      ? sendConfirmationAndStamp(
+          sql,
+          planForPayload(created.id, payload, serviceLabel, now, created.files),
+        )
+      : Promise.resolve<SendOutcome | null>(null),
+    // Independent of the confirmation checkbox on purpose: that box is about
+    // the CUSTOMER, and this invite is the office's own calendar. Best-effort —
+    // the entry has saved, and a missed invite is an inconvenience the office
+    // fixes by adding the event by hand. The flash below does not mention it.
+    sendOfficeInvite(created.id, payload, serviceLabel, now),
+  ]);
+
+  // `deliver` already logs a failed send with its error. This line is here for
+  // the one outcome it cannot see: a send that never settles and is answered by
+  // the deadline, which returns 'failed' with nothing written anywhere.
+  if (inviteOutcome === 'failed') {
+    console.error(`Admin entry ${created.id}: no calendar invite went out.`);
   }
+
+  // 'skipped' is the mute flag, not a failure. Telling the office "it did not
+  // send — try again" would send them to a resend button that will also do
+  // nothing. Test-only today, since the flag is fail-open and unset in
+  // production, but the distinction is free.
+  const email: 'sent' | 'failed' | 'off' =
+    emailOutcome === null || emailOutcome === 'skipped'
+      ? 'off'
+      : emailOutcome === 'sent'
+        ? 'sent'
+        : 'failed';
 
   // The flash is the immediate surfacing, and it has to be: BK-07's warning
   // flags never fire for `source = 'admin'` rows, so a failed send would
@@ -103,6 +138,35 @@ export const POST: APIRoute = async ({ request }) => {
   // "None sent" and the resend button are the recovery.
   return redirect(`${adminAppointmentPath(created.id)}?email=${email}`);
 };
+
+/**
+ * The office's calendar invite for an entry it just typed in.
+ *
+ * **Cannot fail its caller**, on the same terms as everything else past the
+ * insert: the appointment exists, and no calendar artifact may turn a saved
+ * entry into a 500 that sends the office to retype it into a slot that is now
+ * taken. `sendCalendarInvite` already swallows a resolved error and a throwing
+ * client; the deadline covers a send that never settles, and the try/catch
+ * covers the plan-building above it.
+ */
+async function sendOfficeInvite(
+  id: number,
+  payload: BookingPayload,
+  serviceLabel: string,
+  now: Date,
+): Promise<SendOutcome> {
+  try {
+    const event = inviteEventFromPayload(id, payload, serviceLabel);
+    return await withDeadline(
+      sendCalendarInvite(planCalendarInvite(event, 'request', now), { id, kind: 'request', now }),
+      POST_COMMIT_BUDGET_MS,
+      'failed',
+    );
+  } catch (err) {
+    console.error(`Admin entry ${id} calendar invite failed:`, err);
+    return 'failed';
+  }
+}
 
 function back(path: string, params: Record<string, string>): Response {
   const query = new URLSearchParams(params).toString();

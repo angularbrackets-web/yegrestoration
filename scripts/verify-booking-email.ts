@@ -47,9 +47,15 @@ function check(condition: boolean, message: string) {
 const POLICY = 'POLICYSENTINEL-77Q';
 const CLAIM = 'CLAIMSENTINEL-42Z';
 
+/** The instant behind the label above, and the instant the send happens at. */
+const SLOT = new Date('2026-08-12T19:30:00.000Z');
+const NOW = new Date('2026-08-10T15:00:00.000Z');
+
 const INSURANCE: BookingNotificationInput = {
   id: 481,
   slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
+  slotStart: SLOT,
+  now: NOW,
   name: 'Dana Whitecloud',
   phone: '780-555-0142',
   email: 'dana@example.com',
@@ -78,11 +84,32 @@ const PRIVATE: BookingNotificationInput = {
 
 const NO_EMAIL: BookingNotificationInput = { ...INSURANCE, id: 483, email: null };
 
-/** Every string a message carries — subject and addresses included, not just the bodies. */
+/**
+ * Every string a message carries — subject, addresses AND attachments, not just
+ * the bodies. The attachment half matters from BK-14 on: an attached file is as
+ * customer-facing as a paragraph, and a PII check that skipped it would be
+ * green for a confirmation that mailed the policy number as a `.ics`.
+ */
 function allText(message: Message): string {
-  return [message.from, message.to, message.replyTo ?? '', message.subject, message.html, message.text].join(
-    '\n',
-  );
+  return [
+    message.from,
+    message.to,
+    message.replyTo ?? '',
+    message.subject,
+    message.html,
+    message.text,
+    // UNFOLDED. An iCalendar line folds at 75 octets with a CRLF and a leading
+    // space, so a sentinel sitting past that boundary is invisible to
+    // `includes` on the raw text — a PII assertion that cannot fail on exactly
+    // the long messages where it matters. Both forms are joined in, so neither
+    // blindness is inherited.
+    ...(message.attachments ?? []).flatMap((a) => [
+      a.filename,
+      a.contentType,
+      a.content,
+      a.content.replace(/\r\n /g, ''),
+    ]),
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +198,48 @@ console.log('\nInternal notification contents');
     check(body.includes(CLAIM), `the ${part} part carries the claim number`);
   }
   check(internal.subject.includes('481'), 'the subject carries the booking id');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe calendar invite rides the internal notification (BK-14)');
+// ---------------------------------------------------------------------------
+{
+  const { customer, internal } = planBookingNotifications(INSURANCE);
+
+  check(internal.attachments?.length === 1, `the office message carries exactly one attachment, got ${internal.attachments?.length ?? 0}`);
+  const ics = internal.attachments?.[0];
+  check(ics?.filename === 'assessment-481.ics', `named for the booking, got ${ics?.filename}`);
+  check(
+    ics?.contentType === 'text/calendar; charset=utf-8; method=REQUEST',
+    `typed as a REQUEST invite, got ${ics?.contentType}`,
+  );
+  check(ics?.content.startsWith('BEGIN:VCALENDAR') ?? false, 'and the content is an iCalendar body');
+  check(ics?.content.includes('UID:booking-481@') ?? false, 'for this booking');
+  // The instant, not the label: the plan now carries both, and the ICS must use
+  // the one that is an instant. `slotLabel` is 1:30 p.m. Edmonton = 19:30 UTC.
+  check(ics?.content.includes('DTSTART:20260812T193000Z') ?? false, 'at the slot instant');
+  check(ics?.content.includes('DTEND:20260812T200000Z') ?? false, 'lasting the locked 30 minutes');
+  // DTSTAMP from the injected `now`, which is what makes the whole plan a value
+  // rather than something with a clock inside it.
+  check(ics?.content.includes('DTSTAMP:20260810T150000Z') ?? false, 'stamped at the injected send instant');
+
+  // The customer's copy carries NO attachment. Customer-facing ICS is out of
+  // scope by decision, and the shared builder makes "attach it to both" a
+  // one-line edit — so it is asserted, not assumed.
+  check(customer?.attachments === undefined, 'the customer confirmation carries no attachment at all');
+
+  // The stricter-than-email rule, checked on the ATTACHMENT of the message
+  // whose BODY legitimately carries both identifiers. This is the one place
+  // both facts are true at once, which is what makes it worth asserting here as
+  // well as in verify:booking:ics.
+  // Unfolded, for the reason `allText` states — and `allText` covers the same
+  // ground for the whole message, so a regression shows up twice rather than
+  // depending on which of the two an editor happens to keep.
+  const icsText = (ics?.content ?? '').replace(/\r\n /g, '');
+  check(internal.text.includes(POLICY), 'the office BODY still carries the policy number');
+  check(icsText.length > 0 && !icsText.includes(POLICY), 'and the ICS does not');
+  check(!icsText.includes(CLAIM), 'nor the claim number');
+  check(!icsText.includes('Prairie Mutual'), "nor the insurer's name");
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +335,25 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
   const ok = await sendBookingNotifications(plan, { send: sent });
   check(ok.customer === 'sent' && ok.internal === 'sent', 'both send → both sent');
 
+  // The attachment survives the send path, and only on the office message.
+  // Asserted here as well as on the plan because this is the seam every real
+  // send goes through, and a `deliver` that rebuilt its message would drop it.
+  const delivered: Message[] = [];
+  await sendBookingNotifications(plan, {
+    send: async (m) => {
+      delivered.push(m);
+      return { ok: true };
+    },
+  });
+  check(
+    delivered.filter((m) => (m.attachments?.length ?? 0) > 0).length === 1,
+    `exactly one delivered message carries an attachment, got ${delivered.filter((m) => (m.attachments?.length ?? 0) > 0).length}`,
+  );
+  check(
+    delivered.find((m) => (m.attachments?.length ?? 0) > 0)?.to === BOOKING_INTERNAL_TO,
+    'and it is the office one',
+  );
+
   const bad = await sendBookingNotifications(plan, { send: failed });
   check(
     bad.customer === 'failed' && bad.internal === 'failed',
@@ -297,11 +385,24 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
     ['', false],
   ] as const) {
     process.env.BOOKING_NOTIFY_DISABLED = value;
-    const outcome = await sendBookingNotifications(plan, { send: sent });
+    const attempts: Message[] = [];
+    const outcome = await sendBookingNotifications(plan, {
+      send: async (m) => {
+        attempts.push(m);
+        return { ok: true };
+      },
+    });
     const muted = outcome.internal === 'skipped';
     check(
       muted === expected,
       `BOOKING_NOTIFY_DISABLED=${JSON.stringify(value)} must ${expected ? 'mute' : 'not mute'}`,
+    );
+    // Nothing sends under the mute, so no attachment leaves either — the mute
+    // is checked before the seam, which is why every route-level script in this
+    // repo asserts nothing about sends.
+    check(
+      (attempts.length === 0) === expected,
+      `BOOKING_NOTIFY_DISABLED=${JSON.stringify(value)} delivers ${expected ? 'nothing' : 'both messages'}, got ${attempts.length}`,
     );
   }
   delete process.env.BOOKING_NOTIFY_DISABLED;

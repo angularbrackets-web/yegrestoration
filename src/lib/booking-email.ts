@@ -26,6 +26,7 @@ import {
   BOOKING_INTERNAL_TO,
   SUPPORT_PHONE,
 } from './booking-config';
+import { buildBookingIcs, icsAttachment, type IcsEvent } from './booking-ics';
 import {
   CANCEL_LINE,
   HAVE_READY_HEADING,
@@ -33,6 +34,24 @@ import {
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
 } from './booking-copy';
+
+/**
+ * A file riding along with a message. Structurally Resend's `Attachment`
+ * narrowed to the three fields this codebase sends — `content` as a string
+ * rather than `string | Buffer`, because the one thing attached today is an
+ * ICS body and a Buffer would make the verify scripts assert bytes.
+ *
+ * **Adding a field here is not enough to send it.** `createResendSender` maps
+ * `Message` to the SDK through an explicit object literal, so a field that
+ * literal does not name is silently dropped — and every verify script would
+ * stay green, because their injected fake senders receive the whole `Message`.
+ * See the source pin in `scripts/verify-booking-ics.ts`.
+ */
+export type EmailAttachment = {
+  filename: string;
+  content: string;
+  contentType: string;
+};
 
 /** One outbound message, fully rendered. The adapter adds nothing but the API key. */
 export type Message = {
@@ -42,6 +61,7 @@ export type Message = {
   subject: string;
   html: string;
   text: string;
+  attachments?: EmailAttachment[];
 };
 
 export type NotificationPlan = {
@@ -63,6 +83,14 @@ export type BookingNotificationInput = {
   id: number;
   /** Server-formatted, America/Edmonton. Never re-derived here. */
   slotLabel: string;
+  /**
+   * The instant behind `slotLabel`. Both, because they are different things: a
+   * label is for a human reading an email, and an ICS carries instants. Deriving
+   * one from the other in either direction is how a zone gets re-guessed.
+   */
+  slotStart: Date;
+  /** The send instant. DTSTAMP and SEQUENCE both come from it — see `icsSequence`. */
+  now: Date;
   name: string;
   phone: string;
   email: string | null;
@@ -243,6 +271,13 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
  * This is what replaces "open the database to find out a crew is expected
  * somewhere", so it errs toward completeness. It is not a "confirmation" and is
  * not bound by the settled customer copy list.
+ *
+ * BK-14 hangs the calendar invite here rather than sending a second email:
+ * every public booking already produces exactly this message, and one office
+ * email carrying the ICS is one thing to read. The ICS itself is bound by a
+ * STRICTER rule than this message body — no policy or claim number in a
+ * calendar artifact, for any audience, even the office that reads them three
+ * rows above. See `booking-ics.ts`.
  */
 function internalNotification(input: BookingNotificationInput): Message {
   const insurance = input.paymentRoute === 'insurance';
@@ -325,6 +360,26 @@ function internalNotification(input: BookingNotificationInput): Message {
     ),
     html,
     text,
+    attachments: [icsAttachment(buildBookingIcs(icsEventOf(input), 'request', input.now), 'request', input.id)],
+  };
+}
+
+/**
+ * The invite's view of a booking. Written as an explicit field list rather than
+ * a spread so the two insurance identifiers cannot arrive by accident — the
+ * locked rule in `booking-ics.ts` is a property of what is handed in as much as
+ * of what the builder reads.
+ */
+function icsEventOf(input: BookingNotificationInput): IcsEvent {
+  return {
+    id: input.id,
+    name: input.name,
+    serviceLabel: input.serviceLabel,
+    phone: input.phone,
+    address: input.address,
+    city: input.city,
+    postalCode: input.postalCode,
+    slotStart: input.slotStart,
   };
 }
 

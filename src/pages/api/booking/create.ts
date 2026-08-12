@@ -129,7 +129,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     if (created === null) return slotTaken();
 
     const slotLabel = formatSlot(payload.slotStart);
-    const emailSent = await notify(sql, created.id, slotLabel, payload, created.files);
+    const emailSent = await notify(sql, created.id, slotLabel, payload, created.files, now);
 
     return json(
       {
@@ -172,11 +172,19 @@ async function notify(
   slotLabel: string,
   payload: BookingPayload,
   filesAttached: number,
+  now: Date,
 ): Promise<boolean> {
   try {
     const plan = planBookingNotifications({
       id,
       slotLabel,
+      // The instant as well as the label: the internal message carries the
+      // calendar invite (BK-14), and an ICS carries instants. The payload has
+      // always had this — it simply never reached the plan.
+      slotStart: payload.slotStart,
+      // The request's clock, not a fresh one. DTSTAMP and SEQUENCE come from
+      // one instant per send.
+      now,
       name: payload.name,
       phone: payload.phone,
       email: payload.email,

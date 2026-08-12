@@ -25,6 +25,7 @@
 import { Resend } from 'resend';
 
 import type { Message, NotificationPlan } from './booking-email';
+import { inviteIdempotencyPrefix, type IcsKind } from './booking-ics';
 import { readEnv } from './env';
 
 /** Per message: sent, deliberately not sent, or attempted and failed. */
@@ -105,6 +106,13 @@ export function createResendSender(apiKey: string, keyPrefix: string | null) {
         subject: message.subject,
         html: message.html,
         text: message.text,
+        // THIS LINE IS THE WHOLE MAPPING FOR ATTACHMENTS, and the literal above
+        // is a whitelist: a `Message` field this object does not name is
+        // silently dropped at the SDK boundary. Every verify script would stay
+        // green if it were removed, because their injected senders receive the
+        // `Message` and never this literal — which is why
+        // `verify-booking-ics.ts` pins it at the source level and says so.
+        ...(message.attachments ? { attachments: message.attachments } : {}),
       },
       keyPrefix ? { idempotencyKey: `${keyPrefix}:${message.to}` } : {},
     );
@@ -237,6 +245,55 @@ export async function sendCustomerConfirmation(
   }
 
   return deliver(send, plan.customer, 'confirmation', plan.bookingId);
+}
+
+/**
+ * Send one calendar invite. The office's copy of what the crew is doing.
+ *
+ * A separate exported function rather than a `NotificationPlan` wrapped around
+ * the invite message, and the difference is not cosmetic — it is the
+ * plan-review blocker. `sendBookingNotifications` and `sendCustomerConfirmation`
+ * both key idempotency on `booking-<id>`, which is exactly right for a
+ * notification: a retried booking must not mail the customer twice. Every
+ * invite in one booking's lifecycle goes to the SAME office address, so that
+ * fixed prefix would make the create, the cancel and the restore
+ * byte-identical keys — Resend would collapse the CANCEL into a duplicate of
+ * the REQUEST, the calendar event would never clear, and nothing anywhere would
+ * report a failure. The key here therefore carries the transition:
+ * `inviteIdempotencyPrefix`.
+ *
+ * Everything else is shared with the two functions above rather than
+ * re-implemented — the disable flag, the key lookup, the adapter, and
+ * `deliver`'s never-throws contract — so a fix to any of those reaches all
+ * three. Same contract as the rest of the module: it never throws. It runs
+ * after the row exists or after the status has already changed, and neither may
+ * be turned into a 500 by a calendar artifact.
+ */
+export async function sendCalendarInvite(
+  message: Message,
+  keyParts: { id: number; kind: IcsKind; now: Date },
+  deps: NotifyDeps = {},
+): Promise<SendOutcome> {
+  if (mailDisabled()) {
+    console.error(`${DISABLE_FLAG} is set — no calendar invite for booking ${keyParts.id}.`);
+    return 'skipped';
+  }
+
+  let send = deps.send;
+  if (!send) {
+    const apiKey = readEnv('RESEND_API_KEY');
+    if (!apiKey) {
+      // Before `new Resend()`, which throws on a falsy key.
+      console.error('RESEND_API_KEY is not configured — the calendar invite was not sent.');
+      return 'failed';
+    }
+    send = createResendSender(
+      apiKey,
+      inviteIdempotencyPrefix(keyParts.id, keyParts.kind, keyParts.now),
+    );
+  }
+
+  return deliver(send, message, `calendar ${keyParts.kind}`, keyParts.id);
 }
 
 /**

@@ -76,6 +76,10 @@ export const POST: APIRoute = async ({ request }) => {
     const plan = planForAppointment(
       appointment,
       SERVICE_LABELS[appointment.service] ?? appointment.service,
+      // Reaches only the ICS on `plan.internal`, which this route never
+      // delivers — see `planForAppointment`. A real clock rather than a
+      // placeholder for the same reason the file count is real.
+      new Date(),
       appointment.file_count,
     );
     const outcome = await sendConfirmationAndStamp(sql, plan);

@@ -168,6 +168,34 @@ export const BOOKING_EMAIL_REPLY_TO = 'info@yegrestoration.ca';
 /** Who hears that a crew is expected somewhere. Settled with the user 2026-08-09. */
 export const BOOKING_INTERNAL_TO = 'info@yegrestoration.ca';
 
+// ---------------------------------------------------------------------------
+// Calendar invites (BK-14)
+//
+// Here rather than in `booking-ics.ts` for the same reason as the addresses
+// above: one place holds the identities, and a `tsx` script can import it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The right-hand side of every booking's iCalendar UID
+ * (`booking-<id>@yegrestoration.ca`). The SERIAL id is the only reference this
+ * system has; there is no human-facing reference column.
+ */
+export const ICS_UID_DOMAIN = 'yegrestoration.ca';
+
+/** RFC 5545 §3.7.3 product identifier. Free text; it identifies who wrote the file. */
+export const ICS_PRODID = '-//YEG Restoration//Booking//EN';
+
+/**
+ * `ORGANIZER:mailto:` takes a BARE ADDRESS, not the friendly-name form
+ * `BOOKING_EMAIL_FROM` carries — and Gmail matches a CANCEL against the
+ * organizer of the event it is cancelling, so the two must be byte-identical
+ * across the lifecycle. That is why this is its own constant rather than
+ * something derived from `BOOKING_EMAIL_FROM` at each call site: a derivation
+ * is a place the two spellings can drift, and the failure is silent (the
+ * CANCEL simply never clears the event).
+ */
+export const ICS_ORGANIZER = 'noreply@yegrestoration.ca';
+
 /**
  * Total wall-clock budget for everything that happens AFTER the appointment row
  * is inserted: building the messages, sending both, and stamping the result.

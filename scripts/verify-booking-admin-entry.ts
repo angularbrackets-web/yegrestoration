@@ -26,7 +26,11 @@ import {
   parseBlackoutDay,
   parseBlackoutInput,
 } from '../src/lib/booking-admin-entry';
-import { planForPayload } from '../src/lib/booking-admin-notify';
+import {
+  inviteEventFromPayload,
+  planCalendarInvite,
+  planForPayload,
+} from '../src/lib/booking-admin-notify';
 import {
   BOOKING_INTERNAL_TO,
   SLOT_START_TIMES,
@@ -35,6 +39,7 @@ import {
 import { planBookingNotifications, type Message } from '../src/lib/booking-email';
 import {
   sendBookingNotifications,
+  sendCalendarInvite,
   sendCustomerConfirmation,
   type SendResult,
 } from '../src/lib/booking-notify';
@@ -47,6 +52,9 @@ function check(condition: boolean, message: string) {
     failures++;
   }
 }
+
+/** The send instant every plan below is built at. Injected, never a live clock. */
+const NOW = new Date('2026-08-20T15:00:00.000Z');
 
 /** The services the routes pass. Named here so an unknown key is really unknown. */
 const SERVICES = new Set(['water', 'fire', 'mold', 'other']);
@@ -451,7 +459,7 @@ console.log('\nsendCustomerConfirmation — count and audience (AC5)');
     check(false, 'the send fixture must parse');
     throw new Error('fixture did not parse');
   }
-  const plan = planForPayload(4812, parsed.payload, 'Water Damage Restoration');
+  const plan = planForPayload(4812, parsed.payload, 'Water Damage Restoration', NOW);
 
   // The plan carries BOTH messages — it is the same BK-05 builder the public
   // path uses. Asserting that first is what makes "only one was delivered" mean
@@ -472,7 +480,7 @@ console.log('\nsendCustomerConfirmation — count and audience (AC5)');
   check(seen[0]?.to === 'dana@example.com', 'and it is addressed to the customer');
   check(
     !seen.some((m) => m.to === BOOKING_INTERNAL_TO),
-    'THE INVARIANT: no admin send ever reaches the office inbox',
+    'the confirmation path still never reaches the office inbox',
   );
   check(
     !seen.some((m) => m.subject.includes('New booking')),
@@ -502,6 +510,92 @@ console.log('\nsendCustomerConfirmation — count and audience (AC5)');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nThe narrowed invariant: the office gets a calendar artifact, never a notification (BK-14)');
+// ---------------------------------------------------------------------------
+{
+  // WHAT THIS SECTION REPLACES, AND WHY IT IS NOT THE OLD ASSERTION WITH AN
+  // EXCEPTION BOLTED ON. The rule used to be "no admin action ever mails the
+  // office", asserted as `!seen.some(m => m.to === office)` — a check that
+  // stays green when a path stops sending ANYTHING. BK-14 makes exactly one
+  // admin action mail the office on purpose, so the assertion has to be
+  // two-sided: exactly one message, addressed to the office, and it is the
+  // invite rather than the lead notification.
+  //
+  // LIB-LEVEL, through the injected seam, and deliberately so: a route-level
+  // run happens under the mute, which silences injected fakes too, so it could
+  // not tell "muted" from "never wired". The route wiring is pinned at the
+  // source in verify:booking:ics and rendered for real by the post-deploy check.
+  delete process.env.BOOKING_NOTIFY_DISABLED;
+
+  const parsed = parseAdminEntry(entry({ name: 'Dana Whitecloud' }), OPTS);
+  if (!parsed.ok) {
+    check(false, 'the invite fixture must parse');
+    throw new Error('fixture did not parse');
+  }
+
+  const event = inviteEventFromPayload(4815, parsed.payload, 'Water Damage Restoration');
+
+  for (const kind of ['request', 'cancel'] as const) {
+    const seen: Message[] = [];
+    const outcome = await sendCalendarInvite(
+      planCalendarInvite(event, kind, NOW),
+      { id: 4815, kind, now: NOW },
+      {
+        send: async (m) => {
+          seen.push(m);
+          return { ok: true };
+        },
+      },
+    );
+
+    check(outcome === 'sent', `the ${kind} invite reports sent`);
+    // Both halves. "Exactly one" fails if the path goes silent; "to the office"
+    // fails if it goes to the customer instead.
+    check(seen.length === 1, `exactly one message is delivered for a ${kind}, got ${seen.length}`);
+    check(seen[0]?.to === BOOKING_INTERNAL_TO, `and it is addressed to the office`);
+    check(
+      (seen[0]?.attachments?.length ?? 0) === 1,
+      `and it carries the ICS — an invite with no attachment is a pointless email`,
+    );
+    check(
+      seen[0]?.attachments?.[0].contentType.includes('text/calendar') ?? false,
+      'which really is a calendar artifact',
+    );
+    check(
+      !(seen[0]?.subject.includes('New booking') ?? true),
+      'it is NOT the lead notification the invariant still forbids',
+    );
+    // The lead notification's tell is its content, not just its subject: it
+    // lists the phone, the description, the file count and the SMS consent.
+    check(
+      !(seen[0]?.text.includes('SMS consent') ?? true),
+      'and carries none of the notification body',
+    );
+  }
+
+  // The other direction of the narrowing, restated where someone editing this
+  // file will see it: everything else the admin surface does still mails the
+  // office nothing. `sendCustomerConfirmation` reads `plan.customer` and no
+  // other field, which is asserted above and is a property of the code.
+  const plan = planForPayload(4816, parsed.payload, 'Water Damage Restoration', NOW);
+  const resent: Message[] = [];
+  await sendCustomerConfirmation(plan, {
+    send: async (m) => {
+      resent.push(m);
+      return { ok: true };
+    },
+  });
+  check(
+    resent.every((m) => m.to !== BOOKING_INTERNAL_TO),
+    'a resend still mails the office nothing, invite or otherwise',
+  );
+  check(
+    resent.every((m) => (m.attachments?.length ?? 0) === 0),
+    'and the customer copy carries no calendar attachment',
+  );
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nsendCustomerConfirmation — outcomes (AC5)');
 // ---------------------------------------------------------------------------
 {
@@ -510,6 +604,8 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   const withEmail = planBookingNotifications({
     id: 4813,
     slotLabel: 'Mon, Aug 24 · 1:30 p.m.',
+    slotStart: new Date('2026-08-24T19:30:00.000Z'),
+    now: NOW,
     name: 'Dana Whitecloud',
     phone: '780-555-0142',
     email: 'dana@example.com',
@@ -528,6 +624,8 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   const noEmail = planBookingNotifications({
     id: 4814,
     slotLabel: 'Mon, Aug 24 · 2:30 p.m.',
+    slotStart: new Date('2026-08-24T20:30:00.000Z'),
+    now: NOW,
     name: 'Sam Rivers',
     phone: '780-555-0143',
     email: null,

@@ -130,6 +130,8 @@ console.log('\nBooking notifications without RESEND_API_KEY');
   const plan = planBookingNotifications({
     id: 1,
     slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
+    slotStart: new Date('2026-08-12T19:30:00.000Z'),
+    now: new Date('2026-08-12T17:00:00.000Z'),
     name: 'Probe',
     phone: '780-555-0100',
     email: 'probe@example.com',
