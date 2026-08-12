@@ -432,6 +432,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | ✅ committed |
 | BK-15 | Booking widget overflow — fieldset `min-content` default escapes the card | Light | ✅ committed |
 | BK-16 | Customer calendar lifecycle — invite on confirmation; cancellation/restore email + ICS on the boundary | Reviewed | plan-reviewed |
+| BK-20 | Fridays open outside Jummah — closed-Friday config becomes a Friday blocked-hours window (13:00–16:00 now, seasonal by config edit) | Reviewed | not started |
 | BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | not started |
 | BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | not started |
 | BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | not started |
@@ -440,8 +441,16 @@ BK-14: client-requested 2026-08-11. Level 1 of three offered: invites, not API
 sync (level 2, the recorded upgrade path) and not calendar-blocks-availability
 (level 3, declined — blackout dates cover it for one crew).
 
-BK-15–19: client-approved 2026-08-12 from his BK-14 post-deploy test pass, in
-this order. Decisions recorded from that conversation: **the customer gets a
+BK-15–20: client-approved 2026-08-12 from his BK-14 post-deploy test pass, in
+this order (BK-20 added later the same day and sequenced after BK-16,
+deliberately before BK-18 so the picker redesign is built against the final
+slot model). **BK-20 amends the locked Friday rule by client decision
+2026-08-12**: Fridays are open except Jummah hours — currently 13:00–16:00
+Edmonton, blocking the 1:30/2:30/3:30 grid starts and leaving 11:30/12:30
+bookable. The window is a config constant, not a blackout row, because it
+shifts seasonally with prayer times — a change is a one-line config edit the
+client phones in. The locked section's "except Friday" line is BK-20's to
+rewrite when it lands. Decisions recorded from that conversation: **the customer gets a
 cancellation email when the row has an email address** (phone-in cancellation
 stays the only way to cancel — the email is written confirmation of it, and
 it carries the calendar CANCEL so a customer who added the invite gets their
