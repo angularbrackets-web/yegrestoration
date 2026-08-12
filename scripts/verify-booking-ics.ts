@@ -25,12 +25,17 @@ import {
   inviteEventFromAppointment,
   inviteEventFromPayload,
   planCalendarInvite,
+  planCancellationEmail,
+  planRestoreEmail,
 } from '../src/lib/booking-admin-notify';
+import { CANCEL_LINE, CANCELLED_REBOOK_LINE } from '../src/lib/booking-copy';
 import {
   BOOKING_EMAIL_FROM,
+  BOOKING_EMAIL_REPLY_TO,
   BOOKING_INTERNAL_TO,
   ICS_ORGANIZER,
   SLOT_MINUTES,
+  SUPPORT_PHONE,
 } from '../src/lib/booking-config';
 import type { Message } from '../src/lib/booking-email';
 import {
@@ -38,9 +43,11 @@ import {
   escapeIcsText,
   foldIcsLine,
   icsAttachment,
+  icsCustomer,
   icsSequence,
   icsUid,
   inviteIdempotencyPrefix,
+  ICS_OFFICE,
   type IcsEvent,
 } from '../src/lib/booking-ics';
 import { sendCalendarInvite, type SendResult } from '../src/lib/booking-notify';
@@ -97,8 +104,8 @@ function prop(ics: string, name: string): string | null {
 console.log('\nRFC 5545 shape: CRLF, required properties, METHOD/STATUS pairing');
 // ---------------------------------------------------------------------------
 {
-  const request = buildBookingIcs(EVENT, 'request', NOW);
-  const cancel = buildBookingIcs(EVENT, 'cancel', NOW);
+  const request = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
+  const cancel = buildBookingIcs(EVENT, 'cancel', NOW, ICS_OFFICE);
 
   for (const [kind, ics] of [
     ['request', request],
@@ -129,7 +136,7 @@ console.log('\nRFC 5545 shape: CRLF, required properties, METHOD/STATUS pairing'
   // from the wall clock — otherwise this script could not assert it at all.
   check(prop(request, 'DTSTAMP') === '20260820T150000Z', `DTSTAMP is the injected now, got ${prop(request, 'DTSTAMP')}`);
   check(
-    prop(buildBookingIcs(EVENT, 'request', LATER), 'DTSTAMP') === '20260821T150000Z',
+    prop(buildBookingIcs(EVENT, 'request', LATER, ICS_OFFICE), 'DTSTAMP') === '20260821T150000Z',
     'and it moves with it',
   );
 }
@@ -142,8 +149,8 @@ console.log('\nUID and ORGANIZER are identical across the lifecycle');
   // fresh UID, or an organizer spelled the friendly-name way the FROM header
   // uses, is a cancel Google quietly ignores — the event stays on the calendar
   // and nothing anywhere reports a failure.
-  const request = buildBookingIcs(EVENT, 'request', NOW);
-  const cancel = buildBookingIcs(EVENT, 'cancel', LATER);
+  const request = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
+  const cancel = buildBookingIcs(EVENT, 'cancel', LATER, ICS_OFFICE);
 
   check(prop(request, 'UID') === icsUid(481), `the UID is booking-<id>@domain, got ${prop(request, 'UID')}`);
   check(prop(cancel, 'UID') === prop(request, 'UID'), 'and the cancel carries the same UID');
@@ -162,9 +169,166 @@ console.log('\nUID and ORGANIZER are identical across the lifecycle');
     'the organizer is not the friendly-name form',
   );
   check(BOOKING_EMAIL_FROM.includes(ICS_ORGANIZER), 'and it is the same identity the mail is sent from');
+
+  // FLIPPED IN BK-16, NOT DELETED. This used to read "the office is the
+  // attendee" full stop, which is now false for half the sends — and deleting
+  // it would have removed the only assertion that the attendee is anybody in
+  // particular. It is now two-sided per audience: the office copy still names
+  // the office, and the customer copy must NOT, because an ICS naming the
+  // office as the invitee of the customer's own appointment is what a defaulted
+  // audience argument produces.
   check(
     (prop(request, 'ATTENDEE') ?? '').endsWith(`mailto:${BOOKING_INTERNAL_TO}`),
-    `the office is the attendee, got ${prop(request, 'ATTENDEE')}`,
+    `the office audience puts the office in ATTENDEE, got ${prop(request, 'ATTENDEE')}`,
+  );
+  const forCustomer = buildBookingIcs(EVENT, 'request', NOW, icsCustomer('dana@example.com'));
+  check(
+    (prop(forCustomer, 'ATTENDEE') ?? '').endsWith('mailto:dana@example.com'),
+    `the customer audience puts the customer there, got ${prop(forCustomer, 'ATTENDEE')}`,
+  );
+  check(
+    !(prop(forCustomer, 'ATTENDEE') ?? '').includes(BOOKING_INTERNAL_TO),
+    'and the office address is nowhere in the customer ATTENDEE',
+  );
+  // The lifecycle facts the two copies MUST share, or a CANCEL sent to one
+  // calendar cannot match the REQUEST the other holds. This is the reason the
+  // audience is a parameter of one builder rather than a second builder.
+  check(prop(forCustomer, 'UID') === prop(request, 'UID'), 'both audiences share the UID');
+  check(
+    prop(forCustomer, 'ORGANIZER') === prop(request, 'ORGANIZER'),
+    'and the organizer — Gmail matches a CANCEL on both',
+  );
+  check(
+    prop(forCustomer, 'DTSTART') === prop(request, 'DTSTART') &&
+      prop(forCustomer, 'SEQUENCE') === prop(request, 'SEQUENCE'),
+    'and the instant and the revision',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nTHE GOLDEN PIN: the office ICS is byte-for-byte what BK-14 shipped');
+// ---------------------------------------------------------------------------
+{
+  // WHY A FROZEN LITERAL AND NOT A COMPARISON. BK-16 refactored the builder to
+  // take an audience, and the acceptance criterion is that the office output
+  // does not move — but after the refactor there is no "old builder" left to
+  // compare against, so any self-referential check (build it twice, compare)
+  // is an assertion that cannot fail. The text below was captured by running
+  // BK-14's builder BEFORE the first line of BK-16 was written, at the fixture
+  // and instant this file already uses. It is the pre-refactor truth, and the
+  // only thing that makes AC2/AC4 more than a sentence.
+  //
+  // If a later ticket deliberately changes the office artifact, this literal is
+  // updated in the SAME commit and the ticket says so. Editing it to make a red
+  // gate green is the one thing it exists to prevent — BK-14's output is what a
+  // real Gmail render was checked against.
+  const GOLDEN_OFFICE_REQUEST =
+    'BEGIN:VCALENDAR\r\n' +
+    'VERSION:2.0\r\n' +
+    'PRODID:-//YEG Restoration//Booking//EN\r\n' +
+    'CALSCALE:GREGORIAN\r\n' +
+    'METHOD:REQUEST\r\n' +
+    'BEGIN:VEVENT\r\n' +
+    'UID:booking-481@yegrestoration.ca\r\n' +
+    'DTSTAMP:20260820T150000Z\r\n' +
+    'DTSTART:20260824T193000Z\r\n' +
+    'DTEND:20260824T200000Z\r\n' +
+    'SEQUENCE:1787238000\r\n' +
+    'STATUS:CONFIRMED\r\n' +
+    'SUMMARY:Assessment — Dana Whitecloud (Water Damage Restoration)\r\n' +
+    'LOCATION:123 Maple St\\, Edmonton\\, T5J 2R7\r\n' +
+    'DESCRIPTION:Phone: 780-555-0142\\nService: Water Damage Restoration\\nThe vis\r\n' +
+    ' it takes about 30 minutes.\r\n' +
+    'ORGANIZER:mailto:noreply@yegrestoration.ca\r\n' +
+    'ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=\r\n' +
+    ' TRUE:mailto:info@yegrestoration.ca\r\n' +
+    'END:VEVENT\r\n' +
+    'END:VCALENDAR\r\n';
+
+  // The cancellation differs from it in exactly two properties, so pinning the
+  // delta rather than a second wall of text keeps the two from drifting apart
+  // by a copy-paste edit.
+  const GOLDEN_OFFICE_CANCEL = GOLDEN_OFFICE_REQUEST.replace(
+    'METHOD:REQUEST',
+    'METHOD:CANCEL',
+  ).replace('STATUS:CONFIRMED', 'STATUS:CANCELLED');
+
+  const actualRequest = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
+  const actualCancel = buildBookingIcs(EVENT, 'cancel', NOW, ICS_OFFICE);
+
+  check(
+    actualRequest === GOLDEN_OFFICE_REQUEST,
+    `the office REQUEST is byte-identical to BK-14's output.\n      expected ${JSON.stringify(GOLDEN_OFFICE_REQUEST)}\n      got      ${JSON.stringify(actualRequest)}`,
+  );
+  check(
+    actualCancel === GOLDEN_OFFICE_CANCEL,
+    `and the office CANCEL is too.\n      expected ${JSON.stringify(GOLDEN_OFFICE_CANCEL)}\n      got      ${JSON.stringify(actualCancel)}`,
+  );
+
+  // The pin is only worth having if the customer copy is genuinely different —
+  // otherwise "byte-identical" would be satisfied by a builder that ignores its
+  // audience argument entirely, which is the exact failure the required
+  // parameter exists to make impossible.
+  check(
+    buildBookingIcs(EVENT, 'request', NOW, icsCustomer('dana@example.com')) !==
+      GOLDEN_OFFICE_REQUEST,
+    'and the customer copy is NOT that text — the audience argument does something',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe customer audience: their address, their contact line, their calendar');
+// ---------------------------------------------------------------------------
+{
+  const CUSTOMER = 'dana@example.com';
+  const ics = buildBookingIcs(EVENT, 'request', NOW, icsCustomer(CUSTOMER));
+  const description = prop(ics, 'DESCRIPTION') ?? '';
+
+  // The DESCRIPTION swap is the half that is easy to forget, because nothing
+  // breaks if it is missed — the customer just gets an event captioned with
+  // their own phone number, which reads as a mistake in a way the office copy
+  // never would.
+  check(
+    description.includes(SUPPORT_PHONE),
+    `the customer description carries the office's number to call, got ${description}`,
+  );
+  check(
+    !description.includes(EVENT.phone),
+    "and NOT the customer's own phone number, which is the office's line to read",
+  );
+  check(description.includes('Water Damage Restoration'), 'the service is still there');
+  check(description.includes('about 30 minutes'), 'and the visit-length line');
+
+  // SUMMARY and LOCATION are audience-independent on purpose: it is one event,
+  // at one address, and the customer knows their own name.
+  check(
+    prop(ics, 'SUMMARY') === prop(buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE), 'SUMMARY'),
+    'the summary is the same event either way',
+  );
+  check(
+    prop(ics, 'LOCATION') === prop(buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE), 'LOCATION'),
+    'and so is the location',
+  );
+
+  // The cancel direction, which is what the whole ticket is for.
+  const cancel = buildBookingIcs(EVENT, 'cancel', LATER, icsCustomer(CUSTOMER));
+  check(prop(cancel, 'METHOD') === 'CANCEL', "the customer's cancellation is METHOD:CANCEL");
+  check(prop(cancel, 'STATUS') === 'CANCELLED', 'and STATUS:CANCELLED');
+  check(prop(cancel, 'UID') === prop(ics, 'UID'), 'against the UID their calendar already holds');
+  check(
+    Number(prop(cancel, 'SEQUENCE')) > Number(prop(ics, 'SEQUENCE')),
+    'with a strictly greater SEQUENCE, or a client treats it as stale',
+  );
+  check(
+    (prop(cancel, 'ATTENDEE') ?? '').endsWith(`mailto:${CUSTOMER}`),
+    'still addressed to them',
+  );
+
+  // An address with a comma or a plus sign is still one TEXT value.
+  const odd = buildBookingIcs(EVENT, 'request', NOW, icsCustomer('dana+bookings@example.com'));
+  check(
+    (prop(odd, 'ATTENDEE') ?? '').endsWith('mailto:dana+bookings@example.com'),
+    'a plus-addressed customer survives intact',
   );
 }
 
@@ -172,13 +336,13 @@ console.log('\nUID and ORGANIZER are identical across the lifecycle');
 console.log('\nSEQUENCE increases per transition');
 // ---------------------------------------------------------------------------
 {
-  const created = Number(prop(buildBookingIcs(EVENT, 'request', NOW), 'SEQUENCE'));
-  const cancelled = Number(prop(buildBookingIcs(EVENT, 'cancel', LATER), 'SEQUENCE'));
+  const created = Number(prop(buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE), 'SEQUENCE'));
+  const cancelled = Number(prop(buildBookingIcs(EVENT, 'cancel', LATER, ICS_OFFICE), 'SEQUENCE'));
   const restored = Number(
-    prop(buildBookingIcs(EVENT, 'request', new Date(LATER.getTime() + 60_000)), 'SEQUENCE'),
+    prop(buildBookingIcs(EVENT, 'request', new Date(LATER.getTime() + 60_000), ICS_OFFICE), 'SEQUENCE'),
   );
 
-  check(Number.isInteger(created), `SEQUENCE is an integer, got ${prop(buildBookingIcs(EVENT, 'request', NOW), 'SEQUENCE')}`);
+  check(Number.isInteger(created), `SEQUENCE is an integer, got ${prop(buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE), 'SEQUENCE')}`);
   check(cancelled > created, `a later cancel outranks the create (${created} → ${cancelled})`);
   check(restored > cancelled, `and a restore outranks the cancel (${cancelled} → ${restored})`);
   check(created === icsSequence(NOW), 'the value is the exported derivation, not a second copy of it');
@@ -199,7 +363,7 @@ console.log('\nSEQUENCE increases per transition');
 console.log('\nThe instants: UTC Z form, and the slot is 30 minutes long');
 // ---------------------------------------------------------------------------
 {
-  const ics = buildBookingIcs(EVENT, 'request', NOW);
+  const ics = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
   const start = prop(ics, 'DTSTART') ?? '';
   const end = prop(ics, 'DTEND') ?? '';
 
@@ -220,6 +384,7 @@ console.log('\nThe instants: UTC Z form, and the slot is 30 minutes long');
     { ...EVENT, slotStart: new Date('2026-01-15T20:30:00.000Z') },
     'request',
     NOW,
+    ICS_OFFICE,
   );
   check(prop(winter, 'DTSTART') === '20260115T203000Z', 'a winter slot is carried as its own instant');
   check(prop(winter, 'DTEND') === '20260115T210000Z', 'and its end is half an hour later');
@@ -234,7 +399,7 @@ console.log('\nContent: summary, location, description');
   // SUMMARY left `body.includes('Water Damage Restoration')` green, because
   // DESCRIPTION carries a `Service:` line of its own. A content assertion has
   // to name the property it is about.
-  const ics = buildBookingIcs(EVENT, 'request', NOW);
+  const ics = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
   const summary = prop(ics, 'SUMMARY') ?? '';
   const location = prop(ics, 'LOCATION') ?? '';
   const description = prop(ics, 'DESCRIPTION') ?? '';
@@ -250,7 +415,7 @@ console.log('\nContent: summary, location, description');
   check(description.includes('about 30 minutes'), 'and the visit-length line');
 
   // A missing postal code must not leave a dangling separator.
-  const noPostal = prop(buildBookingIcs({ ...EVENT, postalCode: null }, 'request', NOW), 'LOCATION') ?? '';
+  const noPostal = prop(buildBookingIcs({ ...EVENT, postalCode: null }, 'request', NOW, ICS_OFFICE), 'LOCATION') ?? '';
   check(!noPostal.endsWith(', '), `a blank postal code is dropped, got ${JSON.stringify(noPostal)}`);
   check(noPostal.includes('Edmonton'), 'and the rest of the address survives');
 }
@@ -290,6 +455,13 @@ console.log('\nThe stricter-than-email rule: no insurance identifier in a calend
   check(parsed.payload.claim_number === CLAIM, 'and a claim number');
 
   const event = inviteEventFromPayload(4812, parsed.payload, 'Water Damage Restoration');
+  // BOTH AUDIENCES (BK-16). The rule was always "any audience", but until this
+  // ticket there was only one, so the loop below could not distinguish "the
+  // builder drops them" from "the office path drops them". Now it can.
+  for (const [label, audience] of [
+    ['office', ICS_OFFICE],
+    ['customer', icsCustomer('dana@example.com')],
+  ] as const) {
   for (const kind of ['request', 'cancel'] as const) {
     // UNFOLDED, and this is not a detail. A DESCRIPTION long enough to fold —
     // which is every one of them — can split an identifier across a CRLF and a
@@ -297,25 +469,39 @@ console.log('\nThe stricter-than-email rule: no insurance identifier in a calend
     // plainly carries it. The red pass caught exactly that: the break went
     // green against the raw string. Both are checked, because the raw form
     // catches an identifier somewhere folding does not reach.
-    const ics = unfold(buildBookingIcs(event, kind, NOW));
-    const raw = buildBookingIcs(event, kind, NOW);
-    check(!ics.includes(POLICY) && !raw.includes(POLICY), `the ${kind} ICS carries no policy number`);
-    check(!ics.includes(CLAIM) && !raw.includes(CLAIM), `the ${kind} ICS carries no claim number`);
+    const ics = unfold(buildBookingIcs(event, kind, NOW, audience));
+    const raw = buildBookingIcs(event, kind, NOW, audience);
+    check(!ics.includes(POLICY) && !raw.includes(POLICY), `the ${label} ${kind} ICS carries no policy number`);
+    check(!ics.includes(CLAIM) && !raw.includes(CLAIM), `the ${label} ${kind} ICS carries no claim number`);
     check(!ics.includes('Prairie Mutual'), `nor the insurer's name`);
-    // Whole-message, not just the ICS: the invite email itself is a calendar
-    // artifact too, and it is one `row('Policy #', …)` away from carrying them.
-    const message = planCalendarInvite(event, kind, NOW);
+  }
+  }
+  // EVERY MESSAGE BUILT FROM AN `IcsEvent`, not just the office invite. The two
+  // customer boundary emails are new customer-facing artifacts, and they are
+  // exactly the kind of message somebody later "helpfully" adds a claim number
+  // to so the customer can quote it on the phone.
+  for (const [label, message] of [
+    ['office request', planCalendarInvite(event, 'request', NOW)],
+    ['office cancel', planCalendarInvite(event, 'cancel', NOW)],
+    ['customer cancellation', planCancellationEmail(event, 'dana@example.com', NOW)],
+    ['customer restore', planRestoreEmail(event, 'dana@example.com', NOW)],
+  ] as const) {
+    // Whole-message, not just the ICS: the email itself is a calendar artifact
+    // too, and it is one `row('Policy #', …)` away from carrying them.
+    //
     // Attachment CONTENT rather than a JSON dump of it: `JSON.stringify`
     // escapes the CRLFs, so unfolding could not reach inside a dumped string
     // and the whole-message check would inherit the folding blindness above.
     const all = [
+      message.to,
       message.subject,
       message.html,
       message.text,
       ...(message.attachments ?? []).map((a) => `${a.filename}\n${a.contentType}\n${unfold(a.content)}`),
     ].join('\n');
-    check(!all.includes(POLICY), `the ${kind} invite email carries no policy number`);
-    check(!all.includes(CLAIM), `the ${kind} invite email carries no claim number`);
+    check(!all.includes(POLICY), `the ${label} email carries no policy number`);
+    check(!all.includes(CLAIM), `the ${label} email carries no claim number`);
+    check(!all.includes('Prairie Mutual'), `nor does the ${label} email carry the insurer's name`);
   }
 
   // The mapper is the guarantee, so assert its output shape rather than only
@@ -343,10 +529,10 @@ console.log('\nEscaping and folding');
 
   // A comma in an address is the ordinary case, not the exotic one.
   const comma = unfold(
-    buildBookingIcs({ ...EVENT, address: 'Suite 5, 123 Maple St' }, 'request', NOW),
+    buildBookingIcs({ ...EVENT, address: 'Suite 5, 123 Maple St' }, 'request', NOW, ICS_OFFICE),
   );
   check(comma.includes('Suite 5\\, 123 Maple St'), 'a comma in the address is escaped in LOCATION');
-  const semi = unfold(buildBookingIcs({ ...EVENT, name: 'Dana; Whitecloud' }, 'request', NOW));
+  const semi = unfold(buildBookingIcs({ ...EVENT, name: 'Dana; Whitecloud' }, 'request', NOW, ICS_OFFICE));
   check(semi.includes('Dana\\; Whitecloud'), 'a semicolon in the name is escaped in SUMMARY');
 
   // Folding, at the octet boundary rather than the character one.
@@ -373,7 +559,7 @@ console.log('\nEscaping and folding');
 
   // End to end, through the builder, on the field most likely to be long.
   const longAddress = '1234 Extremely Long Street Name Northwest, Second Floor, Rear Entrance By The Alley';
-  const ics = buildBookingIcs({ ...EVENT, address: longAddress }, 'request', NOW);
+  const ics = buildBookingIcs({ ...EVENT, address: longAddress }, 'request', NOW, ICS_OFFICE);
   for (const line of ics.split('\r\n')) {
     check(Buffer.byteLength(line, 'utf8') <= 75, `every builder line is ≤75 octets, got ${Buffer.byteLength(line, 'utf8')}`);
   }
@@ -387,7 +573,7 @@ console.log('\nEscaping and folding');
 console.log('\nThe attachment, and the message that carries it');
 // ---------------------------------------------------------------------------
 {
-  const ics = buildBookingIcs(EVENT, 'request', NOW);
+  const ics = buildBookingIcs(EVENT, 'request', NOW, ICS_OFFICE);
   const attachment = icsAttachment(ics, 'request', EVENT.id);
   check(attachment.filename === 'assessment-481.ics', `the filename names the booking, got ${attachment.filename}`);
   check(attachment.content === ics, 'the content is the ICS itself');
@@ -447,8 +633,133 @@ console.log('\nThe attachment, and the message that carries it');
   check(fromRow.postalCode === null, 'and a null postal code stays null');
   check(fromRow.slotStart.getTime() === SLOT.getTime(), 'and the slot instant');
   check(
-    unfold(buildBookingIcs(fromRow, 'cancel', NOW)).includes('UID:booking-99@'),
+    unfold(buildBookingIcs(fromRow, 'cancel', NOW, ICS_OFFICE)).includes('UID:booking-99@'),
     'and it builds a cancellation for the right booking',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe customer boundary emails (BK-16)');
+// ---------------------------------------------------------------------------
+{
+  const CUSTOMER = 'dana@example.com';
+  const cancellation = planCancellationEmail(EVENT, CUSTOMER, NOW);
+  const restore = planRestoreEmail(EVENT, CUSTOMER, LATER);
+
+  for (const [label, message, method] of [
+    ['cancellation', cancellation, 'CANCEL'],
+    ['restore', restore, 'REQUEST'],
+  ] as const) {
+    check(message.to === CUSTOMER, `the ${label} is addressed to the customer, got ${message.to}`);
+    check(message.from === BOOKING_EMAIL_FROM, 'from the shared sender identity');
+    check(
+      message.replyTo === BOOKING_EMAIL_REPLY_TO,
+      'and a reply reaches the office rather than the noreply sender',
+    );
+    check(message.to !== BOOKING_INTERNAL_TO, `the ${label} is not an office message`);
+
+    // NO URL. Cancellation is phone-in (locked) — there is no self-service
+    // cancel or rebook page, so a link could only be decoration or a lie. Same
+    // assertion the confirmation carries, restated for the new messages
+    // because they are exactly where somebody would add "rebook here".
+    check(!/https?:\/\//.test(message.text), `the ${label} text carries no URL`);
+    check(!/https?:\/\//.test(message.html), `nor the ${label} html`);
+    check(message.text.includes(SUPPORT_PHONE), `the ${label} carries the phone number instead`);
+
+    for (const part of ['html', 'text'] as const) {
+      check(
+        message[part].includes('Aug 24'),
+        `the ${label} ${part} names the slot date, got ${message[part].slice(0, 80)}`,
+      );
+      check(message[part].includes('Edmonton time'), `and says which zone`);
+      check(message[part].includes('123 Maple St'), 'and the address');
+      check(message[part].includes('#481'), 'and the reference number');
+    }
+    check(message.subject.includes('Aug 24'), `the ${label} subject names the slot`);
+    check(!message.subject.includes('\n'), 'and carries no newline');
+
+    // The attachment: the customer's own copy of the event, not the office's.
+    check(message.attachments?.length === 1, `exactly one attachment, got ${message.attachments?.length}`);
+    const ics = message.attachments?.[0].content ?? '';
+    check(
+      unfold(ics).includes(`METHOD:${method}`),
+      `the ${label} carries a METHOD:${method}, got ${unfold(ics).match(/METHOD:[A-Z]+/)?.[0]}`,
+    );
+    check(
+      message.attachments?.[0].contentType.includes(`method=${method}`) ?? false,
+      `and the content type agrees`,
+    );
+    check(unfold(ics).includes('UID:booking-481@'), 'against the booking UID');
+    check(
+      unfold(ics).includes(`RSVP=TRUE:mailto:${CUSTOMER}`),
+      'and the customer is the attendee, not the office',
+    );
+    check(
+      !unfold(ics).includes(`mailto:${BOOKING_INTERNAL_TO}`),
+      'the office address appears nowhere in the customer ICS',
+    );
+  }
+
+  // THE LIFECYCLE, end to end across two calendars: the confirmation's REQUEST,
+  // the cancellation, the restore. Same UID throughout, SEQUENCE strictly
+  // increasing — a CANCEL that does not outrank the REQUEST is a CANCEL a
+  // client ignores, and the event stays on the customer's calendar forever.
+  const seqOf = (m: Message) =>
+    Number(unfold(m.attachments?.[0].content ?? '').match(/SEQUENCE:(\d+)/)?.[1] ?? 0);
+  const uidOf = (m: Message) =>
+    unfold(m.attachments?.[0].content ?? '').match(/UID:([^\r\n]+)/)?.[1] ?? '';
+  const booked = buildBookingIcs(EVENT, 'request', NOW, icsCustomer(CUSTOMER));
+  const restoreLater = planRestoreEmail(EVENT, CUSTOMER, new Date(LATER.getTime() + 60_000));
+
+  check(uidOf(cancellation) === uidOf(restore), 'all three transitions share one UID');
+  check(uidOf(cancellation) === icsUid(481), 'and it is the booking UID');
+  check(
+    uidOf(cancellation) === (booked.match(/UID:([^\r\n]+)/)?.[1] ?? ''),
+    'including the one the confirmation sent',
+  );
+  check(
+    seqOf(cancellation) === icsSequence(NOW),
+    `the cancellation is stamped from its own injected instant, got ${seqOf(cancellation)}`,
+  );
+  check(seqOf(restore) > seqOf(cancellation), 'the restore outranks the cancellation');
+  check(seqOf(restoreLater) > seqOf(restore), 'and a later restore outranks that');
+
+  // The two directions must not be the same email. A restore that arrives
+  // reading "cancelled" is worse than no email.
+  check(
+    cancellation.subject !== restore.subject,
+    'a restore does not arrive under the cancellation subject',
+  );
+  check(
+    !restore.text.includes('cancelled the assessment'),
+    'and does not tell the customer it was cancelled',
+  );
+  // The phone line is direction-dependent too (implementation review,
+  // should-fix 2): the cancellation offers the rebook line, the restore the
+  // plain contact line — "if this cancellation is a surprise" inside "your
+  // assessment is back on" is a contradiction.
+  check(
+    cancellation.text.includes(CANCELLED_REBOOK_LINE) &&
+      !restore.text.includes(CANCELLED_REBOOK_LINE),
+    'the cancellation-flavoured rebook line stays on the cancellation side',
+  );
+  check(restore.text.includes(CANCEL_LINE), 'and the restore carries the plain contact line');
+
+  // Hostile input reaches the body through the name. The subject is built from
+  // constants and a server-formatted label, which is asserted rather than
+  // assumed — it is what makes "nothing customer-typed reaches a header" true
+  // for these two messages.
+  const hostile = planCancellationEmail(
+    { ...EVENT, name: `<img src=x onerror="alert(1)">`, address: '<b>9 Spruce</b>' },
+    CUSTOMER,
+    NOW,
+  );
+  check(!hostile.html.includes('<img src=x'), 'the cancellation html has no injected tag');
+  check(!hostile.html.includes('<b>9 Spruce</b>'), 'and the address is escaped too');
+  check(hostile.html.includes('&lt;b&gt;9 Spruce'), 'surviving as escaped text');
+  check(
+    !hostile.subject.includes('<img src=x'),
+    'and nothing customer-typed reaches the subject at all',
   );
 }
 
@@ -459,7 +770,7 @@ console.log('\nsendCalendarInvite — the mute, the missing key, the per-transit
   delete process.env.BOOKING_NOTIFY_DISABLED;
 
   const message = planCalendarInvite(EVENT, 'request', NOW);
-  const keyParts = { id: EVENT.id, kind: 'request' as const, now: NOW };
+  const keyParts = { id: EVENT.id, kind: 'request' as const, now: NOW, audience: 'office' as const };
 
   const seen: Message[] = [];
   const record = async (m: Message): Promise<SendResult> => {
@@ -511,6 +822,53 @@ console.log('\nsendCalendarInvite — the mute, the missing key, the per-transit
     );
   }
   delete process.env.BOOKING_NOTIFY_DISABLED;
+
+  // THE MUTE LINE IS AUDIENCE-ATTRIBUTABLE (BK-16 plan review S3), and this is
+  // a verification requirement rather than log hygiene. Under the mute — which
+  // is how `verify-booking-admin-db.ts` drives the routes, because the mute
+  // silences injected seams too — this line is the only evidence a route
+  // reached a send. A boundary crossing owes TWO sends; two identical lines
+  // cannot tell "office + customer" from "the office one twice, the customer
+  // half never wired". So the four combinations must all be distinguishable.
+  {
+    process.env.BOOKING_NOTIFY_DISABLED = '1';
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((a) => String(a)).join(' '));
+    };
+    try {
+      for (const audience of ['office', 'customer'] as const) {
+        for (const kind of ['request', 'cancel'] as const) {
+          await sendCalendarInvite(message, { id: 481, kind, now: NOW, audience });
+        }
+      }
+    } finally {
+      console.error = original;
+      delete process.env.BOOKING_NOTIFY_DISABLED;
+    }
+
+    check(lines.length === 4, `four muted sends log four lines, got ${lines.length}`);
+    check(
+      new Set(lines).size === 4,
+      `and all four are distinguishable, got ${new Set(lines).size} distinct:\n      ${lines.join('\n      ')}`,
+    );
+    for (const line of lines) {
+      check(/\bbooking 481\b/.test(line), `each names the booking, got ${line}`);
+    }
+    check(
+      lines.filter((l) => l.includes('(office)')).length === 2,
+      'two name the office audience',
+    );
+    check(
+      lines.filter((l) => l.includes('(customer)')).length === 2,
+      'and two the customer audience',
+    );
+    check(
+      lines.filter((l) => /calendar cancel /.test(l)).length === 2,
+      'two name a cancel, so the kind is attributable too',
+    );
+  }
 
   // An unset key is reported, not thrown on: `new Resend(falsy)` DOES throw.
   const realKey = process.env.RESEND_API_KEY;
@@ -597,8 +955,23 @@ console.log('\nSource pins (weak by construction — see the header)');
     [
       'the status-edit route',
       'src/pages/api/admin/appointments/update.ts',
-      'sendBoundaryInvite(',
-      ['planCalendarInvite(', 'sendCalendarInvite(', 'inviteEventFromAppointment(', 'prev_status'],
+      'sendBoundaryMail(',
+      [
+        'planCalendarInvite(',
+        'sendCalendarInvite(',
+        'inviteEventFromAppointment(',
+        'prev_status',
+        // BK-16's customer half. Without these three needles the whole
+        // customer-facing feature is pinned by nothing at all: the lib-level
+        // sections above build the two messages and prove their contents, and
+        // a route that never calls them would leave every one of those green.
+        'planCancellationEmail(',
+        'planRestoreEmail(',
+        // The snapshot column they are built from. `email` outside the SET
+        // whitelist is what makes reading it from the pre-UPDATE snapshot
+        // correct rather than a second query.
+        'old.email',
+      ],
     ],
   ] as const) {
     const source = strip(file);
@@ -608,6 +981,38 @@ console.log('\nSource pins (weak by construction — see the header)');
     check(
       count(source, helper) >= 2,
       `${label}'s ${helper.slice(0, -1)} is both defined and called, got ${count(source, helper)}`,
+    );
+  }
+
+  // The customer sends must be REAL sends, not planned-and-dropped. Two
+  // occurrences of `sendCalendarInvite(` in the status-edit route is the
+  // difference between "the office invite goes out and the customer's message
+  // is built into a variable nobody reads" and the feature. Counted rather
+  // than merely present, for the same reason the helper is.
+  {
+    const updateSource = strip('src/pages/api/admin/appointments/update.ts');
+    check(
+      count(updateSource, 'sendCalendarInvite(') >= 2,
+      `the status-edit route sends twice on a boundary, got ${count(updateSource, 'sendCalendarInvite(')} call site(s)`,
+    );
+    check(
+      /audience: 'customer'/.test(updateSource),
+      'and one of them is addressed to the customer audience',
+    );
+    check(
+      /audience: 'office'/.test(updateSource),
+      'while the office invite keeps its own',
+    );
+    // ONE DEADLINE OVER BOTH, not one each. Two serial
+    // POST_COMMIT_BUDGET_MS windows stacked on a request that has already run
+    // an UPDATE is how a platform 504 replaces a saved edit's redirect — the
+    // same reasoning the admin entry route states for its own `Promise.all`.
+    // Source-pinned because the alternative is a 10-second timing assertion
+    // against injected sleeps, which measures the test harness more than the
+    // route.
+    check(
+      /withDeadline\(\s*Promise\.all\(/.test(updateSource),
+      'and the two sends share ONE deadline window rather than stacking two',
     );
   }
 

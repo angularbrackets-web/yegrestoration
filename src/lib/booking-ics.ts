@@ -36,11 +36,45 @@ import {
   ICS_UID_DOMAIN,
   SLOT_MINUTES,
 } from './booking-config';
-import { VISIT_LENGTH_LINE } from './booking-copy';
+import { CANCEL_LINE, VISIT_LENGTH_LINE } from './booking-copy';
 import type { EmailAttachment } from './booking-email';
 
 /** A create/restore invite, or the cancellation of one. */
 export type IcsKind = 'request' | 'cancel';
+
+/** Which calendar this copy of the event is going onto. */
+export type IcsAudienceName = 'office' | 'customer';
+
+/**
+ * WHO THE INVITE IS FOR, AND IT IS A REQUIRED ARGUMENT OF THE BUILDER.
+ *
+ * BK-14 built one artifact for one audience and hard-coded both audience-shaped
+ * facts: `ATTENDEE` was `BOOKING_INTERNAL_TO`, and DESCRIPTION's first line was
+ * the customer's phone number — "who do I call to reach them", which is a
+ * sentence only the office has any use for. BK-16 adds a second audience, so
+ * both become parameters.
+ *
+ * **Never defaulted, and that is the plan-review finding rather than a style
+ * choice.** A default of `office` would let a customer-path caller that simply
+ * forgets the argument mail a customer an ICS naming the office as the
+ * attendee, with their own phone number as the description, and `npm run
+ * typecheck` green. Required means the compiler asks the question at every
+ * call site — which is also why this is a discriminated union rather than a
+ * pair of loose strings: there is no way to spell "the office address with the
+ * customer's contact line", and the customer case cannot be constructed
+ * without the address the ATTENDEE needs.
+ */
+export type IcsAudience =
+  | { audience: 'office' }
+  | { audience: 'customer'; email: string };
+
+/** The office's own calendar. Byte-identical to everything BK-14 shipped. */
+export const ICS_OFFICE: IcsAudience = { audience: 'office' };
+
+/** The customer's calendar. The address is the ATTENDEE, so it is not optional. */
+export function icsCustomer(email: string): IcsAudience {
+  return { audience: 'customer', email };
+}
 
 /**
  * Everything an invite needs, already resolved.
@@ -52,8 +86,12 @@ export type IcsKind = 'request' | 'cancel';
  * build by hand.
  *
  * Note what is absent: `policyNumber`, `claimNumber`, `insurerName`, `email`,
- * `description`. The first two are the locked rule above. The last two are
- * simply not the office's calendar's business — the email carries them.
+ * `description`. The first three are the locked rule above. `description` is
+ * simply not a calendar's business — the email carries it. `email` is absent
+ * for a different reason since BK-16: the customer's address is not a property
+ * of the event, it is a property of WHO THIS COPY IS FOR, and it arrives on the
+ * `IcsAudience` argument instead. Keeping it off the event is what stops the
+ * office copy from ever being built with a customer attendee by accident.
  */
 export type IcsEvent = {
   id: number;
@@ -98,16 +136,22 @@ export function icsUid(id: number): string {
  * function rather than a template literal at the call site.
  *
  * `createResendSender` appends `:<to>` and hands the result to Resend as an
- * `Idempotency-Key`. Every invite in a booking's lifecycle goes to the same
- * office address, so a FIXED per-booking prefix — the obvious thing to write,
- * and what the notification path correctly uses — would make the create, the
- * cancel and the restore byte-identical keys. Resend would then collapse the
- * CANCEL into a duplicate of the REQUEST and the calendar event would never
- * clear, with nothing in any log to say so.
+ * `Idempotency-Key`. Every OFFICE invite in a booking's lifecycle goes to the
+ * same address, so a FIXED per-booking prefix — the obvious thing to write, and
+ * what the notification path correctly uses — would make the create, the cancel
+ * and the restore byte-identical keys. Resend would then collapse the CANCEL
+ * into a duplicate of the REQUEST and the calendar event would never clear,
+ * with nothing in any log to say so.
  *
  * Embedding the kind and the SEQUENCE keeps retry dedupe *within* one
  * transition, which is what the key is for, and makes it impossible *across*
  * transitions.
+ *
+ * The audience is deliberately NOT in the prefix (BK-16). The office copy and
+ * the customer copy of one transition are sent concurrently, and the `:<to>`
+ * the sender appends already differs between them — adding the audience here
+ * would be a second reason for something that is already impossible, and would
+ * suggest the `to` suffix could not be relied on.
  */
 export function inviteIdempotencyPrefix(id: number, kind: IcsKind, now: Date): string {
   return `booking-${id}-${kind}-${icsSequence(now)}`;
@@ -204,19 +248,51 @@ function icsLocation(event: IcsEvent): string {
 }
 
 /**
+ * The two audience-shaped facts, resolved. Everything else about the event is
+ * shared — UID, ORGANIZER, SEQUENCE, DTSTART/DTEND, SUMMARY, LOCATION — because
+ * the office copy and the customer copy ARE ONE EVENT, and a CANCEL only clears
+ * an event a client already holds under the same UID.
+ *
+ * The office's contact line is the customer's phone: the office reads its
+ * calendar asking "who do I call". The customer's is the reschedule line, for
+ * the same reason inverted — their own number in their own calendar entry helps
+ * nobody, and it is the one thing they might need from the event at 8am.
+ */
+function audienceOf(event: IcsEvent, audience: IcsAudience): {
+  attendee: string;
+  contactLine: string;
+} {
+  return audience.audience === 'customer'
+    ? { attendee: audience.email, contactLine: CANCEL_LINE }
+    : { attendee: BOOKING_INTERNAL_TO, contactLine: `Phone: ${event.phone}` };
+}
+
+/**
  * The whole invite, as an RFC 5545 string.
  *
  * `now` is injected rather than read from the clock so DTSTAMP and SEQUENCE come
  * from ONE instant per send, and so both are assertable.
+ *
+ * `audience` is required — see `IcsAudience`. The office form is asserted
+ * byte-for-byte against the text BK-14 shipped (the golden pin in
+ * `verify-booking-ics.ts`), because that is the output a real Gmail render was
+ * checked against and it must not drift as a side effect of gaining a second
+ * audience.
  */
-export function buildBookingIcs(event: IcsEvent, kind: IcsKind, now: Date): string {
+export function buildBookingIcs(
+  event: IcsEvent,
+  kind: IcsKind,
+  now: Date,
+  audience: IcsAudience,
+): string {
   const cancel = kind === 'cancel';
   const start = event.slotStart;
   const end = new Date(start.getTime() + SLOT_MINUTES * 60_000);
+  const { attendee, contactLine } = audienceOf(event, audience);
 
   const summary = `Assessment — ${event.name} (${event.serviceLabel})`;
   const description = [
-    `Phone: ${event.phone}`,
+    contactLine,
     `Service: ${event.serviceLabel}`,
     VISIT_LENGTH_LINE,
   ].join('\n');
@@ -241,8 +317,9 @@ export function buildBookingIcs(event: IcsEvent, kind: IcsKind, now: Date): stri
     `DESCRIPTION:${escapeIcsText(description)}`,
     `ORGANIZER:mailto:${ICS_ORGANIZER}`,
     // The RSVP parameters are what make Gmail offer the yes/no/maybe buttons
-    // rather than rendering a file to download. The address is the payload.
-    `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${BOOKING_INTERNAL_TO}`,
+    // rather than rendering a file to download. The address is the payload, and
+    // it is the one thing the audience decides.
+    `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${attendee}`,
     'END:VEVENT',
     'END:VCALENDAR',
   ];

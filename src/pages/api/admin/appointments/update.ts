@@ -10,6 +10,8 @@ import { parseAppointmentUpdate } from '../../../../lib/booking-admin-entry';
 import {
   inviteEventFromAppointment,
   planCalendarInvite,
+  planCancellationEmail,
+  planRestoreEmail,
 } from '../../../../lib/booking-admin-notify';
 import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
 import type { IcsKind } from '../../../../lib/booking-ics';
@@ -115,15 +117,16 @@ export const POST: APIRoute = async ({ request }) => {
                            END,
           updated_at     = ${now}::timestamptz
       FROM (
-        SELECT id, status AS prev_status, name, phone, address, city,
+        SELECT id, status AS prev_status, name, phone, email, address, city,
                postal_code, service, slot_start
         FROM appointments
         WHERE id = ${id}
       ) old
       WHERE appointments.id = old.id
       RETURNING appointments.status AS next_status,
-                old.prev_status, old.id, old.name, old.phone, old.address,
-                old.city, old.postal_code, old.service, old.slot_start
+                old.prev_status, old.id, old.name, old.phone, old.email,
+                old.address, old.city, old.postal_code, old.service,
+                old.slot_start
     `) as UpdatedRow[];
 
     // No row: the id is well-formed but nothing has it. Same answer the detail
@@ -135,8 +138,10 @@ export const POST: APIRoute = async ({ request }) => {
     // this platform. Nothing below changes the redirect — the office is
     // standing at the screen having just cancelled something, and a failed
     // invite is a line in the function log plus an event they delete by hand,
-    // not a UI state worth inventing.
-    await sendBoundaryInvite(rows[0], new Date());
+    // not a UI state worth inventing. The customer half added in BK-16 is held
+    // to the same posture: a cancellation email that did not go out is a phone
+    // call the office was going to make anyway.
+    await sendBoundaryMail(rows[0], new Date());
 
     return redirect(`${detail}?saved=1`);
   } catch (err) {
@@ -151,13 +156,21 @@ export const POST: APIRoute = async ({ request }) => {
   }
 };
 
-/** What the statement above returns: the new status, and the old row beside it. */
+/**
+ * What the statement above returns: the new status, and the old row beside it.
+ *
+ * `email` joined the snapshot in BK-16 for the customer's copy. It is outside
+ * the SET whitelist like every other column here, so the pre-UPDATE value IS
+ * the post-UPDATE value — reading it from the snapshot costs no second query
+ * and cannot be stale.
+ */
 type UpdatedRow = {
   next_status: string;
   prev_status: string;
   id: number;
   name: string;
   phone: string;
+  email: string | null;
   address: string;
   city: string;
   postal_code: string | null;
@@ -167,8 +180,8 @@ type UpdatedRow = {
 };
 
 /**
- * The calendar half of a status edit: which transition, if any, the office just
- * performed, and the invite it owes the calendar.
+ * The mail a status edit owes: the office's calendar artifact, and — since
+ * BK-16 — the customer's written notice carrying their own copy of it.
  *
  * THE RULE IS THE CANCELLED BOUNDARY, not the status names. Into `cancelled`
  * from anything sends a CANCEL; out of `cancelled` to anything sends a fresh
@@ -180,10 +193,19 @@ type UpdatedRow = {
  *
  * A 23505 never reaches here — the statement threw, and the row is untouched.
  *
- * **Cannot fail its caller.** The status edit has already committed; a calendar
- * artifact must not turn it into a `?saved=error` for a change that saved.
+ * **ONE DEADLINE OVER BOTH SENDS, RUN CONCURRENTLY.** Two serial
+ * `POST_COMMIT_BUDGET_MS` windows would stack on a request that has already run
+ * an UPDATE, and the platform's function limit is what a stacked pair blows
+ * through — the same reasoning the admin entry route states for its own
+ * `Promise.all`. The two cannot collapse into one another at Resend either:
+ * they share a per-transition idempotency prefix but go to different addresses,
+ * and the sender appends `:<to>`.
+ *
+ * **Cannot fail its caller.** The status edit has already committed; neither a
+ * calendar artifact nor a courtesy email may turn it into a `?saved=error` for
+ * a change that saved.
  */
-async function sendBoundaryInvite(row: UpdatedRow, now: Date): Promise<void> {
+async function sendBoundaryMail(row: UpdatedRow, now: Date): Promise<void> {
   const wasCancelled = row.prev_status === 'cancelled';
   const isCancelled = row.next_status === 'cancelled';
   if (wasCancelled === isCancelled) return;
@@ -195,13 +217,46 @@ async function sendBoundaryInvite(row: UpdatedRow, now: Date): Promise<void> {
       row,
       SERVICE_LABELS[row.service] ?? row.service,
     );
-    const outcome = await withDeadline(
-      sendCalendarInvite(planCalendarInvite(event, kind, now), { id: row.id, kind, now }),
+
+    // The resend route's guard, and for the same reason: a column that is
+    // present but blank is not an address, and handing `''` to Resend is a
+    // failed send rather than a skip.
+    const email = typeof row.email === 'string' && row.email.trim() !== '' ? row.email : null;
+
+    const sends: Promise<[string, 'sent' | 'skipped' | 'failed']>[] = [
+      sendCalendarInvite(planCalendarInvite(event, kind, now), {
+        id: row.id,
+        kind,
+        now,
+        audience: 'office',
+      }).then((outcome) => ['office', outcome] as [string, 'sent' | 'skipped' | 'failed']),
+    ];
+
+    if (email) {
+      const message =
+        kind === 'cancel'
+          ? planCancellationEmail(event, email, now)
+          : planRestoreEmail(event, email, now);
+      sends.push(
+        sendCalendarInvite(message, { id: row.id, kind, now, audience: 'customer' }).then(
+          (outcome) => ['customer', outcome] as [string, 'sent' | 'skipped' | 'failed'],
+        ),
+      );
+    }
+
+    const outcomes = await withDeadline(
+      Promise.all(sends),
       POST_COMMIT_BUDGET_MS,
-      'failed',
+      // The deadline's answer, one entry per send that was attempted. Wrong in
+      // the safe direction: the log says nothing went out rather than claiming
+      // something did.
+      sends.map((_, i) => [i === 0 ? 'office' : 'customer', 'failed'] as [string, 'failed']),
     );
-    if (outcome === 'failed') {
-      console.error(`Admin update ${row.id}: the calendar ${kind} did not send.`);
+
+    for (const [audience, outcome] of outcomes) {
+      if (outcome === 'failed') {
+        console.error(`Admin update ${row.id}: the ${audience} calendar ${kind} did not send.`);
+      }
     }
   } catch (err) {
     console.error(`Admin update ${row.id} calendar ${kind} failed:`, err);

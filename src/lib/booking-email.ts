@@ -26,8 +26,15 @@ import {
   BOOKING_INTERNAL_TO,
   SUPPORT_PHONE,
 } from './booking-config';
-import { buildBookingIcs, icsAttachment, type IcsEvent } from './booking-ics';
 import {
+  buildBookingIcs,
+  icsAttachment,
+  icsCustomer,
+  ICS_OFFICE,
+  type IcsEvent,
+} from './booking-ics';
+import {
+  CALENDAR_ATTACHED_LINE,
   CANCEL_LINE,
   HAVE_READY_HEADING,
   HAVE_READY_ITEMS,
@@ -198,6 +205,17 @@ function multiline(value: string): string {
  *
  * Note what it does not read: `policyNumber`, `claimNumber`, `insurerName`.
  * Not reading them is the guarantee — see the module header.
+ *
+ * BK-16 hangs the customer's own calendar invite here. BK-14 deliberately left
+ * this message attachment-free and recorded the follow-up; the client asked for
+ * it, and it is not optional flourish — a `METHOD:CANCEL` only clears an event
+ * a calendar already holds under the same UID, so without this attachment the
+ * cancellation email BK-16 also adds would carry an artifact that clears
+ * nothing. The two halves ship together for that reason.
+ *
+ * The ICS is built for the CUSTOMER audience: their address is the ATTENDEE,
+ * and the description carries the reschedule line rather than their own phone
+ * number. Same UID as the office's copy, on purpose — it is one event.
  */
 function customerConfirmation(input: BookingNotificationInput): Message | null {
   if (!input.email) return null;
@@ -223,6 +241,7 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...HAVE_READY_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
+    `<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`,
     `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
     WRAP_CLOSE,
@@ -243,6 +262,8 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     `${HAVE_READY_HEADING}:`,
     ...HAVE_READY_ITEMS.map((item) => `  - ${item}`),
     '',
+    CALENDAR_ATTACHED_LINE,
+    '',
     CANCEL_LINE,
     '',
     `YEG Restoration · ${SUPPORT_PHONE}`,
@@ -258,6 +279,13 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     subject: headerSafe(`You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`),
     html,
     text,
+    attachments: [
+      icsAttachment(
+        buildBookingIcs(icsEventOf(input), 'request', input.now, icsCustomer(input.email)),
+        'request',
+        input.id,
+      ),
+    ],
   };
 }
 
@@ -360,7 +388,13 @@ function internalNotification(input: BookingNotificationInput): Message {
     ),
     html,
     text,
-    attachments: [icsAttachment(buildBookingIcs(icsEventOf(input), 'request', input.now), 'request', input.id)],
+    attachments: [
+      icsAttachment(
+        buildBookingIcs(icsEventOf(input), 'request', input.now, ICS_OFFICE),
+        'request',
+        input.id,
+      ),
+    ],
   };
 }
 

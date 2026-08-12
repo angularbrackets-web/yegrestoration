@@ -539,7 +539,7 @@ console.log('\nThe narrowed invariant: the office gets a calendar artifact, neve
     const seen: Message[] = [];
     const outcome = await sendCalendarInvite(
       planCalendarInvite(event, kind, NOW),
-      { id: 4815, kind, now: NOW },
+      { id: 4815, kind, now: NOW, audience: 'office' },
       {
         send: async (m) => {
           seen.push(m);
@@ -589,9 +589,31 @@ console.log('\nThe narrowed invariant: the office gets a calendar artifact, neve
     resent.every((m) => m.to !== BOOKING_INTERNAL_TO),
     'a resend still mails the office nothing, invite or otherwise',
   );
+  // FLIPPED IN BK-16, NOT DELETED. This read "the customer copy carries no
+  // calendar attachment" — BK-14's deliberate absence. The customer now gets
+  // their own invite from every sender of the confirmation, the resend button
+  // included (AC1), so the assert inverts: exactly one, and it must be THEIR
+  // copy rather than the office's. Deleting it would have left the resend path
+  // free to mail an office-attendee ICS to a customer with every gate green,
+  // which is precisely the defaulted-audience failure the required argument
+  // exists to prevent.
+  check(resent.length === 1, `the resend delivers one message, got ${resent.length}`);
   check(
-    resent.every((m) => (m.attachments?.length ?? 0) === 0),
-    'and the customer copy carries no calendar attachment',
+    (resent[0]?.attachments?.length ?? 0) === 1,
+    `and the customer copy carries their calendar invite, got ${resent[0]?.attachments?.length ?? 0}`,
+  );
+  const resentIcs = (resent[0]?.attachments?.[0]?.content ?? '').replace(/\r\n /g, '');
+  check(
+    resentIcs.includes(`RSVP=TRUE:mailto:${resent[0]?.to}`),
+    `addressed to them as the attendee, got ${resentIcs.match(/ATTENDEE[^\r\n]*/)?.[0]}`,
+  );
+  check(
+    !resentIcs.includes(`mailto:${BOOKING_INTERNAL_TO}`),
+    'and not naming the office as the invitee of their own appointment',
+  );
+  check(
+    resent[0]?.attachments?.[0]?.contentType.includes('method=REQUEST') ?? false,
+    'as a REQUEST — a resend is not a revision of anything',
   );
 }
 

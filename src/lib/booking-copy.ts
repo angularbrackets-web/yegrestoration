@@ -57,3 +57,49 @@ export const CANCEL_LINE = `To cancel or reschedule, call or text ${SUPPORT_PHON
 
 /** Shown only when the confirmation email actually went out. */
 export const EMAILED_LINE = "We've emailed you a copy of this confirmation.";
+
+// ---------------------------------------------------------------------------
+// The customer's calendar (BK-16)
+//
+// Client-decided 2026-08-12: the customer gets the invite with the
+// confirmation, and a written cancellation when the office cancels the row.
+// Same standing rule as everything above — the implementer drafts, the client
+// edits here, and both the email and the ICS read from these constants.
+//
+// NEITHER BOUNDARY MESSAGE MAY CARRY A URL, on the same terms as the
+// confirmation: there is no self-service cancel or rebook path to link to
+// (locked, phone-in), so a URL could only be decoration or a lie.
+// ---------------------------------------------------------------------------
+
+/** The confirmation's nod to its own attachment. */
+export const CALENDAR_ATTACHED_LINE =
+  'A calendar invite is attached — open it to add the appointment to your calendar.';
+
+export const CANCELLED_HEADING = 'Your assessment is cancelled';
+
+/**
+ * The cancellation's opening line.
+ *
+ * "As requested" is deliberate and it is a claim about the world: cancellation
+ * is phone-in (locked), so by the time this sends, a person almost always
+ * asked. The office cancelling a row for its own reasons is the exception, and
+ * the sentence is still true enough not to confuse anybody who did not ask —
+ * they are told to call, which is what they would do either way.
+ */
+export const CANCELLED_LEAD =
+  "We've cancelled the assessment below, as requested. Nothing further is needed from you.";
+
+/** What to do about it. Phone, never a link. */
+export const CANCELLED_REBOOK_LINE = `To book a new time, or if this cancellation is a surprise, call or text ${SUPPORT_PHONE}.`;
+
+/** The attached CANCEL does the work; this says so, because a bare .ics is opaque. */
+export const CANCELLED_CALENDAR_LINE =
+  'The attached update removes the appointment from your calendar.';
+
+export const RESTORED_HEADING = 'Your assessment is back on';
+
+export const RESTORED_LEAD =
+  'The assessment below was cancelled and has now been reinstated. The original time is unchanged.';
+
+export const RESTORED_CALENDAR_LINE =
+  'A calendar invite is attached — open it to put the appointment back on your calendar.';

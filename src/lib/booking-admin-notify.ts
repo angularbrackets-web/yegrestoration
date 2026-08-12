@@ -28,6 +28,13 @@
  * been loosened. The invite is built here, by `planCalendarInvite`, from a
  * record that structurally cannot carry an insurance identifier.
  *
+ * WHAT BK-16 ADDS IS ON THE OTHER SIDE OF THE LEDGER, so it does not touch the
+ * invariant above at all: a status edit that crosses the cancelled boundary now
+ * also mails **the customer**, when the row has an address. Cancelling is the
+ * one admin action a customer has a right to hear about in writing, and the
+ * email carries the calendar artifact that clears the invite they were sent at
+ * booking time. The office half is unchanged and still the only office mail.
+ *
  * The two mappings below sit in one file precisely because they must agree: a
  * confirmation resent from a row has to be the same message the entry sent.
  *
@@ -39,10 +46,23 @@
 
 import {
   BOOKING_EMAIL_FROM,
+  BOOKING_EMAIL_REPLY_TO,
   BOOKING_INTERNAL_TO,
   POST_COMMIT_BUDGET_MS,
+  SUPPORT_PHONE,
 } from './booking-config';
 import { stampNotifications } from './booking-commit';
+import {
+  CANCEL_LINE,
+  CANCELLED_CALENDAR_LINE,
+  CANCELLED_HEADING,
+  CANCELLED_LEAD,
+  CANCELLED_REBOOK_LINE,
+  RESTORED_CALENDAR_LINE,
+  RESTORED_HEADING,
+  RESTORED_LEAD,
+  TIMEZONE_NOTE,
+} from './booking-copy';
 import {
   escapeHtml,
   headerSafe,
@@ -50,7 +70,14 @@ import {
   type Message,
   type NotificationPlan,
 } from './booking-email';
-import { buildBookingIcs, icsAttachment, type IcsEvent, type IcsKind } from './booking-ics';
+import {
+  buildBookingIcs,
+  icsAttachment,
+  icsCustomer,
+  ICS_OFFICE,
+  type IcsEvent,
+  type IcsKind,
+} from './booking-ics';
 import {
   sendCustomerConfirmation,
   withDeadline,
@@ -224,8 +251,134 @@ export function planCalendarInvite(event: IcsEvent, kind: IcsKind, now: Date): M
     subject: headerSafe(`${what} #${event.id} — ${event.name}`),
     html: `<div style="font-family:-apple-system,Segoe UI,sans-serif;color:#1a1a1a;">${escapeHtml(line)}</div>`,
     text: line,
-    attachments: [icsAttachment(buildBookingIcs(event, kind, now), kind, event.id)],
+    attachments: [icsAttachment(buildBookingIcs(event, kind, now, ICS_OFFICE), kind, event.id)],
   };
+}
+
+// ---------------------------------------------------------------------------
+// The customer's side of the cancelled boundary (BK-16)
+//
+// Client-decided 2026-08-12, from his BK-14 post-deploy test: "as a customer I
+// did receive the booking confirmation email but not the cancelled
+// notification email". These two are that email, plus the restore direction —
+// which is not a flourish. The resend button cannot restore a customer's
+// calendar: `sendCustomerConfirmation` keys idempotency on `booking-<id>`,
+// byte-identical to the booking-time confirmation, so within Resend's dedupe
+// window the restore is silently collapsed into a send from days ago and the
+// customer's calendar shows "cancelled" forever, with the flash reading
+// "sent". So un-cancel mails the restore itself, through the per-transition
+// key. (The resend button's fixed key is recorded in the ticket's Mechanism
+// and deliberately NOT changed here.)
+//
+// CANCELLATION IS STILL PHONE-IN (locked). Neither message carries a URL, a
+// cancel link, or a token — they are the WRITTEN CONFIRMATION of something a
+// person almost always arranged by phone, and the only action either offers is
+// the phone number.
+//
+// Both take an `IcsEvent`, so neither CAN read an insurance identifier: the
+// type has no such field. That is the same guarantee `customerConfirmation`
+// gets from not reading them, one level stronger.
+// ---------------------------------------------------------------------------
+
+/**
+ * One shape, two directions. The cancellation and the restore differ only in
+ * their copy and in which ICS they carry, and writing them as two hand-rolled
+ * templates is how the second one quietly grows a URL or drops the zone note.
+ *
+ * The subject carries the SLOT LABEL and not the customer's name — everything
+ * in it is a constant or a server-formatted value, so nothing customer-typed
+ * reaches a header here. `headerSafe` is applied anyway: it is load-bearing the
+ * moment somebody adds `${event.name}` to this line, and a guard that only
+ * appears once the hole does is a guard nobody adds.
+ */
+function planBoundaryEmail(
+  event: IcsEvent,
+  email: string,
+  now: Date,
+  kind: IcsKind,
+  copy: { heading: string; lead: string; calendarLine: string; phoneLine: string },
+): Message {
+  const when = `${formatSlot(event.slotStart)} (${TIMEZONE_NOTE})`;
+  const where = [event.address, event.city, event.postalCode].filter(Boolean).join(', ');
+
+  const rows: [string, string][] = [
+    ['When', when],
+    ['Where', where],
+    ['Service', event.serviceLabel],
+    ['Reference', `#${event.id}`],
+  ];
+
+  const html = [
+    '<div style="font-family:-apple-system,Segoe UI,sans-serif;color:#1a1a1a;max-width:560px;">',
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(copy.heading)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(copy.lead)}</p>`,
+    '<table style="border-collapse:collapse;width:100%;">',
+    ...rows.map(
+      ([label, value]) =>
+        `<tr><td style="padding:8px 12px;background:#f5f5f5;font-weight:600;width:140px;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(value)}</td></tr>`,
+    ),
+    '</table>',
+    `<p style="margin:16px 0;">${escapeHtml(copy.calendarLine)}</p>`,
+    `<p style="margin:16px 0;">${escapeHtml(copy.phoneLine)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    '</div>',
+  ].join('');
+
+  const text = [
+    copy.heading,
+    '',
+    copy.lead,
+    '',
+    ...rows.map(([label, value]) => `${`${label}:`.padEnd(11)}${value}`),
+    '',
+    copy.calendarLine,
+    '',
+    copy.phoneLine,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    from: BOOKING_EMAIL_FROM,
+    to: email,
+    // Same reasoning as the confirmation: the sender is `noreply`, and people
+    // reply to a cancellation notice more than to anything else this system
+    // sends.
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(`${copy.heading} — ${formatSlot(event.slotStart)} (${TIMEZONE_NOTE})`),
+    html,
+    text,
+    // THE CUSTOMER AUDIENCE, and this is the whole point of the audience
+    // argument. An office-attendee ICS mailed to a customer names the office as
+    // the invitee of their own appointment and prints their own phone number
+    // back at them.
+    attachments: [
+      icsAttachment(buildBookingIcs(event, kind, now, icsCustomer(email)), kind, event.id),
+    ],
+  };
+}
+
+/** "We cancelled it" — plus the METHOD:CANCEL that clears their calendar. */
+export function planCancellationEmail(event: IcsEvent, email: string, now: Date): Message {
+  return planBoundaryEmail(event, email, now, 'cancel', {
+    heading: CANCELLED_HEADING,
+    lead: CANCELLED_LEAD,
+    calendarLine: CANCELLED_CALENDAR_LINE,
+    phoneLine: CANCELLED_REBOOK_LINE,
+  });
+}
+
+/** "It is back on" — plus a fresh METHOD:REQUEST, same UID, later SEQUENCE. */
+export function planRestoreEmail(event: IcsEvent, email: string, now: Date): Message {
+  return planBoundaryEmail(event, email, now, 'request', {
+    heading: RESTORED_HEADING,
+    lead: RESTORED_LEAD,
+    calendarLine: RESTORED_CALENDAR_LINE,
+    // NOT the cancellation's rebook line: "if this cancellation is a surprise"
+    // inside an email saying the appointment is back on reads as a
+    // contradiction (implementation review, should-fix 2).
+    phoneLine: CANCEL_LINE,
+  });
 }
 
 /**

@@ -97,8 +97,14 @@ const { GET: availability } = await import('../src/pages/api/booking/availabilit
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { stampNotifications } = await import('../src/lib/booking-commit');
-const { inviteEventFromAppointment, planCalendarInvite, planForAppointment, sendConfirmationAndStamp } =
-  await import('../src/lib/booking-admin-notify');
+const {
+  inviteEventFromAppointment,
+  planCalendarInvite,
+  planCancellationEmail,
+  planForAppointment,
+  planRestoreEmail,
+  sendConfirmationAndStamp,
+} = await import('../src/lib/booking-admin-notify');
 const { localDateKey, zonedTimeToUtc } = await import('../src/lib/booking-time');
 // BK-10's lead-reply path. Same split as the appointment resend above: the
 // helper's send is injectable (lib-level), the route is driven under the mute
@@ -203,6 +209,15 @@ async function read(id: number): Promise<Row | null> {
 const SLOT_DATE = '2029-05-15';
 const SLOT_A = '11:30';
 const SLOT_B = '12:30';
+/**
+ * A second day for BK-16's with-email boundary fixture.
+ *
+ * Its own date rather than a sixth slot on `SLOT_DATE`: the grid holds five,
+ * all five are spoken for by the time the boundary section runs, and a fixture
+ * that has to be cancelled out of somebody else's slot first is a fixture whose
+ * setup can fail for reasons that have nothing to do with what it asserts.
+ */
+const SLOT_DATE_BK16 = '2029-05-22';
 
 function entryFields(over: Record<string, string> = {}): Record<string, string> {
   return {
@@ -542,9 +557,24 @@ try {
       const plan = planForAppointment(appointment, 'Water Damage Restoration', NOW, 0);
       check(plan.customer !== null, 'the plan has a customer message to deliver');
       check(plan.internal != null, 'and an internal one it must never deliver');
+      // FLIPPED IN BK-16, NOT DELETED. It read "carries no calendar
+      // attachment" — BK-14's deliberate absence, now the client-requested
+      // feature. Inverted rather than dropped, and the ATTENDEE is the half
+      // that matters: a plan built for a REAL ROW is where "the office's copy
+      // got mailed to the customer" would actually happen, because this is the
+      // only mapper that has both addresses in hand.
       check(
-        (plan.customer?.attachments?.length ?? 0) === 0,
-        'and the customer message carries no calendar attachment',
+        (plan.customer?.attachments?.length ?? 0) === 1,
+        `and the customer message carries their calendar invite, got ${plan.customer?.attachments?.length ?? 0}`,
+      );
+      const planIcs = (plan.customer?.attachments?.[0]?.content ?? '').replace(/\r\n /g, '');
+      check(
+        planIcs.includes(`RSVP=TRUE:mailto:${appointment.email}`),
+        `naming the customer as the attendee, got ${planIcs.match(/ATTENDEE[^\r\n]*/)?.[0]}`,
+      );
+      check(
+        !planIcs.includes('mailto:info@yegrestoration.ca'),
+        'and not the office — the office has its own copy on the internal message',
       );
 
       const reset = async () => {
@@ -571,9 +601,15 @@ try {
       check(sentOutcome === 'sent', `a successful send reports sent, got ${sentOutcome}`);
       check(delivered.length === 1, `exactly one message left, got ${delivered.length}`);
       check(delivered[0]?.to === appointment.email, 'addressed to the customer');
+      // FLIPPED IN BK-16, NOT DELETED — the same inversion as above, at the
+      // seam the message actually leaves through rather than on the plan.
       check(
-        (delivered[0]?.attachments?.length ?? 0) === 0,
-        'and carrying no attachment — the customer ICS is out of scope by decision',
+        (delivered[0]?.attachments?.length ?? 0) === 1,
+        `and carrying their calendar invite, got ${delivered[0]?.attachments?.length ?? 0}`,
+      );
+      check(
+        (delivered[0]?.attachments?.[0]?.contentType ?? '').includes('method=REQUEST'),
+        'typed as a REQUEST invite',
       );
       const afterSent = await read(idD);
       check(afterSent?.confirmation_sent_at != null, 'confirmation_sent_at is written');
@@ -703,6 +739,70 @@ try {
     const seqOf = (m: typeof request) =>
       Number(m.attachments?.[0].content.match(/SEQUENCE:(\d+)/)?.[1] ?? 0);
     check(seqOf(cancel) > seqOf(request), 'with a strictly greater SEQUENCE');
+
+    // -----------------------------------------------------------------------
+    // BK-16: the customer's two boundary emails, from the same real row.
+    // -----------------------------------------------------------------------
+    // Against a row that genuinely carries insurance identifiers, which is the
+    // point of doing this here rather than only in `verify-booking-ics.ts`: a
+    // hand-built record cannot express them, so the PII check there can only
+    // fail if the BUILDER leaks. Here the mapper, the driver and the columns
+    // are all real, and the two new messages are customer-facing.
+    const customerAddress = 'bk16-customer@example.com';
+    const cancellation = planCancellationEmail(event, customerAddress, LATER);
+    const restore = planRestoreEmail(event, customerAddress, new Date(LATER.getTime() + 60_000));
+
+    for (const [label, message, method] of [
+      ['cancellation', cancellation, 'CANCEL'],
+      ['restore', restore, 'REQUEST'],
+    ] as const) {
+      check(message.to === customerAddress, `the ${label} goes to the customer, got ${message.to}`);
+      check(
+        message.to !== 'info@yegrestoration.ca',
+        `and the ${label} is not an office message`,
+      );
+      check(message.attachments?.length === 1, `carrying one attachment, got ${message.attachments?.length}`);
+
+      const raw = message.attachments?.[0].content ?? '';
+      const body = raw.replace(/\r\n /g, '');
+      check(body.includes(`METHOD:${method}`), `the ${label} ICS is a ${method}`);
+      check(body.includes(`UID:booking-${idE}@`), `for this booking`);
+      check(
+        body.includes(`DTSTART:${expectedStart.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`),
+        `at the slot instant, got ${body.match(/DTSTART:[^\r]*/)?.[0]}`,
+      );
+      check(
+        body.includes(`RSVP=TRUE:mailto:${customerAddress}`),
+        `naming the customer as the attendee, got ${body.match(/ATTENDEE[^\r]*/)?.[0]}`,
+      );
+      check(
+        !body.includes('mailto:info@yegrestoration.ca'),
+        'and the office nowhere in it',
+      );
+
+      // THE STRICTER RULE, on a customer artifact built from an insured row.
+      // Raw AND unfolded, for the reason the office loop above states.
+      check(!body.includes(POLICY) && !raw.includes(POLICY), `the ${label} ICS carries no policy number`);
+      check(!body.includes(CLAIM) && !raw.includes(CLAIM), `the ${label} ICS carries no claim number`);
+      const whole = [message.subject, message.html, message.text].join('\n');
+      check(!whole.includes(POLICY), `nor does the ${label} email body`);
+      check(!whole.includes(CLAIM), `nor a claim number`);
+      check(!whole.includes('Prairie Mutual'), `nor the insurer's name`);
+      // The customer copy is bound by the CUSTOMER rule, not the office one:
+      // the internal notification may print all three, this may not.
+      check(!/https?:\/\//.test(whole), `and the ${label} carries no URL — cancellation is phone-in`);
+    }
+
+    check(
+      Number((restore.attachments?.[0].content ?? '').match(/SEQUENCE:(\d+)/)?.[1] ?? 0) >
+        Number((cancellation.attachments?.[0].content ?? '').match(/SEQUENCE:(\d+)/)?.[1] ?? 0),
+      'the restore outranks the cancellation',
+    );
+    check(
+      cancellation.attachments?.[0].content.match(/UID:[^\r\n]+/)?.[0] ===
+        request.attachments?.[0].content.match(/UID:[^\r\n]+/)?.[0],
+      'and both share the UID the office invite carries — one event, two calendars',
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -715,8 +815,19 @@ try {
   // the post-deploy check to do. What it still cannot see is the message
   // itself; that is the lib-level half above.
   {
-    const muteLine = (id: number) => new RegExp(`no calendar invite for booking ${id}\\b`);
-    const ANY_INVITE = /no calendar invite for booking/;
+    // THE MUTE LINE IS AUDIENCE-ATTRIBUTABLE SINCE BK-16, and these three
+    // helpers are why. It used to read `no calendar invite for booking <id>`,
+    // which counted the same for every send — so once a boundary crossing owed
+    // TWO sends, "the route reached the invite send" could not tell "office and
+    // customer both went" from "the office one went and the customer half was
+    // never wired". Each arm below now names the audience it expects and
+    // asserts the absence of the one it does not.
+    const muteLine = (id: number, kind: 'request' | 'cancel', audience: 'office' | 'customer') =>
+      new RegExp(`no calendar ${kind} \\(${audience}\\) for booking ${id}\\b`);
+    /** Any send at all for one booking, whatever its kind or audience. */
+    const anyMute = (id: number) =>
+      new RegExp(`no calendar (?:request|cancel) \\((?:office|customer)\\) for booking ${id}\\b`);
+    const ANY_INVITE = /no calendar (?:request|cancel) \((?:office|customer)\) for booking/;
 
     /** Runs any route with console.error captured. */
     async function capture(
@@ -753,7 +864,19 @@ try {
       check(enteredId !== null, `the entry ${label} saved, got "${entered.location}"`);
       if (enteredId !== null) {
         createdIds.push(enteredId);
-        check(muteLine(enteredId).test(entered.logs), `an entry ${label} still reaches the invite send`);
+        check(
+          muteLine(enteredId, 'request', 'office').test(entered.logs),
+          `an entry ${label} still reaches the office invite send`,
+        );
+        // AND THE ENTRY MAILS THE CUSTOMER NOTHING FROM THE INVITE PATH. The
+        // entry's customer mail is the confirmation, gated on the checkbox and
+        // sent through `sendConfirmationAndStamp`; BK-16 must not have grown a
+        // second customer send here. This fixture HAS an email address, so the
+        // assertion is falsifiable rather than vacuous.
+        check(
+          !muteLine(enteredId, 'request', 'customer').test(entered.logs),
+          `and an entry ${label} sends the customer no separate invite`,
+        );
         // And it is cleaned up out of the slot so the next iteration can reuse it.
         await call(updateRoute, { id: String(enteredId), status: 'cancelled' });
       }
@@ -770,12 +893,33 @@ try {
     check(!ANY_INVITE.test(blackoutLogs.logs), 'and neither does a blackout edit');
     await call(blackoutDelete, { day: '2029-05-16' });
 
-    // 1. Into cancelled: the boundary is crossed, so the route reaches the send.
+    // 1. Into cancelled, ON A ROW WITH NO EMAIL ADDRESS. The office invite goes;
+    //    the customer half must not, because there is nobody to send it to.
+    //    This is `idE`, whose fixture deliberately has no email — and it is the
+    //    negative half of AC3 that a with-email row cannot express.
+    check((await read(idE)) !== null, 'the no-email fixture is still here');
+    const emailless = (await sql`SELECT email FROM appointments WHERE id = ${idE}`) as {
+      email: string | null;
+    }[];
+    check(
+      emailless[0]?.email == null,
+      `and it really has no email, got ${JSON.stringify(emailless[0]?.email)} — otherwise the arm below is vacuous`,
+    );
     const toCancelled = await callCapturingLogs({ id: String(idE), status: 'cancelled' });
     check(toCancelled.location.endsWith('?saved=1'), `the cancel still saves, got "${toCancelled.location}"`);
     check((await read(idE))?.status === 'cancelled', 'and the row is cancelled');
-    check(muteLine(idE).test(toCancelled.logs), 'and the route reached the invite send');
-    check(!/calendar cancel email failed/.test(toCancelled.logs), 'without escaping the mute');
+    check(
+      muteLine(idE, 'cancel', 'office').test(toCancelled.logs),
+      'and the route reached the office invite send',
+    );
+    check(
+      !muteLine(idE, 'cancel', 'customer').test(toCancelled.logs),
+      'and sent the customer nothing — there is no address on the row',
+    );
+    check(
+      !/calendar cancel \((?:office|customer)\) email failed/.test(toCancelled.logs),
+      'without escaping the mute',
+    );
 
     // 2. Re-submitting the SAME status is not a transition. This is the case
     //    `RETURNING id` could not see, and the reason the statement self-joins.
@@ -785,23 +929,139 @@ try {
       admin_notes: MARKER,
     });
     check(resubmit.location.endsWith('?saved=1'), 'a re-submit still saves');
-    check(!muteLine(idE).test(resubmit.logs), 'and sends nothing — it crossed no boundary');
+    check(!anyMute(idE).test(resubmit.logs), 'and sends nothing — it crossed no boundary');
 
-    // 3. Out of cancelled: a fresh REQUEST.
+    // 3. Out of cancelled: a fresh REQUEST, office only for this row.
     const restored = await callCapturingLogs({ id: String(idE), status: 'booked' });
     check(restored.location.endsWith('?saved=1'), `the un-cancel saves, got "${restored.location}"`);
     check((await read(idE))?.status === 'booked', 'and the row is booked again');
-    check(muteLine(idE).test(restored.logs), 'and the route reached the invite send again');
+    check(
+      muteLine(idE, 'request', 'office').test(restored.logs),
+      'and the route reached the office invite send again',
+    );
+    check(
+      !muteLine(idE, 'request', 'customer').test(restored.logs),
+      'still with no customer send — the row still has no address',
+    );
 
     // 4. Edits that do not touch the boundary send nothing.
     for (const status of ['completed', 'no_show', 'booked']) {
       const edit = await callCapturingLogs({ id: String(idE), status });
       check(edit.location.endsWith('?saved=1'), `a ${status} edit saves`);
-      check(!muteLine(idE).test(edit.logs), `and a ${status} edit sends nothing`);
+      check(!anyMute(idE).test(edit.logs), `and a ${status} edit sends nothing`);
     }
     const notesOnly = await callCapturingLogs({ id: String(idE), admin_notes: `${MARKER} note` });
     check(notesOnly.location.endsWith('?saved=1'), 'a notes-only edit saves');
-    check(!muteLine(idE).test(notesOnly.logs), 'and sends nothing');
+    check(!anyMute(idE).test(notesOnly.logs), 'and sends nothing');
+
+    // 4b. THE SAME BOUNDARY ON A ROW THAT HAS AN EMAIL (BK-16 AC3). Two sends,
+    //     and the assertion is that the two log lines are DISTINGUISHABLE
+    //     rather than merely two — the whole reason the mute line gained the
+    //     audience. A route that sent the office invite twice would produce two
+    //     lines and satisfy any count.
+    const withEmailEntry = await call(
+      createRoute,
+      entryFields({
+        slot_date: SLOT_DATE_BK16,
+        slot_time: '11:30',
+        name: 'BK-16 boundary',
+        email: 'bk16-boundary@example.com',
+      }),
+    );
+    const idG = idFromLocation(withEmailEntry);
+    check(idG !== null, `the with-email fixture saved, got "${withEmailEntry}"`);
+    if (idG !== null) {
+      createdIds.push(idG);
+
+      const cancelG = await callCapturingLogs({ id: String(idG), status: 'cancelled' });
+      check(cancelG.location.endsWith('?saved=1'), `the cancel saves, got "${cancelG.location}"`);
+      check((await read(idG))?.status === 'cancelled', 'and the row is cancelled');
+      check(
+        muteLine(idG, 'cancel', 'office').test(cancelG.logs),
+        'the office CANCEL was reached',
+      );
+      check(
+        muteLine(idG, 'cancel', 'customer').test(cancelG.logs),
+        'AND the customer cancellation was reached — the client-requested half',
+      );
+      const cancelLines = cancelG.logs.split('\n').filter((l) => anyMute(idG).test(l));
+      check(cancelLines.length === 2, `exactly two sends, got ${cancelLines.length}`);
+      check(
+        new Set(cancelLines).size === 2,
+        `and they are distinguishable rather than the same send twice:\n      ${cancelLines.join('\n      ')}`,
+      );
+
+      // Un-cancel: the restore direction, which exists because the resend
+      // button's fixed idempotency key cannot carry it (the plan-review
+      // blocker). Without this the customer's calendar shows "cancelled"
+      // forever with no working recovery.
+      const restoreG = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      check(restoreG.location.endsWith('?saved=1'), `the un-cancel saves, got "${restoreG.location}"`);
+      check((await read(idG))?.status === 'booked', 'and the row is booked again');
+      check(
+        muteLine(idG, 'request', 'office').test(restoreG.logs),
+        'the office REQUEST was reached',
+      );
+      check(
+        muteLine(idG, 'request', 'customer').test(restoreG.logs),
+        'AND the customer restore was reached',
+      );
+      check(
+        !muteLine(idG, 'cancel', 'customer').test(restoreG.logs),
+        'and the customer was not told it was cancelled again',
+      );
+
+      // The negative arms, on the row that CAN receive customer mail — which is
+      // what makes them mean something. On `idE` they could not fail.
+      const resubmitG = await callCapturingLogs({
+        id: String(idG),
+        status: 'booked',
+        admin_notes: MARKER,
+      });
+      check(resubmitG.location.endsWith('?saved=1'), 'a re-submit on the with-email row saves');
+      check(!anyMute(idG).test(resubmitG.logs), 'and mails nobody');
+      // Order is load-bearing: the loop leaves the row `completed`, which is
+      // what makes the next arm literally the completed → cancelled pair it
+      // claims to pin (implementation review, should-fix 1 — it used to leave
+      // the row at `no_show`).
+      for (const status of ['no_show', 'completed']) {
+        const edit = await callCapturingLogs({ id: String(idG), status });
+        check(edit.location.endsWith('?saved=1'), `a ${status} edit saves`);
+        check(
+          !anyMute(idG).test(edit.logs),
+          `and a ${status} edit mails the customer nothing — it crosses no boundary`,
+        );
+      }
+
+      // `completed → cancelled` DOES cross it, and does mail them (the
+      // direction-of-crossing rule inherited from BK-14, recorded as a decision
+      // in BK-16's assumptions log rather than discovered here).
+      const fromCompleted = await callCapturingLogs({ id: String(idG), status: 'cancelled' });
+      check(fromCompleted.location.endsWith('?saved=1'), 'completed → cancelled saves');
+      check(
+        muteLine(idG, 'cancel', 'customer').test(fromCompleted.logs),
+        'and mails the customer the cancellation — the rule is the boundary, not the status pair',
+      );
+
+      // A BLANK EMAIL IS NOT AN ADDRESS, and this is the half of the guard a
+      // NULL column cannot exercise: `if (row.email)` alone is already false
+      // for NULL, so the `.trim() !== ''` the resend route contributed
+      // (plan-review N2) is only load-bearing for a present-but-blank value.
+      // Written straight to the column, because `parseAdminEntry` normalizes a
+      // blank to NULL and so cannot produce this row — which is exactly why a
+      // row like it can exist from some other writer.
+      await sql`UPDATE appointments SET email = '   ' WHERE id = ${idG}`;
+      const blankEmail = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      check(blankEmail.location.endsWith('?saved=1'), 'a boundary crossing on a blank-email row saves');
+      check(
+        muteLine(idG, 'request', 'office').test(blankEmail.logs),
+        'and the office still gets its invite',
+      );
+      check(
+        !muteLine(idG, 'request', 'customer').test(blankEmail.logs),
+        'but a whitespace-only email is not mailed — Resend would report that as a failed send',
+      );
+    }
 
     // 5. The 23505 arm. Cancel this row, take its slot, then try to un-cancel:
     //    the statement throws, the row is untouched, and nothing is sent —
@@ -820,14 +1080,14 @@ try {
     );
     check((await read(idE))?.status === 'cancelled', 'the row stays cancelled');
     check(
-      !muteLine(idE).test(conflicted.logs),
+      !anyMute(idE).test(conflicted.logs),
       'and NOTHING was sent — the statement threw before any send',
     );
 
     // A well-formed id matching nothing sends nothing either.
     const vanished = await callCapturingLogs({ id: '2147483647', status: 'cancelled' });
     check(vanished.location.includes('saved=missing'), 'a vanished appointment is still reported');
-    check(!/no calendar invite for booking/.test(vanished.logs), 'and sends nothing');
+    check(!ANY_INVITE.test(vanished.logs), 'and sends nothing');
   }
 
   // -------------------------------------------------------------------------

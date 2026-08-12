@@ -158,7 +158,12 @@ async function sendOfficeInvite(
   try {
     const event = inviteEventFromPayload(id, payload, serviceLabel);
     return await withDeadline(
-      sendCalendarInvite(planCalendarInvite(event, 'request', now), { id, kind: 'request', now }),
+      sendCalendarInvite(planCalendarInvite(event, 'request', now), {
+        id,
+        kind: 'request',
+        now,
+        audience: 'office',
+      }),
       POST_COMMIT_BUDGET_MS,
       'failed',
     );

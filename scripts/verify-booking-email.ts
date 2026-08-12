@@ -223,10 +223,54 @@ console.log('\nThe calendar invite rides the internal notification (BK-14)');
   // rather than something with a clock inside it.
   check(ics?.content.includes('DTSTAMP:20260810T150000Z') ?? false, 'stamped at the injected send instant');
 
-  // The customer's copy carries NO attachment. Customer-facing ICS is out of
-  // scope by decision, and the shared builder makes "attach it to both" a
-  // one-line edit — so it is asserted, not assumed.
-  check(customer?.attachments === undefined, 'the customer confirmation carries no attachment at all');
+  // FLIPPED IN BK-16, NOT DELETED. This read "the customer confirmation
+  // carries no attachment at all" — BK-14 pinned the ABSENCE, deliberately,
+  // because the shared builder made attaching it to both a one-line edit. The
+  // client asked for the customer invite, so the pin inverts rather than
+  // disappearing: an assert that is deleted instead of inverted is green
+  // forever, and this one guards the difference between the customer getting
+  // their own invite and the customer getting the OFFICE's copy of it.
+  check(
+    customer?.attachments?.length === 1,
+    `the customer confirmation carries exactly one attachment, got ${customer?.attachments?.length ?? 0}`,
+  );
+  const customerIcs = customer?.attachments?.[0];
+  check(
+    customerIcs?.contentType === 'text/calendar; charset=utf-8; method=REQUEST',
+    `typed as a REQUEST invite, got ${customerIcs?.contentType}`,
+  );
+  check(customerIcs?.filename === 'assessment-481.ics', 'named for the same booking');
+  const customerIcsText = (customerIcs?.content ?? '').replace(/\r\n /g, '');
+  // SAME UID as the office copy. This is what makes the cancellation BK-16 also
+  // adds able to clear anything at all: a CANCEL only matches an event the
+  // client already holds under that UID.
+  check(
+    customerIcsText.includes('UID:booking-481@'),
+    'against the same UID as the office copy — they are one event',
+  );
+  check(
+    customerIcsText.includes(`RSVP=TRUE:mailto:${INSURANCE.email}`),
+    `and the CUSTOMER is the attendee, got ${customerIcsText.match(/ATTENDEE[^\r\n]*/)?.[0]}`,
+  );
+  check(
+    !customerIcsText.includes(`mailto:${BOOKING_INTERNAL_TO}`),
+    'with the office address nowhere in it — a defaulted audience is what puts it there',
+  );
+  // The office's contact line is the customer's phone number. In the
+  // customer's own copy that reads as a mistake, and it is the half of the
+  // audience swap that breaks nothing if it is forgotten.
+  check(
+    !customerIcsText.includes(INSURANCE.phone),
+    "the customer's own phone number is not the description of their own event",
+  );
+  check(
+    customerIcsText.includes(SUPPORT_PHONE),
+    'the description carries SUPPORT_PHONE — the number to call',
+  );
+  check(
+    customer?.text.includes('calendar invite is attached') ?? false,
+    'and the copy mentions the attachment rather than leaving a bare .ics',
+  );
 
   // The stricter-than-email rule, checked on the ATTACHMENT of the message
   // whose BODY legitimately carries both identifiers. This is the one place
@@ -335,9 +379,16 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
   const ok = await sendBookingNotifications(plan, { send: sent });
   check(ok.customer === 'sent' && ok.internal === 'sent', 'both send → both sent');
 
-  // The attachment survives the send path, and only on the office message.
-  // Asserted here as well as on the plan because this is the seam every real
-  // send goes through, and a `deliver` that rebuilt its message would drop it.
+  // The attachments survive the send path. Asserted here as well as on the plan
+  // because this is the seam every real send goes through, and a `deliver` that
+  // rebuilt its message would drop them.
+  //
+  // FLIPPED IN BK-16, NOT DELETED. This counted ONE attached message and
+  // asserted it was the office one — true until the customer got their own
+  // invite. Inverting it rather than dropping it keeps the property that
+  // matters: the count is exact, and each message carries the copy addressed to
+  // ITS OWN recipient. A builder that attached the office ICS to both would
+  // satisfy a bare "two messages carry attachments".
   const delivered: Message[] = [];
   await sendBookingNotifications(plan, {
     send: async (m) => {
@@ -345,13 +396,27 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
       return { ok: true };
     },
   });
+  const attached = delivered.filter((m) => (m.attachments?.length ?? 0) > 0);
   check(
-    delivered.filter((m) => (m.attachments?.length ?? 0) > 0).length === 1,
-    `exactly one delivered message carries an attachment, got ${delivered.filter((m) => (m.attachments?.length ?? 0) > 0).length}`,
+    attached.length === 2,
+    `both delivered messages carry an attachment, got ${attached.length} of ${delivered.length}`,
+  );
+  const officeCopy = delivered.find((m) => m.to === BOOKING_INTERNAL_TO);
+  const customerCopy = delivered.find((m) => m.to === INSURANCE.email);
+  check(officeCopy !== undefined && customerCopy !== undefined, 'one to each recipient');
+  const attendeeOf = (m: Message | undefined) =>
+    (m?.attachments?.[0]?.content ?? '').replace(/\r\n /g, '').match(/ATTENDEE[^\r\n]*/)?.[0] ?? '';
+  check(
+    attendeeOf(officeCopy).endsWith(`mailto:${BOOKING_INTERNAL_TO}`),
+    `the office's copy names the office, got ${attendeeOf(officeCopy)}`,
   );
   check(
-    delivered.find((m) => (m.attachments?.length ?? 0) > 0)?.to === BOOKING_INTERNAL_TO,
-    'and it is the office one',
+    attendeeOf(customerCopy).endsWith(`mailto:${INSURANCE.email}`),
+    `and the customer's names the customer, got ${attendeeOf(customerCopy)}`,
+  );
+  check(
+    attendeeOf(officeCopy) !== attendeeOf(customerCopy),
+    'which is to say the two are not the same artifact sent twice',
   );
 
   const bad = await sendBookingNotifications(plan, { send: failed });

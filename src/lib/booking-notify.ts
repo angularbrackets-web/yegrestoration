@@ -25,7 +25,7 @@
 import { Resend } from 'resend';
 
 import type { Message, NotificationPlan } from './booking-email';
-import { inviteIdempotencyPrefix, type IcsKind } from './booking-ics';
+import { inviteIdempotencyPrefix, type IcsAudienceName, type IcsKind } from './booking-ics';
 import { readEnv } from './env';
 
 /** Per message: sent, deliberately not sent, or attempted and failed. */
@@ -268,14 +268,28 @@ export async function sendCustomerConfirmation(
  * three. Same contract as the rest of the module: it never throws. It runs
  * after the row exists or after the status has already changed, and neither may
  * be turned into a 500 by a calendar artifact.
+ *
+ * **The mute line names the kind and the audience, and that is a verification
+ * requirement rather than nicer logging** (BK-16 plan review). It used to name
+ * only the booking id. Under `BOOKING_NOTIFY_DISABLED` — which is how
+ * `verify-booking-admin-db.ts` drives the routes, because the mute silences
+ * injected seams too — that line is the ONLY evidence a route reached a send at
+ * all. A boundary crossing now owes two sends, office and customer, and two
+ * identical lines cannot tell "both went" from "the office one went twice with
+ * the customer half never wired". Naming the audience makes them
+ * distinguishable, which is what the route arms assert.
  */
 export async function sendCalendarInvite(
   message: Message,
-  keyParts: { id: number; kind: IcsKind; now: Date },
+  keyParts: { id: number; kind: IcsKind; now: Date; audience: IcsAudienceName },
   deps: NotifyDeps = {},
 ): Promise<SendOutcome> {
+  const label = `calendar ${keyParts.kind} (${keyParts.audience})`;
+
   if (mailDisabled()) {
-    console.error(`${DISABLE_FLAG} is set — no calendar invite for booking ${keyParts.id}.`);
+    console.error(
+      `${DISABLE_FLAG} is set — no ${label} for booking ${keyParts.id}.`,
+    );
     return 'skipped';
   }
 
@@ -284,16 +298,19 @@ export async function sendCalendarInvite(
     const apiKey = readEnv('RESEND_API_KEY');
     if (!apiKey) {
       // Before `new Resend()`, which throws on a falsy key.
-      console.error('RESEND_API_KEY is not configured — the calendar invite was not sent.');
+      console.error(`RESEND_API_KEY is not configured — the ${label} was not sent.`);
       return 'failed';
     }
+    // No audience in the prefix: `createResendSender` appends `:<to>`, and the
+    // office and customer copies of one transition go to different addresses.
+    // See `inviteIdempotencyPrefix`.
     send = createResendSender(
       apiKey,
       inviteIdempotencyPrefix(keyParts.id, keyParts.kind, keyParts.now),
     );
   }
 
-  return deliver(send, message, `calendar ${keyParts.kind}`, keyParts.id);
+  return deliver(send, message, label, keyParts.id);
 }
 
 /**
