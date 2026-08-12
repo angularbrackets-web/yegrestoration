@@ -444,6 +444,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | not started |
 | BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | not started |
 | BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | not started |
+| BK-21 | Internal email Reply-To fallback — replies to noreply@ bounce (found 2026-08-12: office reply to a no-email booking's notice bounced 550) | Light | draft — after BK-16 lands |
 
 BK-14: client-requested 2026-08-11. Level 1 of three offered: invites, not API
 sync (level 2, the recorded upgrade path) and not calendar-blocks-availability
