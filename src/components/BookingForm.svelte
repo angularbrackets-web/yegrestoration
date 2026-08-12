@@ -509,7 +509,7 @@
 
       <!-- ------------------------------------------------------------ Step 1 -->
       {#if step === 1}
-        <fieldset class="border-0 p-0 m-0">
+        <fieldset class="border-0 p-0 m-0 min-w-0">
           <legend class="font-display font-bold text-xl text-yeg-text mb-1">
             When should we come out?
           </legend>
@@ -603,7 +603,7 @@
 
       <!-- ------------------------------------------------------------ Step 2 -->
       {:else if step === 2}
-        <fieldset class="border-0 p-0 m-0">
+        <fieldset class="border-0 p-0 m-0 min-w-0">
           <legend class="font-display font-bold text-xl text-yeg-text mb-1">Where and what</legend>
           <p class="text-sm text-yeg-text-secondary mb-5">
             {chosenSlot ? chosenSlot.label : 'Appointment time selected.'}
@@ -691,7 +691,7 @@
               {#if errors.description}<p class="text-red-500 text-xs mt-1">{errors.description}</p>{/if}
             </div>
 
-            <fieldset class="border-0 p-0 m-0">
+            <fieldset class="border-0 p-0 m-0 min-w-0">
               <legend class={LABEL_CLASS}>How is this being paid for?</legend>
               <div class="grid grid-cols-2 gap-3">
                 <label class="flex items-center gap-2 border rounded-lg px-4 py-3 cursor-pointer"
@@ -752,7 +752,7 @@
 
       <!-- ------------------------------------------------------------ Step 3 -->
       {:else}
-        <fieldset class="border-0 p-0 m-0">
+        <fieldset class="border-0 p-0 m-0 min-w-0">
           <legend class="font-display font-bold text-xl text-yeg-text mb-1">Photos and confirm</legend>
           <p class="text-sm text-yeg-text-secondary mb-5">
             Photos are optional, and they help us arrive with the right equipment.

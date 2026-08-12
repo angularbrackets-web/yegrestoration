@@ -430,10 +430,24 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | ✅ committed |
+| BK-15 | Booking widget overflow — fieldset `min-content` default escapes the card | Light | ✅ committed |
+| BK-16 | Customer cancellation email on the cancelled boundary (+ ICS CANCEL attached) | Reviewed | not started |
+| BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | not started |
+| BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | not started |
+| BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | not started |
 
-Client-requested 2026-08-11. Level 1 of three offered: invites, not API sync
-(level 2, the recorded upgrade path) and not calendar-blocks-availability
+BK-14: client-requested 2026-08-11. Level 1 of three offered: invites, not API
+sync (level 2, the recorded upgrade path) and not calendar-blocks-availability
 (level 3, declined — blackout dates cover it for one crew).
+
+BK-15–19: client-approved 2026-08-12 from his BK-14 post-deploy test pass, in
+this order. Decisions recorded from that conversation: **the customer gets a
+cancellation email when the row has an email address** (phone-in cancellation
+stays the only way to cancel — the email is written confirmation of it, and
+it carries the calendar CANCEL so a customer who added the invite gets their
+calendar cleared too); the widget work is split hotfix-now (BK-15) /
+redesign-later (BK-18); the admin calendar view is approved but sequenced
+last.
 
 ## Open questions for the client
 
