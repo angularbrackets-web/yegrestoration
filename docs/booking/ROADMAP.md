@@ -431,7 +431,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | --- | --- | --- | --- |
 | BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | ✅ committed |
 | BK-15 | Booking widget overflow — fieldset `min-content` default escapes the card | Light | ✅ committed |
-| BK-16 | Customer cancellation email on the cancelled boundary (+ ICS CANCEL attached) | Reviewed | not started |
+| BK-16 | Customer calendar lifecycle — invite on confirmation; cancellation/restore email + ICS on the boundary | Reviewed | plan-reviewed |
 | BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | not started |
 | BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | not started |
 | BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | not started |
