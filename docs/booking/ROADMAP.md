@@ -398,6 +398,16 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | BK-10 | Cutover: booking = the quote path; form demoted to messages (client-amended 2026-08-11 — `leads` stays writable); fix the 308s | Reviewed | ✅ committed |
 | BK-11 | Production launch checks — env vars, cron secret, tracking | Light | not started |
 
+### P6 — Post-launch enhancements
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | plan-reviewed |
+
+Client-requested 2026-08-11. Level 1 of three offered: invites, not API sync
+(level 2, the recorded upgrade path) and not calendar-blocks-availability
+(level 3, declined — blackout dates cover it for one crew).
+
 ## Open questions for the client
 
 All three were answered on 2026-08-08. Kept here as decisions rather than
