@@ -8,7 +8,7 @@ import {
   bookedQueryRange,
   isSlotBookable,
 } from '../../../lib/booking-availability';
-import { insertBooking, stampNotifications } from '../../../lib/booking-commit';
+import { countUnclaimedFiles, insertBooking, stampNotifications } from '../../../lib/booking-commit';
 import { planBookingNotifications } from '../../../lib/booking-email';
 import { notifyAndStamp, withDeadline } from '../../../lib/booking-notify';
 import { parseBookingPayload, type BookingPayload } from '../../../lib/booking-payload';
@@ -63,6 +63,10 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
 
   const parsed = parseBookingPayload(body, {
     allowedServices: new Set(Object.keys(SERVICE_LABELS)),
+    // This route IS the public form. The admin path reaches the same parser
+    // through `parseAdminEntry`, which supplies `'admin'` itself — see the
+    // exemption note there.
+    entry: 'public',
   });
   if (!parsed.ok) {
     return json({ error: 'Please check the highlighted fields.', fields: parsed.errors }, 422);
@@ -92,7 +96,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     const slots = bookedQueryRange(now);
     const days = blackoutQueryRange(now);
 
-    const [bookedRows, blackoutRows] = await Promise.all([
+    const [bookedRows, blackoutRows, attachedFiles] = await Promise.all([
       sql`
         SELECT slot_start
         FROM appointments
@@ -105,7 +109,40 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
         FROM blackout_dates
         WHERE day BETWEEN ${days.from} AND ${days.to}
       `,
+      // Folded into the existing round trip rather than awaited after it: this
+      // path already runs a rate-limit query, two availability queries and the
+      // insert inside POST_COMMIT_BUDGET_MS, and a serial fourth would be pure
+      // added latency on the happy path.
+      //
+      // No token means no draft, which means no files — the common case, since
+      // the island only sends a token once it has an attachment. Resolving 0
+      // without a query is not an optimisation, it is the only correct answer:
+      // there is no draft id to count against.
+      draftId === null ? Promise.resolve(0) : countUnclaimedFiles(sql, draftId),
     ]);
+
+    // BK-22: at least one photo or video, required on the public form (client
+    // decision, ROADMAP P7). Checked BEFORE `isSlotBookable` so that a visitor
+    // who attached nothing is told to attach something, rather than being sent
+    // back to the calendar to re-pick a time that was never the problem.
+    //
+    // Same 422 envelope as a parse error, so BK-03's island routes it through
+    // the field-error path it already has — `FIELD_STEPS.files` sends them to
+    // step 3 — instead of needing a new branch for a new shape.
+    if (attachedFiles === 0) {
+      return json(
+        {
+          error: 'Please check the highlighted fields.',
+          fields: [
+            {
+              field: 'files',
+              message: 'Add at least one photo or video of the damage.',
+            },
+          ],
+        },
+        422,
+      );
+    }
 
     const bookable = isSlotBookable(payload.slotStart, {
       now,

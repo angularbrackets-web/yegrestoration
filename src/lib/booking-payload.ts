@@ -85,9 +85,14 @@ export function isPlausiblePhone(value: string): boolean {
 }
 
 /**
- * Deliberately loose. A stricter pattern rejects valid addresses, and email is
- * optional here anyway — the phone number is how this business actually calls
- * people back.
+ * Deliberately loose. A stricter pattern rejects valid addresses that a typo
+ * check would never have caught anyway, and this predicate decides *shape*, not
+ * presence — whether an address is required at all is `entry`'s business, below.
+ *
+ * Presence matters more than it used to. Since BK-22 a public booking cannot be
+ * made without an email (client decision, ROADMAP P7), so this runs on a field
+ * the visitor is now compelled to fill; a false rejection here is a customer
+ * turned away rather than a nicety declined. Loose stays loose.
  */
 export function isPlausibleEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= MAX_FIELD_LENGTHS.email;
@@ -96,6 +101,31 @@ export function isPlausibleEmail(value: string): boolean {
 export type ParseOptions = {
   /** Valid `service` values. The endpoint passes the keys of `SERVICE_LABELS`. */
   allowedServices: ReadonlySet<string>;
+  /**
+   * Which door this submission came through. Public bookings must carry an
+   * email; admin entries need not — the office types what the customer gave
+   * them over the phone, and that is often a number and nothing else (client
+   * exemption, ROADMAP P7: "if we enter ourselves … it won't go to review
+   * process").
+   *
+   * A discriminator rather than an `isAdmin`/`requireEmail` boolean, for two
+   * reasons that are worth not rediscovering. A boolean's permissive value is
+   * `false`, so every way of producing `undefined` — a `Partial`, an
+   * `as ParseOptions` cast, a spread from a stale object — **fails open** and
+   * silently exempts the public form, which is the one path that must not be
+   * exempt. And it is non-optional so that adding it broke all six construction
+   * sites at `astro check`, which is the only mechanism that makes "every caller
+   * answered this question" true rather than hoped.
+   *
+   * Note this does NOT contradict `booking-admin-entry.ts`'s rule against
+   * threading flags through shared predicates. That rule is about the slot
+   * bypass, a *whole predicate* (`isSlotBookable`) admin skips by not calling
+   * it. Email is one field inside a parse both paths need in full, so there is
+   * nothing structural to skip. What keeps the rule's intent is that the public
+   * path cannot name the exemption: `parseAdminEntry` hard-codes `'admin'`
+   * itself and its signature forbids a caller supplying one.
+   */
+  entry: 'public' | 'admin';
 };
 
 export function parseBookingPayload(input: unknown, options: ParseOptions): ParseResult {
@@ -137,8 +167,17 @@ export function parseBookingPayload(input: unknown, options: ParseOptions): Pars
   const phone = required('phone', 'Phone number');
   if (phone && !isPlausiblePhone(phone)) add('phone', 'Enter a 10-digit phone number.');
 
+  // Email is required on the public form and optional for admin entry (see
+  // `ParseOptions.entry`). It stays parsed by `optional` rather than `required`
+  // so that the value handed to the payload is `null` and never `''` —
+  // `required` returns an empty string on failure, and `BookingPayload.email`
+  // is `string | null`. The presence test re-reads `raw.email` instead of
+  // testing the parsed value on purpose: a too-long address parses to `null`
+  // having already reported "too long", and reporting "required" beside it
+  // would tell the visitor to fill a field they just filled.
   const email = optional('email', 'Email');
   if (email && !isPlausibleEmail(email)) add('email', 'Enter a valid email address.');
+  if (options.entry === 'public' && str(raw.email) === null) add('email', 'Email is required.');
 
   const service = required('service', 'Service');
   if (service && !options.allowedServices.has(service)) {

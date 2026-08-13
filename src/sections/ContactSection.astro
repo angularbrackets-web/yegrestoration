@@ -260,7 +260,16 @@ const { showForm = false } = Astro.props;
               </p>
               <ul class="space-y-2 mb-8 text-sm text-yeg-text-secondary">
                 <li>Instant confirmation — no waiting for a callback</li>
-                <li>Photos optional, and they help us arrive ready</li>
+                <!--
+                  BK-22 made a photo mandatory, so the old "photos optional"
+                  line went false. It is customer-facing copy about the booking
+                  form that lives outside the island, and no gate reads it —
+                  `verify-cutover.ts` sweeps CTAs and paths, not claims — so it
+                  is only ever as true as the last person to remember it.
+                  The line above it ("Instant confirmation") goes false with
+                  BK-23 and is that ticket's to rewrite.
+                -->
+                <li>Send a photo or two — we arrive with the right equipment</li>
                 <li>Insurance claim? We document it the way your adjuster needs</li>
               </ul>
               <a href="/book/" class="cta-primary w-full justify-center">

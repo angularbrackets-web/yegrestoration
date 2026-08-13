@@ -51,6 +51,29 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **A Blob/upload-token failure now kills the booking with no phone fallback
+  and no funnel event.** BK-22's Q2 names two live causes of "photos are
+  impossible to attach": the draft route's 429, and *a Blob/env
+  misconfiguration*. Only the first reaches `failPhotoUpload()` — the branch
+  that says "call or text us and we'll book it for you" and raises
+  `booking_photo_upload_unavailable` — because Scope 10 scoped the remedy to
+  `mintDraft`, and `/api/booking/draft/` never touches Blob (it rate-limits and
+  signs a token, nothing else). A Blob misconfiguration therefore fails one
+  layer down, at `/api/booking/upload-token/` or the PUT, where the island's
+  only response is `entry.status = 'failed'` with "That upload didn't finish."
+  The client counts `{done, failed}`, so step 3 lets the visitor submit; the
+  server counts `appointment_files` rows, of which there are none (the row is
+  written at token-mint time, and the mint is what failed); the 422 sends them
+  back to step 3 reading "Add at least one photo or video" beside an attachment
+  they can see. Retry is the only exit and it fails again if the cause is the
+  deploy. **Severity: medium** — it needs a broken deploy to trigger, but when
+  it triggers the whole public booking funnel is dead *and* the one event that
+  would reveal it does not fire, so the client's "did the new filter cost me
+  jobs" question is unanswerable in exactly the case it matters. **Owner:
+  none** — a small follow-up (surface the hard notice + event from the upload
+  path too, not just the mint path). Found during BK-22's implementation
+  review, 2026-08-13; not fixed inline because the implementation matches the
+  approved Scope and the gap is in the ticket.
 - **The `Photos/video` count in the internal email does not distinguish
   uploaded from pending.** `booking-email.ts:358` and `:389` print a bare
   number; the admin detail page *does* distinguish
@@ -68,7 +91,10 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   for `DRAFT_TOKEN_TTL_HOURS = 6`. **Severity: low** — the per-draft caps bound
   the damage. **Owner: none.** Recorded because BK-22 raises the value of a
   draft token by making one mandatory to book, and any raise of
-  `DRAFT_RATE_LIMIT_PER_HOUR` scales this linearly.
+  `DRAFT_RATE_LIMIT_PER_HOUR` scales this linearly. **That raise has now
+  landed** — BK-22 took it 20 → 50 (user decision), so the ceiling this note
+  describes is 50 × 10 unthrottled `onBeforeGenerateToken` calls per IP per
+  hour. Severity unchanged: still low, still bounded by the per-draft caps.
 - **`verify-booking-commit.ts:573-586` ("Database failure") reaches its 500
   through a different path than its comment claims.** `consumeRateLimit`
   (`create.ts:49`) is awaited **outside** the route's `try` (which opens at
@@ -565,7 +591,7 @@ marked **proposed**.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | approved — plan-reviewed, ready to implement |
+| BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | **committed** 2026-08-13 — implementation review passed (no blockers; 3 nits, 1 Known trap) |
 | BK-23 | Review lifecycle core — migration (pending/declined + index), public bookings land pending, received-your-info page + email (no invite), admin Approve/Decline, approve → BK-16's confirmation+invites, decline → at-capacity email, 24h minimum notice | Reviewed | not started |
 | BK-24 | One-click Approve/Decline from the internal email — signed tokens, POST-confirm page (no GET mutation), expiry, idempotent re-use | Reviewed | not started |
 | BK-25 | Pending timers — office reminder at +24h unactioned, auto-decline at slot−24h (cron) | Reviewed | not started |

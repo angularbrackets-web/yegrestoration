@@ -3,11 +3,20 @@
 //   npx tsx scripts/verify-booking-payload.ts
 //
 // Exits non-zero on the first failed assertion.
-import { parseBookingPayload, MAX_FIELD_LENGTHS } from '../src/lib/booking-payload';
+import { parseBookingPayload, MAX_FIELD_LENGTHS, type ParseOptions } from '../src/lib/booking-payload';
 import { slotStartsForDate, localDateKey, addDays } from '../src/lib/booking-time';
 
 const SERVICES = new Set(['water', 'fire', 'mold', 'other']);
-const opts = { allowedServices: SERVICES };
+
+/**
+ * The public door. Every pre-existing case in this file runs through it, which
+ * is the right default: it is the stricter of the two, so a case that passes
+ * here passes everywhere.
+ */
+const opts: ParseOptions = { allowedServices: SERVICES, entry: 'public' };
+
+/** The office door — BK-22's exemption. Used only by the arms that test it. */
+const adminOpts: ParseOptions = { allowedServices: SERVICES, entry: 'admin' };
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -36,6 +45,12 @@ function base(overrides: Record<string, unknown> = {}) {
 
 function errorsFor(input: unknown): string[] {
   const r = parseBookingPayload(input, opts);
+  return r.ok ? [] : r.errors.map((e) => e.field);
+}
+
+/** The same, through the office door. Only BK-22's exemption arms use it. */
+function adminErrorsFor(input: unknown): string[] {
+  const r = parseBookingPayload(input, adminOpts);
   return r.ok ? [] : r.errors.map((e) => e.field);
 }
 
@@ -68,7 +83,20 @@ console.log('\nRequired fields and shapes');
   check(errorsFor(base({ phone: '123' })).includes('phone'), 'a short phone must be rejected');
   check(errorsFor(base({ phone: '1-780-555-0134' })).length === 0, '11-digit phone must pass');
   check(errorsFor(base({ email: 'not-an-email' })).includes('email'), 'bad email must be rejected');
-  check(errorsFor(base({ email: undefined })).length === 0, 'email must be optional');
+  // BK-22 inverted this: it used to read "email must be optional". Public
+  // bookings now require one; the admin exemption is asserted in its own block
+  // below, and the two arms together are what pin the discriminator's polarity.
+  check(errorsFor(base({ email: undefined })).includes('email'), 'email must be required');
+  check(errorsFor(base({ email: '   ' })).includes('email'), 'email must reject whitespace');
+  // An over-long address reports "too long" and must NOT also report
+  // "required" — the parsed value is null in both cases, which is exactly the
+  // trap the presence test avoids by re-reading the raw field.
+  check(
+    errorsFor(base({ email: `${'x'.repeat(MAX_FIELD_LENGTHS.email)}@example.com` })).filter(
+      (f) => f === 'email',
+    ).length === 1,
+    'an over-long email must report exactly one error, not two',
+  );
   check(errorsFor(base({ service: 'nope' })).includes('service'), 'unknown service must be rejected');
   check(
     errorsFor(base({ payment_route: 'cash' })).includes('payment_route'),
@@ -80,6 +108,50 @@ console.log('\nRequired fields and shapes');
     'over-long description must be rejected',
   );
   console.log('  required, length, and format rules hold');
+}
+
+// ---------------------------------------------------------------------------
+console.log("\nBK-22 — the admin exemption and its polarity");
+// ---------------------------------------------------------------------------
+{
+  // These two are a PAIR, and the pairing is the point. Breaking the email
+  // requirement itself turns both of them red at once and proves nothing about
+  // which way `entry` points; only a discriminator wired the right way round
+  // satisfies both, because they demand opposite outcomes from one input.
+  check(
+    errorsFor(base({ email: undefined })).includes('email'),
+    'public: an absent email must be rejected',
+  );
+  check(
+    adminErrorsFor(base({ email: undefined })).length === 0,
+    'admin: an absent email must be accepted (the client exemption)',
+  );
+
+  // The exemption is about PRESENCE only. A malformed address is still
+  // malformed however it was typed, and the office typos as readily as anyone.
+  check(
+    adminErrorsFor(base({ email: 'not-an-email' })).includes('email'),
+    'admin: a malformed email must still be rejected',
+  );
+
+  // Nothing else moves with the door. If it did, the discriminator would be
+  // doing more than it says.
+  check(adminErrorsFor(base()).length === 0, 'admin: a complete entry parses');
+  check(adminErrorsFor(base({ name: undefined })).includes('name'), 'admin: name is still required');
+  check(
+    adminErrorsFor(base({ phone: '123' })).includes('phone'),
+    'admin: the phone rule is unchanged',
+  );
+
+  // `null`, never `''`. `BookingPayload.email` is `string | null`, and reusing
+  // the `required()` helper for this field would have written an empty string
+  // into a type that does not admit one.
+  const exempt = parseBookingPayload(base({ email: undefined }), adminOpts);
+  check(
+    exempt.ok && exempt.payload.email === null,
+    'admin: an absent email parses to null, never an empty string',
+  );
+  console.log('  public requires an email, admin does not, and nothing else moves');
 }
 
 // ---------------------------------------------------------------------------

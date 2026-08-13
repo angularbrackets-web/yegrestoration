@@ -52,18 +52,32 @@ export function loadConfirmation(): Confirmation | null {
 }
 
 /**
- * The two ways the booking funnel can fail before a booking exists.
+ * The ways the booking funnel can fail before a booking exists.
  *
  * Added by BK-10 so a post-cutover CPA regression is not a black box: with the
  * form demoted, `/book/` is the only quote path, and "availability would not
- * load" or "every day is full" are the two states that lose a visitor without
- * leaving any other trace. Neither event carries parameters — there is no PII
- * here and nothing to key on beyond the count.
+ * load" or "every day is full" are two states that lose a visitor without
+ * leaving any other trace. No event here carries parameters — there is no PII
+ * and nothing to key on beyond the count.
+ *
+ * `booking_photo_upload_unavailable` is BK-22's addition and the same argument
+ * one ticket later: photos became mandatory, so a visitor who cannot reach the
+ * upload endpoint can no longer book at all, and the client will ask whether
+ * his new filter cost him real jobs. It fires only on the **hard** failure —
+ * not on the 429, which is retryable and self-heals on the next tap.
+ *
+ * **All of these count attempts, not visitors** (ROADMAP, Known traps). They
+ * re-fire on every retry within one session by design; reading a count as "N
+ * people were turned away" overstates it. The names say `_error` /
+ * `_unavailable` — a condition — rather than anything that reads as a headcount.
  *
  * GA4 only, deliberately: these are diagnostics, not conversions, and Google
  * Ads has no business bidding on them.
  */
-export type BookingFunnelEvent = 'booking_availability_error' | 'booking_availability_empty';
+export type BookingFunnelEvent =
+  | 'booking_availability_error'
+  | 'booking_availability_empty'
+  | 'booking_photo_upload_unavailable';
 
 export function reportBookingFunnelEvent(event: BookingFunnelEvent): void {
   const gtag = window.gtag;

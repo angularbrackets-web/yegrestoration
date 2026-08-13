@@ -23,7 +23,7 @@ import {
   validateStep,
   type FormValues,
 } from '../src/lib/booking-form';
-import { parseBookingPayload } from '../src/lib/booking-payload';
+import { parseBookingPayload, type ParseOptions } from '../src/lib/booking-payload';
 import { slotStartsForDate, localDateKey, addDays } from '../src/lib/booking-time';
 
 const SERVICES = new Set([
@@ -55,8 +55,14 @@ function values(overrides: Partial<FormValues> = {}): FormValues {
   };
 }
 
-function fieldsFor(step: 1 | 2 | 3, v: FormValues): string[] {
-  return validateStep(step, v, SERVICES).map((e) => e.field);
+/**
+ * `attachments` is BK-22's count of files in `{done, failed}`. It defaults to 0
+ * — nothing attached, the state a visitor actually arrives at step 3 in — so
+ * that a step-3 case which forgets to say otherwise fails closed rather than
+ * inheriting a pass. Steps 1 and 2 ignore it.
+ */
+function fieldsFor(step: 1 | 2 | 3, v: FormValues, attachments = 0): string[] {
+  return validateStep(step, v, SERVICES, attachments).map((e) => e.field);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +91,11 @@ console.log('Step validation');
   check(fieldsFor(2, values({ phone: '123' })).includes('phone'), 'a short phone is rejected');
   check(fieldsFor(2, values({ phone: '1-780-555-0134' })).length === 0, '11-digit phone passes');
   check(fieldsFor(2, values({ email: 'nope' })).includes('email'), 'a bad email is rejected');
-  check(fieldsFor(2, values({ email: '' })).length === 0, 'email is optional');
+  // Required since BK-22 — this assertion used to say the opposite ("email is
+  // optional"), and it is inverted rather than deleted so the reversal is
+  // legible in the diff.
+  check(fieldsFor(2, values({ email: '' })).includes('email'), 'email must be required');
+  check(fieldsFor(2, values({ email: '   ' })).includes('email'), 'email must reject whitespace');
 
   // Optional fields are optional on the private route; required on insurance.
   check(
@@ -101,10 +111,34 @@ console.log('Step validation');
     'insurer_name must not be required on the private route',
   );
 
-  check(fieldsFor(3, values()).length === 0, 'step 3 must never block on consent');
+  // CASL: consent gates reminders, not the appointment, so it must never be
+  // why a booking cannot be made. That used to be expressible as "step 3
+  // returns nothing at all", which stopped being true when BK-22 gave step 3 a
+  // requirement of its own. **Rewritten rather than deleted** — the legal point
+  // is the reason these lines exist, and it outlives the shape that carried it.
   check(
-    fieldsFor(3, values({ smsConsent: false })).length === 0,
+    fieldsFor(3, values({ smsConsent: false }), 1).length === 0,
     'a booking without consent must still be submittable',
+  );
+  check(
+    fieldsFor(3, values({ smsConsent: true }), 1).length === 0,
+    'and so must one with consent',
+  );
+  // The strongest form, and the one that survives whatever else step 3 grows:
+  // even when step 3 *does* block, consent is never the field it blocks on.
+  check(
+    !fieldsFor(3, values({ smsConsent: false }), 0).includes('sms_consent'),
+    'consent must never be the reason step 3 blocks, even when step 3 blocks',
+  );
+
+  // BK-22's file requirement, both directions.
+  check(
+    fieldsFor(3, values(), 0).includes('files'),
+    'step 3 must require at least one photo or video',
+  );
+  check(
+    fieldsFor(3, values(), 1).length === 0,
+    'one attachment must satisfy step 3',
   );
   console.log('  required, optional, and conditional rules hold');
 }
@@ -122,6 +156,11 @@ console.log('\nStep routing for server field errors');
     ]) === 1,
     'the earliest step wins when several are in error',
   );
+  // BK-22: the server's file rejection names a field no input owns. Without a
+  // FIELD_STEPS entry it routes nowhere, `mapCommitResponse` falls through to
+  // the generic form error, and the visitor reads "please check your details"
+  // with nothing highlighted and no way to learn what is wrong.
+  check(stepForErrors([{ field: 'files', message: 'x' }]) === 3, 'files routes to step 3');
   check(stepForErrors([{ field: '_', message: 'x' }]) === null, 'an unmapped field routes nowhere');
   check(stepForErrors([]) === null, 'no errors routes nowhere');
   console.log('  earliest mappable step wins, unmapped routes to null');
@@ -184,7 +223,10 @@ console.log('\nAssembled payloads survive the real server validator');
   // The strongest available check without a database: run what the island would
   // POST through the exact function the endpoint runs. A client that assembles
   // a shape the server rejects is the failure this whole module exists to stop.
-  const opts = { allowedServices: SERVICES };
+  // `entry: 'public'` because that is what the island's POST hits — this block
+  // exists to prove the client assembles a shape the *public* endpoint accepts,
+  // and the admin door is a weaker test that would not catch a missing email.
+  const opts: ParseOptions = { allowedServices: SERVICES, entry: 'public' };
 
   const plain = parseBookingPayload(assembleBookingPayload(values(), null), opts);
   check(plain.ok, `a private-route payload must parse server-side (got ${JSON.stringify(plain.ok ? [] : plain.errors)})`);

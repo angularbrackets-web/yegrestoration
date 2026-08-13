@@ -136,6 +136,22 @@
   const busy = $derived(submitting || leaving || uploadsInFlight > 0);
 
   /**
+   * What satisfies BK-22's "at least one photo or video" on the client.
+   *
+   * `done` **and** `failed`, never `done` alone — Q3 on the ticket, and the
+   * reason is `skipUpload`: a stalled 100 MB video on bad wifi is the case this
+   * form was built to survive, and Skip marks the attachment `failed`. Counting
+   * only completed uploads would let the visitor out of the stall and into a
+   * step that will not release them, for a booking **the server would have
+   * accepted** — the `appointment_files` row exists from token-mint time,
+   * before any bytes. Uploads still in flight are excluded, and cost nothing:
+   * `busy` already disables submit while `uploadsInFlight > 0`.
+   */
+  const attachmentCount = $derived(
+    attachments.filter((a) => a.status === 'done' || a.status === 'failed').length,
+  );
+
+  /**
    * Every day in the window is full — a different state from "nothing open on
    * the day you clicked", and the one that used to render as "try another day"
    * when there was no other day to try.
@@ -216,7 +232,7 @@
   }
 
   function nextStep() {
-    const found = validateStep(step, values, SERVICE_IDS);
+    const found = validateStep(step, values, SERVICE_IDS, attachmentCount);
     if (found.length > 0) {
       applyErrors(found);
       return;
@@ -232,9 +248,25 @@
   /**
    * Mint the session's draft, or report why photos are unavailable.
    *
-   * A failure here must never block the booking — `draft.ts` answers 429 once an
-   * IP has minted 20 drafts in an hour, which is one office behind one NAT, and
-   * an appointment without photos is still an appointment.
+   * **This used to say a failure here must never block the booking, because an
+   * appointment without photos is still an appointment. Since BK-22 that is no
+   * longer true**: a photo is required, so no draft means no booking, and this
+   * function's failure message is the last thing a losable customer reads.
+   * That is why it says two different things rather than one.
+   *
+   * - **429 — retryable, and only retryable.** `draft.ts` throttles per IP per
+   *   hour, and `createDraftSession` does not cache a failed mint, so the next
+   *   tap genuinely can succeed. Telling this visitor to abandon the form and
+   *   phone instead would be wrong; they are 30 seconds from booking.
+   * - **Anything else — hard.** Photos cannot be attached and therefore the
+   *   booking cannot be made here, so the only honest thing to offer is the
+   *   phone. That fallback is real rather than a brush-off: the office takes it
+   *   as an admin entry, which is exempt from this requirement by the client's
+   *   own instruction, and they ask for the pictures by text afterwards.
+   *
+   * Do NOT add a "couldn't attach? book anyway" escape. It reopens precisely
+   * the hole the client asked to close, and it is reachable by anyone who
+   * blocks one request. Settled on the ticket; not to be relitigated here.
    */
   async function mintDraft(): Promise<Draft | null> {
     try {
@@ -252,14 +284,39 @@
         | { draftId?: unknown; draftToken?: unknown }
         | null;
       if (!res.ok || typeof body?.draftId !== 'string' || typeof body?.draftToken !== 'string') {
-        photoNotice = `Photos can't be attached right now. You can still book — or call us at ${PHONE_DISPLAY}.`;
+        // A 429 is the throttle, not a breakage. Note this branch is also
+        // reached by a 200 carrying a malformed body, which is a hard failure —
+        // hence the status test rather than `!res.ok`.
+        if (res.status === 429) {
+          photoNotice = RETRY_PHOTO_NOTICE;
+          return null;
+        }
+        failPhotoUpload();
         return null;
       }
       return { draftId: body.draftId, draftToken: body.draftToken };
     } catch {
-      photoNotice = `Photos can't be attached right now. You can still book — or call us at ${PHONE_DISPLAY}.`;
+      // Network-level: no status to read, so it can only be treated as hard.
+      failPhotoUpload();
       return null;
     }
+  }
+
+  const RETRY_PHOTO_NOTICE =
+    'Too many people on this connection right now — wait a moment and try again.';
+
+  /**
+   * The hard branch: say to call, and count it.
+   *
+   * The event is a diagnostic, not a conversion, and it counts **attempts, not
+   * visitors** — `createDraftSession` retries on the next file selection, so one
+   * stuck person can raise it several times. That is the same reading hazard the
+   * ROADMAP records for the availability events, and the reason the name
+   * describes a condition rather than a headcount.
+   */
+  function failPhotoUpload() {
+    photoNotice = `Photos can't be attached right now, and a photo is required to book online. Please call or text us at ${PHONE_DISPLAY} and we'll book it for you.`;
+    reportBookingFunnelEvent('booking_photo_upload_unavailable');
   }
 
   async function onFilesChosen(event: Event) {
@@ -368,11 +425,13 @@
     if (leaving) return;
     formMessage = '';
 
-    const found = ([1, 2, 3] as Step[]).flatMap((s) => validateStep(s, values, SERVICE_IDS));
+    const found = ([1, 2, 3] as Step[]).flatMap((s) =>
+      validateStep(s, values, SERVICE_IDS, attachmentCount),
+    );
     if (found.length > 0) {
       applyErrors(found);
       const target = ([1, 2, 3] as Step[]).find(
-        (s) => validateStep(s, values, SERVICE_IDS).length > 0,
+        (s) => validateStep(s, values, SERVICE_IDS, attachmentCount).length > 0,
       );
       if (target) step = target;
       return;
@@ -627,7 +686,7 @@
                 {#if errors.phone}<p class="text-red-500 text-xs mt-1">{errors.phone}</p>{/if}
               </div>
               <div>
-                <label class={LABEL_CLASS} for="bk-email">Email <span class="normal-case">(optional)</span></label>
+                <label class={LABEL_CLASS} for="bk-email">Email</label>
                 <input id="bk-email" class={FIELD_CLASS} class:border-red-500={errors.email}
                   type="email" bind:value={values.email} maxlength={MAX_FIELD_LENGTHS.email}
                   autocomplete="email" placeholder="you@email.com" />
@@ -755,7 +814,8 @@
         <fieldset class="border-0 p-0 m-0 min-w-0">
           <legend class="font-display font-bold text-xl text-yeg-text mb-1">Photos and confirm</legend>
           <p class="text-sm text-yeg-text-secondary mb-5">
-            Photos are optional, and they help us arrive with the right equipment.
+            Add at least one photo or video of the damage. It's how we arrive with the right
+            equipment and the right crew.
           </p>
 
           <div class="rounded-lg border border-dashed p-5 mb-5" style="border-color:rgba(0,0,0,0.15)">
@@ -769,8 +829,19 @@
               final for this booking.
             </p>
 
+            <!--
+              One line, never two. `photoNotice` wins when both are set: it is
+              the specific complaint (this file was rejected, or photos cannot
+              be attached at all and here is what to do instead), while
+              `errors.files` is the generic requirement, and stacking two red
+              lines in one box reads as two separate problems. `photoNotice` is
+              cleared on every new selection, so the generic line reappears the
+              moment the specific one stops applying.
+            -->
             {#if photoNotice}
               <p class="text-red-500 text-xs mt-3" role="alert">{photoNotice}</p>
+            {:else if errors.files}
+              <p class="text-red-500 text-xs mt-3" role="alert">{errors.files}</p>
             {/if}
 
             {#if attachments.length > 0}

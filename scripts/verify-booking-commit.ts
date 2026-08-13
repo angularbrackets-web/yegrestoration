@@ -147,7 +147,57 @@ function freshIp() {
   return `bk02-${++ipCounter}`;
 }
 
-function payload(slot: Date, overrides: Record<string, unknown> = {}) {
+/**
+ * A pool of draft tokens, each already holding one unclaimed
+ * `appointment_files` row on the dev branch.
+ *
+ * BK-22 turned "has at least one file" into a precondition of booking at all,
+ * so the default payload has to carry one — otherwise 13 of the 16 `post(...)`
+ * sites below flip to a 422 on `files` and quietly stop testing the thing they
+ * are named after. The most expensive of those is the endpoint hammer: twelve
+ * racers that all 422 would fail `conflicted.length === HAMMER_N - 1` outright,
+ * and **the only endpoint-level test of the double-booking guard** would be the
+ * thing that got "fixed".
+ *
+ * Pre-seeded rather than minted per call so `payload()` can stay synchronous:
+ * it is called inside `Array.from(...)` and inside loops, and making it async
+ * would rewrite every call site to buy nothing. Sized well ahead of real
+ * consumption; `nextDraft` throws a legible error rather than handing back
+ * `undefined` if that estimate is ever wrong.
+ */
+const DRAFT_POOL_SIZE = 96;
+const draftPool: { token: string; draftId: string }[] = [];
+let draftCursor = 0;
+
+function nextDraft(): { token: string; draftId: string } {
+  const draft = draftPool[draftCursor++];
+  if (!draft) {
+    throw new Error(`Ran out of seeded drafts after ${draftCursor - 1}; raise DRAFT_POOL_SIZE.`);
+  }
+  return draft;
+}
+
+async function seedDraftPool() {
+  const ids: string[] = [];
+  const paths: string[] = [];
+  for (let i = 0; i < DRAFT_POOL_SIZE; i++) {
+    const d = await issueDraftToken();
+    draftPool.push(d);
+    draftIds.push(d.draftId);
+    ids.push(d.draftId);
+    paths.push(`bk02/pool/${d.draftId}.jpg`);
+  }
+  // One statement, not 96 round trips. The `bk02/` pathname prefix means
+  // cleanup reaches these even if the run dies before `draftIds` is read.
+  await sql`
+    INSERT INTO appointment_files (draft_id, pathname, content_type, upload_state)
+    SELECT t.id::uuid, t.path, 'image/jpeg', 'pending'
+    FROM unnest(${ids}::text[], ${paths}::text[]) AS t(id, path)
+  `;
+}
+
+/** Everything except the draft token, so the two payload builders cannot drift. */
+function baseFields(slot: Date, overrides: Record<string, unknown> = {}) {
   return {
     name: `${NAME} ${ipCounter}`,
     phone: '7805550134',
@@ -159,6 +209,26 @@ function payload(slot: Date, overrides: Record<string, unknown> = {}) {
     slot_start: slot.toISOString(),
     ...overrides,
   };
+}
+
+/**
+ * The default: a payload that can actually be booked, which since BK-22 means
+ * one carrying a draft token whose draft holds a file. `email` has always been
+ * here, so the email half of BK-22 breaks nothing in this script; the file half
+ * is what every call site below depends on.
+ */
+function payload(slot: Date, overrides: Record<string, unknown> = {}) {
+  return { ...baseFields(slot), draft_token: nextDraft().token, ...overrides };
+}
+
+/**
+ * Deliberately tokenless — BK-22's AC2. Kept as a named builder rather than
+ * `payload(slot, { draft_token: undefined })` because that spelling depends on
+ * `JSON.stringify` dropping undefined keys, which is a fact about the
+ * serializer rather than a statement of intent.
+ */
+function payloadWithoutFiles(slot: Date, overrides: Record<string, unknown> = {}) {
+  return baseFields(slot, overrides);
 }
 
 async function post(body: unknown, ip = freshIp()) {
@@ -202,8 +272,13 @@ function freeSlots(now = new Date()): Date[] {
   return out;
 }
 
-/** Every `nextSlot()` call below consumes one. Keep this ahead of the real count. */
-const SLOTS_NEEDED = 24;
+/**
+ * Every `nextSlot()` call below consumes one. Keep this ahead of the real
+ * count — it is a precondition check, so being short here aborts with a clear
+ * message instead of throwing out of `nextSlot()` halfway through a run.
+ * Raised from 24 by BK-22, which added eight file-requirement cases.
+ */
+const SLOTS_NEEDED = 40;
 
 const slots = freeSlots();
 if (slots.length < SLOTS_NEEDED) {
@@ -235,6 +310,12 @@ try {
     process.exit(1);
   }
   seeded = true;
+
+  // Before anything posts: since BK-22 a payload without a file cannot book, so
+  // the pool has to exist before the first `payload()` call rather than being
+  // filled lazily.
+  await seedDraftPool();
+  console.log(`  seeded ${DRAFT_POOL_SIZE} drafts, one file each\n`);
 
   // -------------------------------------------------------------------------
   console.log('Raw CTE under real contention');
@@ -474,6 +555,124 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  console.log('\nBK-22 — a public booking must carry a file (AC2, AC3)');
+  // -------------------------------------------------------------------------
+  {
+    // A row to claim against, so "already claimed" below is genuinely claimed
+    // by a real appointment rather than by a made-up id.
+    const donor = await post(payload(nextSlot()));
+    check(donor.status === 201, `donor booking must succeed (got ${donor.status})`);
+    const donorId = donor.body.id as number;
+
+    const seedFiles = async (
+      draftId: string,
+      rows: { state: 'pending' | 'uploaded'; claimedBy: number | null }[],
+    ) => {
+      for (const [i, row] of rows.entries()) {
+        await sql`
+          INSERT INTO appointment_files (draft_id, pathname, content_type, upload_state, appointment_id)
+          VALUES (
+            ${draftId}::uuid, ${`bk02/bk22/${draftId}-${i}.jpg`}, 'image/jpeg',
+            ${row.state}, ${row.claimedBy}
+          )
+        `;
+      }
+    };
+
+    // AC2 — no token at all. The common case: the island only sends a token
+    // once it has an attachment, so "booked without photos" arrives as this.
+    const noToken = await post(payloadWithoutFiles(nextSlot()));
+    check(noToken.status === 422, `no draft token must 422 (got ${noToken.status})`);
+    check(
+      noToken.body?.fields?.[0]?.field === 'files',
+      'the rejection must name `files`, or the island cannot route it to step 3',
+    );
+
+    // AC1, at the endpoint rather than at the parser.
+    //
+    // `verify:booking:payload` proves the *rule* — `entry: 'public'` rejects an
+    // absent email. Only this proves the ROUTE asks for that rule: change one
+    // word at `create.ts`'s `parseBookingPayload` call and the parser stays
+    // perfect, every payload assertion stays green, and the public form quietly
+    // stops requiring an email. There is no other script that reads that line.
+    const withoutEmail = payload(nextSlot()) as Record<string, unknown>;
+    delete withoutEmail.email;
+    const noEmail = await post(withoutEmail);
+    check(noEmail.status === 422, `a public POST with no email must 422 (got ${noEmail.status})`);
+    check(
+      Array.isArray(noEmail.body?.fields) &&
+        noEmail.body.fields.some((f: { field: string }) => f.field === 'email'),
+      'and it must name the `email` field',
+    );
+
+    // AC3 — a *valid* token whose draft holds nothing. The token proves a
+    // session was opened, never that a photo exists, and these are exactly the
+    // visitors who opened the picker and changed their mind.
+    const emptyDraft = await issueDraftToken();
+    draftIds.push(emptyDraft.draftId);
+    const empty = await post(
+      payloadWithoutFiles(nextSlot(), { draft_token: emptyDraft.token }),
+    );
+    check(empty.status === 422, `a token with no files must 422 (got ${empty.status})`);
+
+    // AC3 — `upload_state` must NOT be part of the rule. The row is written at
+    // token-mint time, before the bytes; `onUploadCompleted` never fires on
+    // localhost and lags in production. Gating on 'uploaded' would make every
+    // dev booking impossible and would reject real customers on webhook lag.
+    for (const state of ['pending', 'uploaded'] as const) {
+      const d = await issueDraftToken();
+      draftIds.push(d.draftId);
+      await seedFiles(d.draftId, [{ state, claimedBy: null }]);
+      const r = await post(payloadWithoutFiles(nextSlot(), { draft_token: d.token }));
+      check(r.status === 201, `one '${state}' file must be enough to book (got ${r.status})`);
+      check(r.body?.filesAttached === 1, `and it must be claimed (got ${r.body?.filesAttached})`);
+    }
+
+    // ---- The fixture that manages the two-copies risk (Q1 / plan review S2).
+    //
+    // `countUnclaimedFiles` and `insertBooking`'s `claimed` CTE hold SEPARATE
+    // hand-written copies of the same predicate, evaluated at different
+    // instants against a table the cleanup cron also writes. Nothing makes them
+    // agree — so these two arms are the tripwire, and they are a pair because
+    // one alone cannot catch both copies:
+    //
+    //   * mixed draft (1 claimed + 1 unclaimed) → 201 claiming exactly 1.
+    //     Drop `appointment_id IS NULL` from the CTE and it claims 2 → red.
+    //     The COUNT's copy is invisible here: 1 and 2 both clear a >0 gate.
+    //   * spent draft (1 claimed, 0 unclaimed) → 422.
+    //     Drop `appointment_id IS NULL` from the COUNT and it sees 1, the gate
+    //     opens, and a booking with no photo of its own commits → red.
+    const mixed = await issueDraftToken();
+    draftIds.push(mixed.draftId);
+    await seedFiles(mixed.draftId, [
+      { state: 'uploaded', claimedBy: donorId },
+      { state: 'pending', claimedBy: null },
+    ]);
+    const mixedRes = await post(payloadWithoutFiles(nextSlot(), { draft_token: mixed.token }));
+    check(mixedRes.status === 201, `a draft with one free file must book (got ${mixedRes.status})`);
+    check(
+      mixedRes.body?.filesAttached === 1,
+      `only the unclaimed row may be claimed (got ${mixedRes.body?.filesAttached})`,
+    );
+    const donorStillOwns = (await sql`
+      SELECT appointment_id FROM appointment_files
+      WHERE draft_id = ${mixed.draftId}::uuid AND appointment_id = ${donorId}
+    `) as { appointment_id: number }[];
+    check(donorStillOwns.length === 1, "the donor's file must not be stolen by the new booking");
+
+    const spent = await issueDraftToken();
+    draftIds.push(spent.draftId);
+    await seedFiles(spent.draftId, [{ state: 'uploaded', claimedBy: donorId }]);
+    const spentRes = await post(payloadWithoutFiles(nextSlot(), { draft_token: spent.token }));
+    check(
+      spentRes.status === 422,
+      `a draft whose only file is already claimed must 422 (got ${spentRes.status})`,
+    );
+
+    console.log('  no token / empty draft / spent draft refused; pending and uploaded both suffice');
+  }
+
+  // -------------------------------------------------------------------------
   console.log('\nDraft token integrity');
   // -------------------------------------------------------------------------
   {
@@ -493,18 +692,29 @@ try {
     const bare = await post(payload(nextSlot(), { draft_id: good.draftId }));
     check(bare.status === 422, `a bare draft_id must be refused (got ${bare.status})`);
 
-    const none = await post(payload(nextSlot()));
-    check(none.status === 201, 'a booking with no token must still succeed');
-    check(none.body?.filesAttached === 0, 'a booking with no token must claim no files');
+    // **INVERTED BY BK-22.** This line read `check(none.status === 201, 'a
+    // booking with no token must still succeed')` — a live, green assertion of
+    // the exact opposite of that ticket's AC2. It is inverted rather than
+    // deleted so the reversal is visible in the diff instead of looking like a
+    // check that was quietly dropped when it became inconvenient.
+    const none = await post(payloadWithoutFiles(nextSlot()));
+    check(none.status === 422, `a booking with no token must now be refused (got ${none.status})`);
+    check(
+      Array.isArray(none.body?.fields) &&
+        none.body.fields.some((f: { field: string }) => f.field === 'files'),
+      'and it must name the `files` field, or the island cannot route it to step 3',
+    );
 
     // AC5 is "…and creates nothing": a 400 returned *after* an insert would
-    // otherwise pass. Only the tokenless booking above may have added a row.
+    // otherwise pass. Nothing in this block may now create a row at all — the
+    // tokenless booking that used to be the one permitted exception is a
+    // rejection since BK-22.
     const rowsAfter = (await sql`SELECT COUNT(*)::int AS n FROM appointments`) as { n: number }[];
     check(
-      rowsAfter[0].n === rowsBefore[0].n + 1,
-      `only the tokenless booking may have been created (${rowsBefore[0].n} → ${rowsAfter[0].n})`,
+      rowsAfter[0].n === rowsBefore[0].n,
+      `nothing in this block may create a row (${rowsBefore[0].n} → ${rowsAfter[0].n})`,
     );
-    console.log('  forged and expired rejected, bare draft_id refused, tokenless booking allowed');
+    console.log('  forged and expired rejected, bare draft_id refused, tokenless booking refused');
   }
 
   // -------------------------------------------------------------------------

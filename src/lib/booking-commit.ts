@@ -88,6 +88,45 @@ export async function insertBooking(
 }
 
 /**
+ * How many of a draft's uploaded files are still unclaimed.
+ *
+ * BK-22: a public booking must carry at least one photo or video, and this is
+ * the count the endpoint gates on. It lives here beside `insertBooking`, for
+ * the `claimedFilePathname` reason (`booking-files.ts:168`) — a verify script
+ * drives the *same statement* the route runs, not a retyped lookalike.
+ *
+ * **The predicate is deliberately the same one `insertBooking`'s `claimed` CTE
+ * uses, and it is a second copy of it.** That is worth stating plainly rather
+ * than claiming they cannot disagree: they are two hand-written WHERE clauses,
+ * evaluated at different instants, against a table the orphan-cleanup cron also
+ * writes to. What manages the risk is a fixture in
+ * `scripts/verify-booking-commit.ts` — one draft holding one already-claimed row
+ * and one unclaimed row — under which dropping `appointment_id IS NULL` from
+ * *either* copy turns the script red. Not impossibility; a tripwire.
+ *
+ * `upload_state` is intentionally not in the predicate. A row exists from
+ * token-mint time, before any bytes are PUT, and `onUploadCompleted` never
+ * fires on localhost and can lag in production — so gating on `'uploaded'`
+ * would make every dev booking impossible and reject real customers on webhook
+ * lag. Same reasoning, and the same rule, as the claim above.
+ *
+ * `COUNT(*)::int`, not bare `COUNT(*)`: a bigint comes back from this driver as
+ * a *string*, and `'0' === 0` is false. That is the `size_bytes` trap in the
+ * ROADMAP, one comparison away from silently accepting every photo-less
+ * booking.
+ */
+export async function countUnclaimedFiles(sql: Sql, draftId: string): Promise<number> {
+  const rows = (await sql`
+    SELECT COUNT(*)::int AS files
+    FROM appointment_files
+    WHERE draft_id = ${draftId}::uuid
+      AND appointment_id IS NULL
+  `) as { files: number }[];
+
+  return rows[0]?.files ?? 0;
+}
+
+/**
  * Record which of a booking's two notifications actually went out.
  *
  * Lives here beside `insertBooking` rather than inline in the route so that

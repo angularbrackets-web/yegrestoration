@@ -21,6 +21,15 @@
  * `isAdmin` parameter on a shared predicate is how the public path
  * accidentally inherits the bypass. Grid snap and the partial unique index
  * still hold, and they are what the locked 30-minute CHECK depends on.
+ *
+ * BK-22 added a second admin exemption — no mandatory email, no mandatory
+ * photo — and it does NOT get the same treatment, because it cannot: those are
+ * fields inside a parse both paths need in full, not a whole predicate admin
+ * declines to call. It rides a `ParseOptions.entry` discriminator instead. What
+ * preserves the rule above is that the exemption is unnameable from outside:
+ * `parseAdminEntry` hard-codes `entry: 'admin'` at the call below and its
+ * signature `Omit`s the field, so no caller can hand the public form the
+ * bypass. The reasoning is written out at `ParseOptions` in `booking-payload.ts`.
  */
 
 import { SLOT_START_TIMES } from './booking-config';
@@ -148,7 +157,10 @@ function isRecord(input: unknown): input is Record<string, unknown> {
  * closed select: it is the check the partial unique index depends on, and the
  * select is client-side state that a form post does not have to respect.
  */
-export function parseAdminEntry(input: unknown, options: ParseOptions): AdminEntryResult {
+export function parseAdminEntry(
+  input: unknown,
+  options: Omit<ParseOptions, 'entry'>,
+): AdminEntryResult {
   if (!isRecord(input)) {
     return { ok: false, errors: [{ field: '_', message: 'Expected a form submission.' }] };
   }
@@ -194,7 +206,20 @@ export function parseAdminEntry(input: unknown, options: ParseOptions): AdminEnt
       slot_start: (slotStart ?? PLACEHOLDER_SLOT).toISOString(),
       sms_consent: checked(raw.sms_consent),
     },
-    options,
+    // `entry` is hard-coded here and deliberately NOT forwarded from the
+    // caller, which is why the parameter type omits it. The client's exemption
+    // (ROADMAP P7, 2026-08-12) is: "if we enter ourselves we will ask them to
+    // text pictures/videos. It won't go to review process." So an admin entry
+    // needs neither an email address nor a photo, and BK-22's public
+    // requirements must not reach it.
+    //
+    // Hard-coding is what makes that structural rather than conventional: no
+    // caller of `parseAdminEntry` can make it behave like the public form,
+    // because the type forbids them supplying the field at all. Forwarding
+    // would additionally leave the admin route holding a live-looking
+    // `entry: 'public'` that did nothing — a comment that lies in type form.
+    // Do not "fix" this asymmetry with the public route.
+    { ...options, entry: 'admin' },
   );
 
   const adminNotes = str(raw.admin_notes);

@@ -131,6 +131,12 @@ export const FIELD_STEPS: Readonly<Record<string, Step>> = {
   insurer_name: 2,
   policy_number: 2,
   claim_number: 2,
+  // BK-22's server-side file requirement reports on a field no input owns. It
+  // still needs a step, or `stepForErrors` returns undefined for it,
+  // `mapCommitResponse` falls through to the generic form error, and the
+  // visitor reads "Please check your details and try again" with nothing on the
+  // page highlighted and no way to tell what is wrong.
+  files: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -146,11 +152,18 @@ function tooLong(value: string, key: keyof typeof MAX_FIELD_LENGTHS): boolean {
  *
  * Mirrors `parseBookingPayload` deliberately and incompletely: it cannot know
  * whether a slot is still free, and it does not try. The server decides that.
+ *
+ * `attachmentCount` is BK-22's file requirement, and it is **non-optional so
+ * that every call site had to answer it** — a default of 0 would have blocked
+ * every step-3 caller that had not been updated, and a default of 1 would have
+ * silently exempted them. What it must be handed is the number of attachments
+ * in `{done, failed}` — NOT `done` alone. See step 3.
  */
 export function validateStep(
   step: Step,
   values: FormValues,
   allowedServices: ReadonlySet<string>,
+  attachmentCount: number,
 ): FieldError[] {
   const errors: FieldError[] = [];
   const add = (field: string, message: string) => errors.push({ field, message });
@@ -169,8 +182,13 @@ export function validateStep(
     if (!phone) add('phone', 'Phone number is required.');
     else if (!isPlausiblePhone(phone)) add('phone', 'Enter a 10-digit phone number.');
 
+    // Required since BK-22, mirroring `parseBookingPayload`'s public arm. The
+    // island mirrors the server on purpose; leaving this permissive would let a
+    // visitor walk to step 3, submit, and be bounced back here by a 422 for a
+    // field the page told them was optional.
     const email = values.email.trim();
-    if (email && !isPlausibleEmail(email)) add('email', 'Enter a valid email address.');
+    if (!email) add('email', 'Email is required.');
+    else if (!isPlausibleEmail(email)) add('email', 'Enter a valid email address.');
 
     if (!values.service) add('service', 'Choose the service you need.');
     else if (!allowedServices.has(values.service)) {
@@ -202,8 +220,22 @@ export function validateStep(
     return errors;
   }
 
-  // Step 3 collects only optional things: photos and consent. Consent is not
-  // required to book — under CASL it gates reminders, not the appointment.
+  // Step 3 collects a photo or video — required since BK-22 — and SMS consent,
+  // which is not. Consent still never blocks a booking: under CASL it gates
+  // reminders, not the appointment, and that is a legal position rather than a
+  // UX preference.
+  //
+  // The count is of attachments in `{done, failed}`, not `done` alone, and the
+  // difference is the whole of Q3. A 100 MB video stalled on bad wifi is
+  // *exactly* the case this form is built for; `skipUpload` exists so that
+  // visitor can escape without losing everything they typed. Counting only
+  // completed uploads would let them out of the stall and straight into a step
+  // that will not release them — while the **server would have accepted that
+  // booking**, because the `appointment_files` row is written at token-mint
+  // time, before the bytes. A client stricter than the server manufactures a
+  // dead end out of nothing. The requirement still stops the visitor who
+  // attaches nothing at all, who is the person the client actually asked about.
+  if (attachmentCount === 0) add('files', 'Add at least one photo or video.');
   return errors;
 }
 

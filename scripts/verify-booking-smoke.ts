@@ -236,6 +236,12 @@ let uploadedPathname: string | null = null;
  * what uploaded successfully leaks exactly the rows a failing run creates.
  */
 let usedDraftId: string | null = null;
+/**
+ * BK-22's second draft: the rejection block needs one of its own, because the
+ * first draft's file is claimed by the booking that block is trying to repeat.
+ * Same cleanup rule as above — recorded at mint time, not at success.
+ */
+let repeatDraftId: string | null = null;
 /** Set when `fatal()` aborted the run; reported after cleanup has finished. */
 let aborted: string | null = null;
 
@@ -467,11 +473,38 @@ try {
   console.log('\nRejections still reject over HTTP');
   // -------------------------------------------------------------------------
   {
+    // The repeat needs a draft of its own. Since BK-22 the endpoint checks the
+    // file requirement BEFORE availability, and the first draft's only file was
+    // just claimed by the booking above — so reusing `payload` here answers 422
+    // on `files` and never reaches the slot logic this block is about. That is
+    // the endpoint behaving correctly and the test asking the wrong question.
+    //
+    // The row is inserted directly rather than uploaded: `upload-token.ts`
+    // writes it at mint time, before any bytes exist, and a row is exactly what
+    // the server counts. A second real blob upload would cost storage to prove
+    // nothing this block is about.
+    const repeatDraftRes = await fetch(url(BOOKING_DRAFT_ENDPOINT), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: BASE },
+    });
+    const repeatDraft = (await repeatDraftRes.json()) as {
+      draftId?: string;
+      draftToken?: string;
+    };
+    if (!repeatDraft.draftId || !repeatDraft.draftToken) {
+      fatal('could not mint a second draft — the rejection checks cannot run');
+    }
+    repeatDraftId = repeatDraft.draftId;
+    await sql`
+      INSERT INTO appointment_files (draft_id, pathname, content_type, upload_state)
+      VALUES (${repeatDraftId}::uuid, ${`smoke/${repeatDraftId}/repeat.jpg`}, 'image/jpeg', 'pending')
+    `;
+
     // The same slot again: the row now exists, so the precheck refuses it.
     const repeat = await fetch(url(BOOKING_CREATE_ENDPOINT), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Origin: BASE },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, draft_token: repeatDraft.draftToken }),
       redirect: 'manual',
     });
     const body = (await repeat.json()) as { code?: string };
@@ -510,6 +543,9 @@ try {
   if (usedDraftId) {
     // By draft, not just by the pathname that succeeded.
     await sql`DELETE FROM appointment_files WHERE draft_id = ${usedDraftId}::uuid`;
+  }
+  if (repeatDraftId) {
+    await sql`DELETE FROM appointment_files WHERE draft_id = ${repeatDraftId}::uuid`;
   }
   if (uploadedPathname) {
     await sql`DELETE FROM appointment_files WHERE pathname = ${uploadedPathname}`;

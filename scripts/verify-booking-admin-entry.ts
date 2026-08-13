@@ -218,6 +218,50 @@ console.log('\nparseAdminEntry — what it rejects (AC1)');
 }
 
 // ---------------------------------------------------------------------------
+console.log("\nBK-22 — the office is exempt from the public form's new requirements");
+// ---------------------------------------------------------------------------
+{
+  // The client's instruction, verbatim: "if we enter ourselves we will ask them
+  // to text pictures/videos. It won't go to review process." So an entry typed
+  // by the office needs neither an email address nor a photo — and the phone-in
+  // customer very often gives only a number.
+  //
+  // This is the OTHER half of the polarity pair in `verify-booking-payload.ts`.
+  // That script proves the public door rejects an absent email; this one proves
+  // the office door accepts it. Flipping the discriminator inside
+  // `parseAdminEntry` turns this red while the public arm stays green, which is
+  // the only way to tell "the rule works" from "the rule points the wrong way".
+  const noEmail = parseAdminEntry(entry({ email: '' }), OPTS);
+  check(noEmail.ok, 'an entry with no email must be accepted');
+  check(
+    noEmail.ok && noEmail.payload.email === null,
+    'and its email must be null, never an empty string',
+  );
+
+  const omitted = entry();
+  delete omitted.email;
+  check(parseAdminEntry(omitted, OPTS).ok, 'an entry with the email field absent entirely is accepted');
+
+  // The exemption covers presence, not shape: the office mistypes too, and a
+  // bad address here reaches a real send. Already covered in the rejection
+  // table above; restated here so this block reads as the whole exemption.
+  check(
+    !parseAdminEntry(entry({ email: 'dana@' }), OPTS).ok,
+    'but a malformed email is still rejected',
+  );
+
+  // `parseAdminEntry` supplies `entry: 'admin'` itself and its signature omits
+  // the field, so there is no caller-side way to hand the office door the
+  // public rule — this is the compile-time half of the same guarantee, and it
+  // is written as a type-level tie so that widening the parameter back to a
+  // full `ParseOptions` stops `npm run typecheck` rather than going quietly
+  // wrong. A runtime assert could never catch that.
+  const _optionsCannotCarryEntry: Parameters<typeof parseAdminEntry>[1] = OPTS;
+  void _optionsCannotCarryEntry;
+  console.log('  no email is fine through the office door, and the door cannot be swapped');
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nThe private route drops insurance identifiers (AC1)');
 // ---------------------------------------------------------------------------
 {

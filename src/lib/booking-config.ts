@@ -114,8 +114,28 @@ export const BLOB_ISSUE_TIMEOUT_MS = 4000;
 /** Draft tokens expire this long after being issued — an upper bound on how long a form sits open. */
 export const DRAFT_TOKEN_TTL_HOURS = 6;
 
-/** Draft tokens a single IP may request per hour. Gates the whole upload funnel. */
-export const DRAFT_RATE_LIMIT_PER_HOUR = 20;
+/**
+ * Draft tokens a single IP may request per hour. Gates the whole upload funnel.
+ *
+ * Raised 20 → 50 by BK-22 (user decision, 2026-08-12), because that ticket made
+ * a photo mandatory and turned this from "how many people can attach photos"
+ * into **how many people can book at all**. One shared connection — an office,
+ * an apartment building, a coffee shop — exhausting it now locks everyone
+ * behind it out of the booking form entirely.
+ *
+ * It is also a storage-cost ceiling, which is why the number was the user's to
+ * pick rather than the implementer's: each draft independently permits 10 files
+ * / 300 MB (`upload-token.ts`), so the worst case from a single IP is ~6 GB/h
+ * at 20 and ~15 GB/h at 50. The 100 that was floated would have been ~30 GB/h
+ * and was not taken. The island mints exactly one draft per form session
+ * (memoised in `booking-form.ts`), so the real unit is booking sessions per
+ * hour per NAT, and 50 is headroom for any plausible shared connection.
+ *
+ * Note `/api/booking/upload-token/` has no limit of its own, so one draft token
+ * is worth 10 unthrottled calls — raising this scales that linearly. Recorded
+ * in the ROADMAP's Known traps; the per-draft caps are what bound it.
+ */
+export const DRAFT_RATE_LIMIT_PER_HOUR = 50;
 
 /**
  * Bookings a single IP may commit per hour. Generous next to five slots a day —
