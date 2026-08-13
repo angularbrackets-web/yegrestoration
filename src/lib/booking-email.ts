@@ -294,6 +294,22 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * What the Email row says when the booking carries no address (BK-21).
+ *
+ * A bare `—` is what got read past on booking #25: the office hit Reply to send
+ * a DocuSeal link, the notice had no `Reply-To` but the `noreply@` sender, and
+ * Google bounced it 550. The row now carries all three facts — no address was
+ * given, the customer cannot be reached by email at all, and a reply to this
+ * notice lands at the office. Internal copy; no customer ever sees it.
+ */
+const NO_EMAIL_NOTICE =
+  '— (none given — customer is NOT reachable by email; replies to this message go to the office)';
+
+/** The same line, wrapped to the text part's 13-column label gutter. */
+const NO_EMAIL_NOTICE_TEXT =
+  '— (none given — customer is NOT reachable by email;\n             replies to this message go to the office)';
+
+/**
  * The office's copy: everything, including the insurance identifiers.
  *
  * This is what replaces "open the database to find out a crew is expected
@@ -317,7 +333,10 @@ function internalNotification(input: BookingNotificationInput): Message {
     row('Booking', `#${input.id}`),
     row('Name', input.name),
     row('Phone', input.phone),
-    row('Email', or(input.email)),
+    // Not `or()` — that helper feeds the Insurer/Policy/Claim rows below, where
+    // a bare dash is the right answer. Only the Email row is a dead end worth
+    // shouting about. `row` escapes, like every other row here.
+    row('Email', input.email || NO_EMAIL_NOTICE),
     row('Service', input.serviceLabel),
     row('Address', fullAddress(input)),
     row('Payment', insurance ? 'Insurance claim' : 'Private pay'),
@@ -356,7 +375,7 @@ function internalNotification(input: BookingNotificationInput): Message {
     `When:        ${input.slotLabel} (${TIMEZONE_NOTE})`,
     `Name:        ${input.name}`,
     `Phone:       ${input.phone}`,
-    `Email:       ${or(input.email)}`,
+    `Email:       ${input.email || NO_EMAIL_NOTICE_TEXT}`,
     `Service:     ${input.serviceLabel}`,
     `Address:     ${fullAddress(input)}`,
     `Payment:     ${insurance ? 'Insurance claim' : 'Private pay'}`,
@@ -377,8 +396,12 @@ function internalNotification(input: BookingNotificationInput): Message {
   return {
     from: BOOKING_EMAIL_FROM,
     to: BOOKING_INTERNAL_TO,
-    // Reply goes to the customer when there is one, matching `api/contact.ts`.
-    ...(input.email ? { replyTo: input.email } : {}),
+    // Reply goes to the customer when there is one, and to the office when
+    // there is not — never absent, because absent means a reply falls back to
+    // the `noreply@` From and bounces 550 (BK-21, booking #25). `||` and not
+    // `??`: an empty string is a Resend API error, and `''` is a live value in
+    // this codebase's email plumbing (`contact-message.ts` admits it).
+    replyTo: input.email || BOOKING_EMAIL_REPLY_TO,
     // The name is here on purpose. The office wants to see who at a glance —
     // and it is the ONLY customer-typed string in either subject, which is what
     // makes `headerSafe` load-bearing rather than decorative. The customer's own

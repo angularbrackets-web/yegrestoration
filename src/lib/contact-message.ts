@@ -38,7 +38,7 @@
 
 import { z } from 'zod';
 
-import { BOOKING_EMAIL_FROM, BOOKING_INTERNAL_TO } from './booking-config';
+import { BOOKING_EMAIL_FROM, BOOKING_EMAIL_REPLY_TO, BOOKING_INTERNAL_TO } from './booking-config';
 import { escapeHtml, type Message } from './booking-email';
 import { mailDisabled, type SendResult } from './booking-notify';
 
@@ -128,6 +128,22 @@ function row(label: string, value: string): string {
 }
 
 /**
+ * What the Email row says when the enquiry carries no address (BK-21).
+ *
+ * The same line the booking notice grew, in this file's voice — the visitor is
+ * not a customer yet. A bare `—` reads as "nothing to see"; what it actually
+ * means is that hitting Reply cannot reach this person, and used to bounce off
+ * `noreply@` rather than say so. Three facts: no address was given, the visitor
+ * is unreachable by email, replies land at the office. Internal copy only.
+ */
+const NO_EMAIL_NOTICE =
+  '— (none given — visitor is NOT reachable by email; replies to this message go to the office)';
+
+/** The same line, wrapped to the text part's 9-column label gutter. */
+const NO_EMAIL_NOTICE_TEXT =
+  '— (none given — visitor is NOT reachable by email;\n         replies to this message go to the office)';
+
+/**
  * The internal notification, as a value.
  *
  * `serviceLabel` is passed in already resolved rather than looked up here:
@@ -146,16 +162,19 @@ export function buildContactEmail(message: ContactMessage, serviceLabel: string 
   return {
     from: BOOKING_EMAIL_FROM,
     to: BOOKING_INTERNAL_TO,
-    // Replying to the notification reaches the person who wrote it. Absent
-    // when they gave no address, rather than an empty string the API rejects.
-    ...(message.email ? { replyTo: message.email } : {}),
+    // Replying to the notification reaches the person who wrote it, or the
+    // office when they gave no address — never absent, because absent means a
+    // reply falls back to the `noreply@` From and bounces 550 (BK-21). `||`
+    // and not `??`: the schema above admits `''`, and an empty `replyTo` is an
+    // API error.
+    replyTo: message.email || BOOKING_EMAIL_REPLY_TO,
     subject,
     html: `
         <h2 style="font-family:sans-serif;margin-bottom:16px;">${escapeHtml(subject)}</h2>
         <table style="font-family:sans-serif;border-collapse:collapse;width:100%;max-width:500px;">
           ${row('Name', escapeHtml(message.name))}
           ${row('Phone', escapeHtml(message.phone))}
-          ${row('Email', message.email ? escapeHtml(message.email) : '—')}
+          ${row('Email', escapeHtml(message.email || NO_EMAIL_NOTICE))}
           ${row('Service', escapeHtml(serviceText))}
           <tr>
             <td style="${HEAD}vertical-align:top;">Message</td>
@@ -168,7 +187,7 @@ export function buildContactEmail(message: ContactMessage, serviceLabel: string 
       '',
       `Name:    ${message.name}`,
       `Phone:   ${message.phone}`,
-      `Email:   ${message.email ?? '—'}`,
+      `Email:   ${message.email || NO_EMAIL_NOTICE_TEXT}`,
       `Service: ${serviceText}`,
       `Message: ${message.message}`,
     ].join('\n'),

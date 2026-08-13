@@ -590,7 +590,10 @@ console.log('\nThe attachment, and the message that carries it');
     const message = planCalendarInvite(EVENT, kind, NOW);
     check(message.to === BOOKING_INTERNAL_TO, `the ${kind} invite is addressed to the office`);
     check(message.from === BOOKING_EMAIL_FROM, 'from the shared sender identity');
-    check(message.replyTo === undefined, 'with no reply-to — it is the office writing to itself');
+    check(
+      message.replyTo === BOOKING_EMAIL_REPLY_TO,
+      'with the office as reply-to — a reply to the noreply sender bounces (BK-21)',
+    );
     check(message.attachments?.length === 1, `exactly one attachment, got ${message.attachments?.length}`);
     check(
       message.attachments?.[0].contentType.includes(kind === 'cancel' ? 'CANCEL' : 'REQUEST') ?? false,

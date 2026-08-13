@@ -245,9 +245,12 @@ export function planCalendarInvite(event: IcsEvent, kind: IcsKind, now: Date): M
   return {
     from: BOOKING_EMAIL_FROM,
     to: BOOKING_INTERNAL_TO,
-    // No replyTo. There is nobody to reply to — this is the office writing to
-    // itself, and a reply-to pointing at the customer would invite a reply to
-    // a calendar notice.
+    // The office, not the customer: a reply-to pointing at the customer would
+    // invite a reply to a calendar notice. Present rather than omitted, though
+    // — omitting it sends a reply to the `noreply@` From, which bounces 550
+    // (BK-21). Pointing it at the office is harmless: this is the office
+    // writing to itself, so a stray reply lands where it started.
+    replyTo: BOOKING_EMAIL_REPLY_TO,
     subject: headerSafe(`${what} #${event.id} — ${event.name}`),
     html: `<div style="font-family:-apple-system,Segoe UI,sans-serif;color:#1a1a1a;">${escapeHtml(line)}</div>`,
     text: line,

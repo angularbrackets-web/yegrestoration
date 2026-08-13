@@ -306,8 +306,36 @@ console.log('\nNo email address means no customer message');
   const plan = planBookingNotifications(NO_EMAIL);
   check(plan.customer === null, 'the customer message is null, not an empty or unaddressed one');
   check(plan.internal.to === BOOKING_INTERNAL_TO, 'the office is still notified');
-  check(plan.internal.replyTo === undefined, 'with no reply-to, since there is nobody to reply to');
-  check(plan.internal.text.includes('—'), 'and the email field reads as absent');
+  check(
+    plan.internal.replyTo === BOOKING_EMAIL_REPLY_TO,
+    'and a reply reaches the office rather than bouncing off the noreply sender',
+  );
+
+  // BK-21. The old assertion here looked for a bare '—', a substring the
+  // warning keeps, so it stayed green against a half-done change. These name
+  // the three facts the line exists to carry, in BOTH parts.
+  for (const part of ['html', 'text'] as const) {
+    const body = plan.internal[part];
+    check(body.includes('none given'), `the ${part} part says no address was given`);
+    check(
+      body.includes('NOT reachable by email'),
+      `the ${part} part says the customer cannot be emailed at all`,
+    );
+    check(
+      body.includes('replies to this message go to the office'),
+      `the ${part} part says where a reply to it lands`,
+    );
+  }
+
+  // And the with-email arm carries none of it — a warning on every notice is a
+  // warning the office learns to read past, which is the whole failure mode.
+  const withEmail = planBookingNotifications(INSURANCE).internal;
+  for (const part of ['html', 'text'] as const) {
+    check(
+      !withEmail[part].includes('NOT reachable by email'),
+      `a booking WITH an email carries no such warning in its ${part} part`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

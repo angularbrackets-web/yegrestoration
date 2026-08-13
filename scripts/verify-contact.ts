@@ -79,6 +79,10 @@ process.env.DATABASE_URL = DEV_URL;
 delete process.env.BOOKING_NOTIFY_DISABLED;
 
 const { neon } = await import('@neondatabase/serverless');
+// Dynamic like the rest, not because `booking-config` reaches getDb — it does
+// not — but because the rule this file states is that EVERY value import
+// happens after the swap, and an exception is a thing to re-audit later.
+const { BOOKING_EMAIL_REPLY_TO } = await import('../src/lib/booking-config');
 const {
   buildContactEmail,
   contactSubject,
@@ -334,10 +338,37 @@ try {
 
     const anonymous = buildContactEmail(message({ email: null }), null);
     check(
-      anonymous.replyTo === undefined,
-      'a visitor with no email produces NO replyTo key — an empty string is an API error',
+      anonymous.replyTo === BOOKING_EMAIL_REPLY_TO,
+      'a visitor with no email sends replies to the office, not the noreply sender (BK-21)',
     );
-    check(anonymous.text.includes('Email:   —'), 'and the body shows a dash');
+    check(
+      typeof anonymous.replyTo === 'string' && anonymous.replyTo.length > 0,
+      'and never an empty string, which is an API error',
+    );
+
+    // The old assertion here looked for 'Email:   —', a substring the warning
+    // keeps, so it stayed green against a half-done change. These name the
+    // three facts the line exists to carry, in BOTH parts.
+    for (const part of ['html', 'text'] as const) {
+      const body = anonymous[part];
+      check(body.includes('none given'), `the ${part} part says no address was given`);
+      check(
+        body.includes('NOT reachable by email'),
+        `the ${part} part says the visitor cannot be emailed at all`,
+      );
+      check(
+        body.includes('replies to this message go to the office'),
+        `the ${part} part says where a reply to it lands`,
+      );
+    }
+
+    // And an enquiry WITH an address carries none of it.
+    for (const part of ['html', 'text'] as const) {
+      check(
+        !withService[part].includes('NOT reachable by email'),
+        `a message WITH an email carries no such warning in its ${part} part`,
+      );
+    }
 
     // Escaping comes from booking-email.ts's five-character version. The
     // apostrophe is the one the retired local copy missed.

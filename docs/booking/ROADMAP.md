@@ -441,7 +441,7 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | BK-15 | Booking widget overflow — fieldset `min-content` default escapes the card | Light | ✅ committed |
 | BK-16 | Customer calendar lifecycle — invite on confirmation; cancellation/restore email + ICS on the boundary | Reviewed | ✅ committed (`1162b9d`) |
 | ~~BK-20~~ | ~~Fridays open outside Jummah~~ | — | **cancelled — client reverted 2026-08-12; Fridays stay closed** |
-| BK-21 | Internal email Reply-To fallback + loud "no email" line — replies to noreply@ bounce (found 2026-08-12: office reply to a no-email booking's notice bounced 550); covers all three internal notices, contact form included | Light | approved — **in flight**: lands before P7, which reworks the same email files |
+| BK-21 | Internal email Reply-To fallback + loud "no email" line — replies to noreply@ bounce (found 2026-08-12: office reply to a no-email booking's notice bounced 550); covers all three internal notices, contact form included | Light | ✅ committed (`4c6d935`) |
 | BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | deferred behind P7 — "taken" must include `pending` once P7 lands |
 | BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | deferred behind P7 — build against the review-before-confirm flow, not the auto-confirm one |
 | BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | deferred behind P7 — pending rows need distinct rendering |
