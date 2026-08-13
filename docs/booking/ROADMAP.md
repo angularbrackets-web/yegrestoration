@@ -439,12 +439,12 @@ Ads-side count stays 0 until real ad-click traffic books (see the resolved
 | --- | --- | --- | --- |
 | BK-14 | Calendar invites — bookings land on the office Google Calendar (ICS over Resend; cancel clears) | Reviewed | ✅ committed |
 | BK-15 | Booking widget overflow — fieldset `min-content` default escapes the card | Light | ✅ committed |
-| BK-16 | Customer calendar lifecycle — invite on confirmation; cancellation/restore email + ICS on the boundary | Reviewed | implemented — awaiting implementation review |
+| BK-16 | Customer calendar lifecycle — invite on confirmation; cancellation/restore email + ICS on the boundary | Reviewed | ✅ committed (`1162b9d`) |
 | ~~BK-20~~ | ~~Fridays open outside Jummah~~ | — | **cancelled — client reverted 2026-08-12; Fridays stay closed** |
-| BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | not started |
-| BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | not started |
-| BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | not started |
-| BK-21 | Internal email Reply-To fallback — replies to noreply@ bounce (found 2026-08-12: office reply to a no-email booking's notice bounced 550) | Light | draft — after BK-16 lands |
+| BK-21 | Internal email Reply-To fallback — replies to noreply@ bounce (found 2026-08-12: office reply to a no-email booking's notice bounced 550) | Light | draft — **next up**: lands before P7, which reworks the same email files |
+| BK-17 | Admin entry: taken slots visible/disabled in the time dropdown | Reviewed | deferred behind P7 — "taken" must include `pending` once P7 lands |
+| BK-18 | Public picker redesign — Calendly-style month calendar + time list | Reviewed | deferred behind P7 — build against the review-before-confirm flow, not the auto-confirm one |
+| BK-19 | Admin week-calendar view (additional view beside the list) | Reviewed | deferred behind P7 — pending rows need distinct rendering |
 
 BK-14: client-requested 2026-08-11. Level 1 of three offered: invites, not API
 sync (level 2, the recorded upgrade path) and not calendar-blocks-availability
@@ -472,6 +472,91 @@ it carries the calendar CANCEL so a customer who added the invite gets their
 calendar cleared too); the widget work is split hotfix-now (BK-15) /
 redesign-later (BK-18); the admin calendar view is approved but sequenced
 last.
+
+### P7 — Review-before-confirm (client change request 2026-08-12)
+
+**The client is drowning in time-waster bookings and wants two things: harder
+requirements to book, and a human review before anything is confirmed.**
+Decided over WhatsApp 2026-08-12 (Abdul, ferried by the user), follow-up
+Q&A same day. This phase reverses P6's "confirm instantly" posture on
+purpose: a public booking is now an *application* until the office approves
+it. All client answers below are decisions, not proposals, except the one
+marked **proposed**.
+
+**Decisions (client, 2026-08-12):**
+
+- **Mandatory on the public form:** phone (already), **email**, and **at
+  least one photo/video**. 100 MB/file limit stays ("should be fine for
+  now"). Admin/phone-in entries are exempt — "if we enter ourselves we will
+  ask them to text pictures/videos. It won't go to review process."
+- **Customer checklist, optional**, on the public form — the client's
+  scoping list (levels, rooms, dimensions, wall build-up, mechanical
+  proximity) translated into plain customer language; answers surface in the
+  internal email and admin detail. It exists "so the client can know more
+  information about the job in hand."
+- **Review flow:** submission → `pending`, customer sees / is emailed "we
+  received your information and will get back to you after reviewing" (no
+  calendar invite yet). Office reviews — SLA stated: "almost right away, max
+  1 hour." **Approve** → confirmation email + customer invite + office
+  invite (the BK-16 machinery, moved to the approval moment). **Decline** →
+  a diplomatic email; the client's exact framing: **"we're at capacity at
+  this time"** — one standard message, no reason menu.
+- **Approve/Decline buttons live in the internal "new booking" email** plus
+  the admin page. Client said YES to this replacing the calendar-RSVP idea —
+  which cannot work: Gmail's Yes/No mails an iTIP REPLY to the ORGANIZER
+  (`noreply@`, send-only stack, see BK-21). Nobody re-proposes RSVP capture
+  without inbound-mail infrastructure.
+- **Minimum notice moves 4h → 24h** ("change to 24 hours").
+- **Everything goes through review** — "everything urgent brother, all jobs
+  need to follow the same process." No emergency bypass.
+- **Proposed, client's to overturn (pinned 2026-08-13):** reminder to the
+  office if a booking is still pending 24h after submission; auto-decline
+  (with the at-capacity email) if still pending **24h before the slot**.
+  "24 hours after submission" was rejected in planning: it would decline a
+  two-weeks-out booking over one day of inattention.
+
+**Settled in planning, without the client (assumptions, overturnable):**
+
+- `pending` **holds** the slot (else two applicants race for it during
+  review); `declined` **frees** it — the partial unique index becomes
+  `WHERE status NOT IN ('cancelled', 'declined')`, migration territory.
+  `status` gains `pending` and `declined`; `source='web'` starts `pending`,
+  `source='admin'` starts `booked` (the exemption above).
+- BK-16's cancel/restore boundary logic applies to rows that reached
+  `booked`; a declined application gets no CANCEL ICS (no invite ever
+  existed for it).
+- **One-click email buttons must not mutate on GET.** Mail scanners and
+  link-prefetchers (Outlook SafeLinks, security proxies) follow links in
+  email — a GET that approves is a booking approved by a robot. The link
+  lands on a minimal signed page whose button POSTs. Tokens are signed,
+  single-purpose, expire, and answer idempotently ("already handled") on
+  re-use.
+- The Ads conversion keeps firing at submission — the ad produced the lead;
+  review is our filter, not the ad's. Revisit only if the client asks why
+  conversions exceed confirmed jobs.
+- Checklist and all new copy: implementer drafts, client edits later (the
+  standing rule); the checklist wording additionally goes past the client
+  before launch because it is customer-visible vocabulary.
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | not started |
+| BK-23 | Review lifecycle core — migration (pending/declined + index), public bookings land pending, received-your-info page + email (no invite), admin Approve/Decline, approve → BK-16's confirmation+invites, decline → at-capacity email, 24h minimum notice | Reviewed | not started |
+| BK-24 | One-click Approve/Decline from the internal email — signed tokens, POST-confirm page (no GET mutation), expiry, idempotent re-use | Reviewed | not started |
+| BK-25 | Pending timers — office reminder at +24h unactioned, auto-decline at slot−24h (cron) | Reviewed | not started |
+| BK-26 | Customer checklist — optional plain-language fields, stored on the row, rendered in internal email + admin detail | Reviewed | not started |
+
+The Locked section's "4 hours minimum notice" line is **BK-23's to rewrite
+when it lands** (client decision 2026-08-12), the same arrangement BK-20
+briefly held over the Friday line. Nothing else in Locked moves: the grid,
+Fridays, phone-in cancellation, and the PII rules all stand.
+
+Sequenced BK-22 → 26 (BK-21 lands first, before any of them — see its row).
+Each ticket is independently shippable: BK-22 filters immediately while
+confirmation is still instant; BK-23 flips the flow with admin-page buttons;
+BK-24 adds the client's one-tap UX; BK-25 the safety net; BK-26 is
+independent and can be pulled earlier if the client pushes. BK-17/18/19
+resume after P7 with the amendments noted in their rows.
 
 ## Open questions for the client
 
