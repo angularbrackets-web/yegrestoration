@@ -51,6 +51,31 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **The `Photos/video` count in the internal email does not distinguish
+  uploaded from pending.** `booking-email.ts:358` and `:389` print a bare
+  number; the admin detail page *does* distinguish
+  (`admin/appointments/[id].astro:364,378` — "upload not confirmed"). The row
+  is written at token-mint time, before any bytes exist, so "Photos/video: 1"
+  can mean zero bytes on disk. **Severity: low today (cosmetic), medium once
+  BK-23 lands** — the office will approve or decline *from that email*, which
+  makes the number decision material. **Owner: BK-23** (or BK-24, which owns
+  the email's buttons). Found during BK-22's plan review, 2026-08-12.
+- **`/api/booking/upload-token/` has no rate limit of its own.** `draft.ts` is
+  the only throttled end of the funnel, on the stated theory that "without a
+  draft there are no uploads, and each draft is independently capped at 10
+  files / 300 MB" (`draft.ts:28-31`). One draft token is therefore worth 10
+  unthrottled `onBeforeGenerateToken` calls, each running two SQL statements,
+  for `DRAFT_TOKEN_TTL_HOURS = 6`. **Severity: low** — the per-draft caps bound
+  the damage. **Owner: none.** Recorded because BK-22 raises the value of a
+  draft token by making one mandatory to book, and any raise of
+  `DRAFT_RATE_LIMIT_PER_HOUR` scales this linearly.
+- **`verify-booking-commit.ts:573-586` ("Database failure") reaches its 500
+  through a different path than its comment claims.** `consumeRateLimit`
+  (`create.ts:49`) is awaited **outside** the route's `try` (which opens at
+  `:72`), so an unreachable database throws there rather than being caught at
+  `:144`. The assertion passes today for a reason other than the one it
+  states. **Severity: low** — same status either way. **Owner: none**; worth a
+  glance from whoever next edits that script for BK-22's item 13.
 - ~~**Admin login is a redirect loop in production — `/admin` has been
   unreachable since ~2026-07-04.**~~ **Fixed in BK-07** (`ef6d76e`, deployed
   2026-08-10): `GET /admin/login/` answers 200 where it 302-looped, and every
@@ -540,7 +565,7 @@ marked **proposed**.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | not started |
+| BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | plan-reviewed — awaiting user answer on `DRAFT_RATE_LIMIT_PER_HOUR`, then ready to implement |
 | BK-23 | Review lifecycle core — migration (pending/declined + index), public bookings land pending, received-your-info page + email (no invite), admin Approve/Decline, approve → BK-16's confirmation+invites, decline → at-capacity email, 24h minimum notice | Reviewed | not started |
 | BK-24 | One-click Approve/Decline from the internal email — signed tokens, POST-confirm page (no GET mutation), expiry, idempotent re-use | Reviewed | not started |
 | BK-25 | Pending timers — office reminder at +24h unactioned, auto-decline at slot−24h (cron) | Reviewed | not started |
