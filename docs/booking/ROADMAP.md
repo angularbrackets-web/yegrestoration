@@ -609,6 +609,42 @@ BK-24 adds the client's one-tap UX; BK-25 the safety net; BK-26 is
 independent and can be pulled earlier if the client pushes. BK-17/18/19
 resume after P7 with the amendments noted in their rows.
 
+### P8 — Fee terms + homepage availability (client change request 2026-08-13)
+
+Client decisions relayed 2026-08-13: (1) new assessment fee conditions — free
+when the customer proceeds with us; otherwise $699 for a cause-of-loss report
+and estimate, or up to $1,200 including an insurance sketch/diagram — shown on
+the homepage booking section AND on `/book/` with a required acknowledgment
+checkbox, recorded in the DB, echoed in the confirmation email, admin exempt
+(user decisions, same day); (2) the homepage booking section gains an
+availability preview (next few slots, deep-linked into `/book/`).
+
+The client also asked to apply BK-22's conditions "to quote requests as well" —
+**no ticket**: since BK-10 the quote path *is* the booking form, so the
+conditions already apply everywhere a quote can be requested. Confirmation
+message drafted for the user to send; if the client turns out to mean the
+contact/message form, that becomes a new decision (and note the contact
+endpoint's standing gaps: no rate limit, no spam protection — Known-trap
+material if it ever gains requirements).
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-27 | Assessment fee terms — `booking-copy.ts` constants (placeholder wording, client sign-off before launch), step-3 required ack, `terms_acked_at` column (migration 005/006, number contended with BK-23), public-only enforcement via the `entry` seam, both booking surfaces reworded, confirmation-email echo | Reviewed | draft — plan approved in planning session; implementation assigned to a new session |
+| BK-28 | Homepage availability preview — pure `booking-preview.ts` + `AvailabilityPreview.svelte` island (`client:visible`, zero-CLS skeleton), `?slot=` prefill hardened (grid check + extracted reconcile helper) | Reviewed (narrow — `?slot=` feeds the public write path; LCP/CLS) | draft — same session plan; implement after BK-27 (shared files) |
+
+Ordering vs P7: BK-27 lands **before BK-23** (its confirmation-email echo is
+an at-submission artifact; BK-23 inherits a recorded handoff to move it into
+the received-your-info email when the emails split). BK-28 has no coupling to
+BK-23 and follows BK-27 only for clean diffs. BK-18 must preserve BK-28's
+`?slot=` preselect + reconcile helper when it eventually replaces the step-1
+UI.
+
+Related, not a ticket: the quote/booking → work order → invoice workflow the
+client floated is documented as an options report at
+`docs/booking/workflow-options.md` (integrate vs build vs self-hosted OSS,
+with recommendation); awaiting the client's direction before any tickets
+exist.
+
 ## Open questions for the client
 
 All three were answered on 2026-08-08. Kept here as decisions rather than
