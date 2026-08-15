@@ -1,131 +1,119 @@
-# Session state — saved 2026-08-12 (reviewer session, Fable)
+# Session state — saved 2026-08-15 (Opus session: BK-27 copy revision, re-review, BK-29 draft)
 
-## Who this file is for
+## Read this first
 
-The next **reviewer session** in the two-session workflow. Normally Fable;
-**until Friday 2026-08-14 22:00 the user is at their Fable weekly limit, so
-the reviewer session runs on Opus** — same procedure, same standards, this
-file is the handoff. An Opus **implementer** session does ticket work; the
-reviewer session drafts tickets, runs plan reviews, verifies the
-implementer's summary against the repo, runs the implementation review via a
-fresh agent, fixes small review findings itself, and commits. The user
-ferries paste-ready messages between the two sessions. Never take the
-implementer's summary's word for anything checkable.
+**BK-27 is committed and reviewed. It is NOT pushed, and pushing is the deploy.**
+Nothing in this session reached production.
 
-## Latest (2026-08-12, later in the day — Opus reviewer session)
+Everything durable is in the repo. This file is orientation, not the source of
+truth: `/CLAUDE.md` (process), `docs/booking/ROADMAP.md` (phases, Known traps,
+P8), `docs/booking/tickets/BK-27.md` and `BK-29.md`.
 
-- **BK-21 committed + pushed** (`90c65a9`) = deployed. The go-over of the
-  draft found a **third** hole it had recorded as safe (the contact form's
-  email has always been optional), and the two old assertions checked only
-  for a bare `—` — a substring the new copy keeps — so they would have
-  stayed green against a half-done change. Gates all re-run here; dev branch
-  clean; one red re-observed first-hand on the half the implementer had not
-  broken.
-- **BK-22 drafted + plan-reviewed** (`cba98f3`). 4 blockers / 7 should-fixes
-  / 8 nits, all folded in, none refused; every blocker re-confirmed against
-  source here before folding. **Blocked only on the user's
-  `DRAFT_RATE_LIMIT_PER_HOUR` answer**, then it is approved and ready to hand
-  to the implementer. Handoff message is written in the session transcript.
-- **Three out-of-scope defects recorded in ROADMAP Known traps** (internal
-  email's photo count can't distinguish uploaded from pending — owner BK-23;
-  upload-token has no rate limit of its own; verify-booking-commit's
-  "Database failure" arm passes via an unhandled path).
-- Unchanged: BK-23 and BK-24 plan reviews are still **held for Fable after
-  Fri 22:00**.
+## Exact tree state
 
-## Where things stand (2026-08-12, all committed and pushed to main)
+- **Working tree clean.** Both commits landed this session:
+  - `c20ade0` BK-29 draft
+  - `a1eedc9` BK-27 implementation
+- **5 unpushed commits on `main`**: the two above plus `95e0773`, `2adc752`
+  (BK-22 — live code that has never deployed) and `0daa89d`.
+- Migration 005 is **applied to dev**, **still pending on production**.
 
-- **BK-16** (customer calendar lifecycle) — implemented by Opus, reviewed
-  here (fresh agent: approve-with-should-fixes, 0 blockers, 2 should-fixes +
-  2 nits, all folded in and red-observed), committed `1162b9d`, pushed =
-  deployed. Full review record in the ticket file.
-- **BK-21** (internal Reply-To fallback) — drafted (`af106d3`), **next up**.
-  Light tier: gates only, no plan/implementation review. Lands BEFORE P7
-  because it touches the same email files P7 reworks.
-- **P7 planned and committed** (`e33435d`) — review-before-confirm, the
-  client's 2026-08-12 change request. Read the P7 section of
-  `docs/booking/ROADMAP.md` in full before drafting any of BK-22–26; every
-  client decision and planning assumption is recorded there. Sequenced:
-  BK-21 → BK-22 (mandatory email + ≥1 photo/video) → BK-23 (pending
-  lifecycle core + migration) → BK-24 (signed one-click email actions) →
-  BK-25 (reminder + auto-decline cron) → BK-26 (customer checklist).
-  BK-17/18/19 deferred behind P7 with amendments noted in their rows.
-- **Model-aware sequencing until the Fable reset (Fri 22:00):** BK-21 and
-  BK-22 are fully Opus-runnable (draft, plan-review, implement, review).
-  **Hold BK-23 and BK-24 plan reviews for Fable after the reset** — the
-  migration/index change and the signed unauthenticated endpoint are the two
-  highest-risk designs in the phase and where plan-review depth pays most.
-  Drafting them earlier is fine; plan review gates implementation.
-- **Pending client answer (via user):** the auto-decline rule — reminder at
-  +24h unactioned, auto-decline at slot−24h with the "we're at capacity"
-  email — is recorded in P7 as *proposed, client's to overturn*. BK-25 is
-  last in sequence, so no work blocks on it.
+## What BK-27 shipped
 
-## The reviewer pass, when the implementer reports back (as run for BK-09/10/14/16)
+Assessment fee terms on the public booking form: a terms box, a required
+acknowledgment checkbox on step 3, `terms_acked_at TIMESTAMPTZ` via migration
+005, public-only enforcement riding BK-22's `entry: 'public' | 'admin'`
+discriminator (admin exempt, `parseAdminEntry` unchanged), the terms echoed in
+the confirmation email's HTML *and* text, and the stamp shown in admin.
 
-1. Verify tree vs claims: `git status --porcelain`, `git diff --stat`
-   (file counts, +/- lines), nothing committed, untracked files explained.
-2. Re-run EVERY gate yourself: typecheck, build, the ticket's verify
-   scripts, regressions verify:contact + verify:booking:smoke +
-   verify:cutover (which chains its own build).
-3. Dev-branch cleanliness after any db script: appointments/files/blackouts
-   = 0. (`leads` has ~30 historical production rows from the branch fork —
-   normal, not leakage; check no fixture-shaped rows.)
-4. Secret scan the diff (fake fixtures like vercel_blob_rw_FAKESTORE are
-   fine).
-5. Launch a FRESH implementation-review agent (general-purpose): ONLY
-   /CLAUDE.md, ROADMAP, the ticket, the diff, and your independently re-run
-   gate output. Withhold the implementer's "things to push on" notes;
-   cross-check afterward whether the reviewer found them independently.
-   Findings: blocker / should-fix / nit.
-6. Should-fixes: fix in this session if small (BK-10/BK-16 precedent).
-   Red-observe every NEW/CHANGED assert: break the PRODUCTION target, watch
-   red, RESTORE THE BREAK WITH AN EDIT — **never `git checkout` on an
-   uncommitted tree; it discards the implementer's work too** (this bit the
-   BK-16 pass; recovery was only possible because the full diff had been
-   saved to a scratch file first — always save `git diff > scratch/x.patch`
-   before the red pass). Append red rows + an "Implementation review"
-   section to the ticket, set Status: committed.
-7. Update the ROADMAP row → ✅ committed; one ticket per commit
-   ("BK-NN: <summary>" + Co-Authored-By: Claude Fable 5
-   <noreply@anthropic.com>); push (push = production deploy via Vercel).
-8. Update memory `booking-feature-plan.md` + MEMORY.md index line; give the
-   user their post-deploy checklist.
+**The pricing model, in one paragraph.** Every customer pays at the end of the
+visit; if they go ahead with the work the fee is credited in full against the
+final invoice. Three tiers — **$399 + GST** (assessment only), **$699 + GST**
+(+ cause-of-loss report and estimate), **$1,199 + GST** (+ insurance sketch,
+*includes* the report). Non-refundable if they don't proceed. No time limit on
+the credit. Paid on site only. Nothing charged at booking. The tier is **not
+binding** and there is **no tier picker yet** — that is BK-31, and the copy is
+worded to be true without one.
 
-## Open user actions (growing checklist, remind gently)
+The five copy constants live in `src/lib/booking-copy.ts` and nowhere else.
+**No surface outside the booking pages states a price** — that is a design rule,
+not an accident, and BK-29 depends on it.
 
-- **BK-16 post-deploy** (newest): production booking with a real inbox →
-  confirmation carries the invite → add it → cancel in admin →
-  cancellation email + calendar clears → un-cancel → restore email + event
-  returns → delete the test row.
-- **BK-21 mail-side half**: create `noreply@yegrestoration.ca` as an alias
-  /routing rule to info@ in Google Workspace — the only fix that covers ICS
+## Reviews — both rounds done, nothing refused
+
+- **Mechanism, 2026-08-14** (fresh session): 2 blockers / 4 should-fixes / 3
+  nits. All folded in, one should-fix accepted-and-documented (S2).
+- **Copy revision, 2026-08-15** (fresh subagent): 0 blockers / 4 should-fixes /
+  3 nits. All folded in.
+
+Three of the second round's four should-fixes were **gates passing green while
+the violation shipped**, each proved by planting rather than argument:
+
+- `stripForUse` deleted everything after `https://` on a line, so the
+  "free assessment" pin passed while the phrase rendered into `dist/`.
+- The island's terms box — the only surface with the checkbox — had no pin.
+- `/refund/i` matched "It is **fully** refundable", the client's exact negation.
+
+**The recurring error, now four times in this ticket: writing a disclosure check
+as a keyword search.** A keyword red proves a weaker property than the assertion
+claims. What works is naming the accepted phrasings of the correct claim and
+explicitly refusing its negation. Written up in BK-27.md under "Re-review".
+
+## Next actions, in order
+
+1. **Implement BK-29** (`docs/booking/tickets/BK-29.md`, drafted, plan review not
+   run). 51 claims / 22 files. **Its gate must read `dist/`, not source.** Expect
+   the new pin to be red until the sweep finishes — that is the intended
+   sequence, written into the ticket.
+2. **Apply migration 005 to production BEFORE the push.** New code names the
+   column, so new-code-on-old-schema 500s every booking, and production holds 5
+   real appointment rows.
+3. **Push BK-27 + BK-29 together.** Neither deploys alone.
+4. **BK-31** (tier selection at booking) after that. It owns rewriting the
+   outro's "Tell the tech on the day…" once a picker exists.
+5. BK-28 (homepage availability preview) and BK-23 remain queued behind P8.
+
+## Open with the client
+
+1. **Sign-off on BK-29's replacement wording** — ~51 customer-facing claims.
+2. **Wasted-trip charge?** Recommendation given: publish the expectation, charge
+   nothing at launch, revisit when card-on-site is live.
+3. **Insurance route** — confirm the credit applies to the customer's own share,
+   and mind the framing (never "we help with your deductible").
+4. Whether the ack should record **which tier** was chosen (recommended, BK-31).
+5. **Google Ads copy** likely still says "free assessment", and indexed
+   titles/descriptions will for weeks after deploy. The account is the user's.
+
+## Older open user actions (unchanged, remind gently)
+
+- `noreply@yegrestoration.ca` alias in Google Workspace — the only fix for ICS
   RSVP replies; no code can redirect those.
-- **Ferry to client**: the P7 auto-decline rule (above).
+- Post-deploy exercises still owed: BK-08 / BK-09 / BK-10 / BK-14 / BK-16.
 - Production test row **#22** (cancelled) — delete on the user's word.
-- Older owed: BK-08/BK-09/BK-10/BK-14 post-deploy exercises; Google Ads
-  account checklist (form action Secondary, "Assessment booked" Primary).
-- **BK-06** — blocked on Twilio number verification ((780) 720-8856).
-- **BK-11** — launch checks; note booking_availability_error/empty GA4
-  events count ATTEMPTS not visitors.
+- Google Ads account checklist (form action → Secondary, "Assessment booked"
+  → Primary).
+- **BK-06** blocked on Twilio number verification ((780) 720-8856).
+- **BK-11** launch checks — `booking_availability_error/empty` GA4 events count
+  ATTEMPTS, not visitors.
+- `workflow-options.md` (build vs Jobber vs OSS) still awaiting client
+  direction. Payment recording folds into that decision.
 
 ## Facts that save re-derivation
 
-- Implementer/reviewer can NOT log into production admin (ADMIN_PASSWORD
-  pulls as "" — vercel env pull trap). Authenticated production checks are
-  the user's.
-- BOOKING_NOTIFY_DISABLED=1 is the positive mail mute; it silences injected
-  seams too, so success/failure arms verify LIB-level with injected senders.
-- Dev DB: DATABASE_URL_DEV in .env (values are quoted — strip quotes if
-  reading by shell); `DATABASE_URL="$DATABASE_URL_DEV" npm run migrate --
-  --status` for the dev ledger; bare command = production.
-- Resend resolves {data,error}, never throws; only booking-notify.ts may
-  call the SDK (verify-cutover sweeps for it, comment-stripping).
-- P7 design pins nobody should re-derive: calendar RSVP cannot approve
-  (iTIP REPLY goes to noreply@, send-only stack); one-click email actions
-  must not mutate on GET (scanner prefetch) — signed page + POST;
-  `pending` holds the slot, `declined` frees it (index becomes
-  `NOT IN ('cancelled','declined')`); admin entries skip review
-  (`source='admin'` starts `booked`); Ads conversion stays at submission.
-- Process: /CLAUDE.md. One ticket per commit. Reviewers are always fresh
-  agents with ticket + diff + gate output only.
+- Run `verify:booking:commit` with **no `DATABASE_URL` override** — it reads
+  `DATABASE_URL_DEV` itself and refuses if that host equals `DATABASE_URL`'s.
+- **Never run `verify:booking:smoke` locally** — it POSTs to the deployed site.
+  Its fixture carries `termsAck: true`; it belongs to the post-deploy pass.
+- The implementer/reviewer **cannot log into production admin** —
+  `ADMIN_PASSWORD` pulls as `""` (the `vercel env pull` trap). `DATABASE_URL`
+  **is** real, so `npm run migrate -- --status` (bare = prod) works.
+- Dev DB: `DATABASE_URL_DEV` in `.env`, values quoted — strip quotes in shell.
+- `BOOKING_NOTIFY_DISABLED=1` is the positive mail mute; it silences injected
+  seams too, so success/failure arms verify at LIB level with injected senders.
+- Resend resolves `{data,error}`, never throws; only `booking-notify.ts` may call
+  the SDK (`verify-cutover` sweeps for it, comment-stripping).
+- Red pass rule: restore breaks **by edit**, never `git checkout` on an
+  uncommitted tree. Save `git diff > scratch.patch` first, diff against it after.
+- **Do not drive file edits through `perl -0777 -i -pe` with shell-quoted
+  strings** — `&`, `/` and em-dashes mangled a line this session. Use the Edit
+  tool for break/restore.
