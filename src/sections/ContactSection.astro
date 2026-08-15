@@ -1,5 +1,11 @@
 ---
 import ContactForm from '../components/ContactForm.svelte';
+import {
+  FEE_TERMS_HEADING,
+  FEE_TERMS_INTRO,
+  FEE_TERMS_ITEMS,
+  FEE_TERMS_OUTRO,
+} from '../lib/booking-copy';
 
 interface Props {
   /**
@@ -40,13 +46,37 @@ const { showForm = false } = Astro.props;
       <!-- Left Column — Info -->
       <div data-contact-left class="w-full lg:w-[40%]">
         <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
-          {showForm ? 'Send Us a Message' : 'Get a Free Assessment'}
+          {showForm ? 'Send Us a Message' : 'Book Your Assessment'}
         </h2>
         <p class="text-yeg-text-secondary text-lg leading-relaxed max-w-md mb-10">
           {
+            /*
+              BK-27, implementation review blocker 1: the `showForm === false`
+              arm is the HOMEPAGE BOOKING SECTION — the same section as the
+              terms box below — and it read "no obligation" one screen above a
+              box that prices declining. That phrase came out of `book.astro`'s
+              header and out of the island's step 1 for exactly this reason and
+              was left standing here. `no obligation` is actively false — and
+              more so since 2026-08-14 than when this was written. Under the
+              superseded waiver model the obligation was contingent (declining
+              carried a potential $699). Under the credit model EVERY customer
+              owes the fee at the visit and only gets it back by going ahead, so
+              there is no reading on which a visitor has no obligation.
+
+              2026-08-14: the `<h2>` above and the CTA button below both said
+              "Free Assessment" and were parked as copy judgment, on the reading
+              that the claim held for customers who go ahead. THE PRICING MODEL
+              CHANGED THAT. Under the credit model nobody gets a free assessment
+              at the point of sale — every customer pays on the day — so both
+              strings went from "conditionally true" to false, sitting inches
+              from a box that prices the visit. Reworded here rather than parked
+              for BK-29, on blocker 1's own reasoning: BK-29 owns the ~50 claims
+              on OTHER pages; a contradiction inside the box's own section is
+              this ticket's. The pin below now enforces both.
+            */
             showForm
               ? "Questions get answered the same business day. Emergencies get answered on the first ring."
-              : "Pick a time that works and a certified tech comes out — about 30 minutes, no obligation. Emergency? Call; we answer live."
+              : "Pick a time that works and a certified tech comes out — about 30 minutes. Emergency? Call; we answer live."
           }
         </p>
 
@@ -248,17 +278,17 @@ const { showForm = false } = Astro.props;
               class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
             >
               <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3">
-                Free assessment
+                Credited in full when you go ahead
               </p>
               <h3 class="font-display font-bold text-2xl text-yeg-text mb-3">
                 Book a time that works for you
               </h3>
               <p class="text-yeg-text-secondary leading-relaxed mb-6">
                 An IICRC-certified tech comes out, looks at the damage, and tells you what it takes
-                to put it right. About 30 minutes, no obligation — you'll see the open times before
-                you give us anything.
+                to put it right. About 30 minutes — you'll see the open times before you give us
+                anything.
               </p>
-              <ul class="space-y-2 mb-8 text-sm text-yeg-text-secondary">
+              <ul class="space-y-2 mb-6 text-sm text-yeg-text-secondary">
                 <li>Instant confirmation — no waiting for a callback</li>
                 <!--
                   BK-22 made a photo mandatory, so the old "photos optional"
@@ -272,8 +302,30 @@ const { showForm = false } = Astro.props;
                 <li>Send a photo or two — we arrive with the right equipment</li>
                 <li>Insurance claim? We document it the way your adjuster needs</li>
               </ul>
+
+              {/*
+                BK-27's fee terms. THIS BRANCH ONLY — `/contact/` renders the
+                message form instead, and it is not a booking surface; putting
+                assessment pricing beside "send us a message" would price a
+                question. The strings come from `booking-copy.ts`, the same
+                constants the form's step 3 and the confirmation email read, so
+                the client edits the wording in one file. Never retype the
+                figures here — hand-typed facts in copy are exactly the (780)
+                244-4747 trap.
+              */}
+              <div class="rounded-lg border border-black/10 bg-black/[0.03] px-4 py-3 mb-6">
+                <p class="text-sm font-semibold text-yeg-text">{FEE_TERMS_HEADING}</p>
+                <p class="text-xs text-yeg-text-secondary mt-1">{FEE_TERMS_INTRO}</p>
+                <ul class="mt-2 space-y-1 text-xs text-yeg-text-secondary list-disc pl-5">
+                  {FEE_TERMS_ITEMS.map((item) => <li>{item}</li>)}
+                </ul>
+                {FEE_TERMS_OUTRO.map((line) => (
+                  <p class="text-xs text-yeg-text-secondary mt-2">{line}</p>
+                ))}
+              </div>
+
               <a href="/book/" class="cta-primary w-full justify-center">
-                <span>Book a Free Assessment</span>
+                <span>Book Your Assessment</span>
                 <span aria-hidden="true">&rarr;</span>
               </a>
               <p class="text-xs text-yeg-text-secondary text-center mt-4">

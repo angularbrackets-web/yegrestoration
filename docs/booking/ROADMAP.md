@@ -51,6 +51,35 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **"Free assessment" is claimed unconditionally across ~50 places in `src/`,
+  and since the 2026-08-14 pricing model the claim is FALSE, not merely
+  conditional.** Under the credit model every customer pays at the visit and the
+  fee is credited back if they proceed — so nobody gets a free assessment at the
+  point of sale. This upgraded the trap: BK-27's first pass could argue the claim
+  held for the customers who went ahead; that argument is gone. **Severity raised
+  to high, and BK-29 is now a hard blocker on BK-27's deploy** rather than a
+  follow-up, because the two claims land on the same screen.
+  BK-27 reworded the two *booking* surfaces (`/book/`'s header and
+  `ContactSection.astro`'s CTA card) and put the terms in full on both, plus in
+  the confirmation email; the 2026-08-14 revision additionally removed the two
+  "Free Assessment" strings inside those surfaces (the CTA button and the
+  homepage `<h2>`) and pinned both templates against the phrase in
+  `verify-cutover.ts`. `book.astro`'s `<title>` and WebPage schema `name` were
+  left for BK-29 on purpose — search surface, and one decision should not split
+  across two commits. Everything else still says "free assessment" flat:
+  every service page (`[service].astro`, `data/services.ts` SEO copy and FAQ
+  answers), `about.astro`, `insurance-claims.astro`, `Navbar.svelte`,
+  `Layout.astro`'s default meta description, `BlogLayout.astro`, three blog
+  posts, `llms.txt`, `TestimonialsSection.astro`, `ServiceHero.astro`,
+  `VideoReel.svelte`, `ContactForm.svelte` and `contact.astro`. **Severity:
+  high** (raised from medium 2026-08-14) — it is not a code defect, it is ~50
+  customer-facing claims that are now simply untrue, and one of them
+  (`llms.txt`/meta descriptions) is what an AI assistant will quote. It is also
+  a *client copy* decision, not the implementer's: how hard to qualify a
+  marketing claim is a business call. **Owner: BK-29**, which ships with BK-27
+  as one message. Found during BK-27's implementation, 2026-08-13; not fixed inline
+  because BK-27's scope is the booking surfaces and a 50-file copy sweep is
+  neither reviewable as part of this diff nor decidable without the client.
 - **A Blob/upload-token failure now kills the booking with no phone fallback
   and no funnel event.** BK-22's Q2 names two live causes of "photos are
   impossible to attach": the draft route's 429, and *a Blob/env
@@ -592,7 +621,7 @@ marked **proposed**.
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-22 | Mandatory email + ≥1 photo/video on the public form — server-enforced at commit, form UX, admin exempt | Reviewed | **committed** 2026-08-13 — implementation review passed (no blockers; 3 nits, 1 Known trap) |
-| BK-23 | Review lifecycle core — migration (pending/declined + index), public bookings land pending, received-your-info page + email (no invite), admin Approve/Decline, approve → BK-16's confirmation+invites, decline → at-capacity email, 24h minimum notice | Reviewed | not started |
+| BK-23 | Review lifecycle core — migration (pending/declined + index — **006**; BK-27 took 005), public bookings land pending, received-your-info page + email (no invite), admin Approve/Decline, approve → BK-16's confirmation+invites, decline → at-capacity email, 24h minimum notice | Reviewed | not started |
 | BK-24 | One-click Approve/Decline from the internal email — signed tokens, POST-confirm page (no GET mutation), expiry, idempotent re-use | Reviewed | not started |
 | BK-25 | Pending timers — office reminder at +24h unactioned, auto-decline at slot−24h (cron) | Reviewed | not started |
 | BK-26 | Customer checklist — optional plain-language fields, stored on the row, rendered in internal email + admin detail | Reviewed | not started |
@@ -629,8 +658,35 @@ material if it ever gains requirements).
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-27 | Assessment fee terms — `booking-copy.ts` constants (placeholder wording, client sign-off before launch), step-3 required ack, `terms_acked_at` column (migration 005/006, number contended with BK-23), public-only enforcement via the `entry` seam, both booking surfaces reworded, confirmation-email echo | Reviewed | draft — plan approved in planning session; implementation assigned to a new session |
+| BK-27 | Assessment fee terms — `booking-copy.ts` constants (**five**: heading, intro, three tiers, outro), step-3 required ack, `terms_acked_at` column (**migration 005**, applied to dev), public-only enforcement via the `entry` seam, both booking surfaces reworded + pinned against "free assessment", confirmation-email echo | Reviewed | **reviewed 2026-08-15 — ready to commit.** Two fresh-agent rounds: the mechanism 2026-08-14 (2 blockers / 4 should-fixes / 3 nits) and the copy revision 2026-08-15 (0 blockers / 4 should-fixes / 3 nits). **All folded in, nothing refused, nothing disputed.** The revision brought the credit model, three tiers ($399 / $699 / $1,199 + GST), `FEE_TERMS_OUTRO` (nothing-charged-at-booking + the non-refundable disclosure), five render surfaces and three pins in `verify-cutover.ts`. 19 red rows logged (l–ad). The re-review's sharpest catch: `stripForUse` was deleting the template after every `https://`, so the "free assessment" pin passed green while the phrase rendered into `dist/`. Plan review skipped on the user's instruction (recorded in the ticket). **Push blocks on: BK-29 and migration 005 on production** — see Rollout |
 | BK-28 | Homepage availability preview — pure `booking-preview.ts` + `AvailabilityPreview.svelte` island (`client:visible`, zero-CLS skeleton), `?slot=` prefill hardened (grid check + extracted reconcile helper) | Reviewed (narrow — `?slot=` feeds the public write path; LCP/CLS) | draft — same session plan; implement after BK-27 (shared files) |
+
+**The pricing model changed on 2026-08-14, after BK-27 was built and reviewed.**
+Every customer now pays at the visit and the fee is credited against the final
+invoice if they proceed; three tiers ($399 / $699 / $1,199, all + GST), chosen at
+booking, non-refundable, no time limit on the credit, paid on site only. The full
+decision record — including the insurance-route recommendation, the replacement
+copy, and what is still open — is in `tickets/BK-27.md` under **"Client pricing
+model — FINAL, 2026-08-14"**. Read it before touching booking copy.
+
+**Applied to the code the same day** — see BK-27's "Copy revision — applied
+2026-08-14". The tiers now live in `booking-copy.ts`, `book.astro`'s `<title>`
+and schema `name` are the only "free assessment" strings left on the two booking
+surfaces, and they are BK-29's.
+
+Two consequences for the phase:
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-29 | Remove "free assessment" site-wide (~50 places: every service page, `data/services.ts` SEO copy + FAQs, `about`, `insurance-claims`, `Navbar`, `Layout`'s default meta description, `BlogLayout`, 3 blog posts, `llms.txt`, `TestimonialsSection`, `ServiceHero`, `VideoReel`, `ContactForm`, `contact.astro`) — **plus `book.astro`'s `<title>` and WebPage schema `name`**, which BK-27's revision deliberately left for this ticket so the search surface changes in one commit | Light (copy) | proposed — **hard blocker on BK-27's deploy**, not a follow-up. BK-27 already cleared the two strings *inside* the booking surfaces (CTA button + homepage `<h2>`) and pinned both templates, so BK-29 inherits a smaller list and a gate that will catch a regression on those two files |
+| BK-31 | Assessment tier selection at booking — form control, `assessment_tier` column, validation, both emails, admin display + edit for upgrades. Non-binding by design: the form must say the choice can change on the day | Reviewed | proposed — ships after BK-27 + BK-29 |
+
+Recommended sequence: **BK-27 (new copy) + BK-29 ship together**, then BK-31.
+That puts the accurate pricing and the removal of the "free" claim live quickly
+— the part with actual exposure — without waiting on the picker. The interim is
+honest: the box states three prices and the customer tells the tech which they
+want. Recording payments is NOT in this phase; it belongs to the
+quote → work order → invoice workflow (`workflow-options.md`).
 
 Ordering vs P7: BK-27 lands **before BK-23** (its confirmation-email echo is
 an at-submission artifact; BK-23 inherits a recorded handoff to move it into

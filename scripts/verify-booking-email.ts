@@ -13,7 +13,15 @@ import {
   POST_COMMIT_BUDGET_MS,
   SUPPORT_PHONE,
 } from '../src/lib/booking-config';
-import { HAVE_READY_ITEMS, TIMEZONE_NOTE, VISIT_LENGTH_LINE } from '../src/lib/booking-copy';
+import {
+  FEE_TERMS_HEADING,
+  FEE_TERMS_INTRO,
+  FEE_TERMS_ITEMS,
+  FEE_TERMS_OUTRO,
+  HAVE_READY_ITEMS,
+  TIMEZONE_NOTE,
+  VISIT_LENGTH_LINE,
+} from '../src/lib/booking-copy';
 import {
   escapeHtml,
   headerSafe,
@@ -165,8 +173,93 @@ console.log('\nCustomer confirmation contents');
       const needle = part === 'html' ? escapeHtml(item) : item;
       check(body.includes(needle), `the ${part} part carries "${item.slice(0, 28)}…"`);
     }
+
+    // BK-27: the fee terms are echoed back to the customer in the message they
+    // keep. Asserted against the CONSTANTS, not retyped prose, so the client's
+    // pending wording sign-off does not turn this gate red — paired with the
+    // figure assertions below, which are what stop the prices vanishing.
+    for (const line of [
+      FEE_TERMS_HEADING,
+      FEE_TERMS_INTRO,
+      ...FEE_TERMS_ITEMS,
+      ...FEE_TERMS_OUTRO,
+    ]) {
+      const needle = part === 'html' ? escapeHtml(line) : line;
+      check(body.includes(needle), `the ${part} part carries the fee terms: "${line.slice(0, 28)}…"`);
+    }
   }
   check(customer.subject.includes(INSURANCE.slotLabel), 'the subject carries the slot label');
+
+  // The other half of the pair. The assertions above would stay green if a copy
+  // edit replaced both priced lines with "terms apply", because they only ever
+  // compare the email to whatever the constants currently say. These check the
+  // constants themselves, and they are the reason a silent price deletion
+  // cannot ship. The figures live in `booking-copy.ts` and nowhere else.
+  const figures = [...FEE_TERMS_ITEMS].join(' ');
+  check(figures.includes('399'), 'the fee terms still name the $399 assessment fee');
+  check(figures.includes('699'), 'and the $699 assessment-plus-report fee');
+  check(figures.includes('1,199'), 'and the $1,199 insurance-sketch fee');
+  // GST is the client's own term (2026-08-14) and the figures are BEFORE tax.
+  // Its own assertion, not folded into the three above, because losing it is a
+  // different failure: the prices would still look right and would still
+  // understate what the customer owes by 5%.
+  check(figures.includes('GST'), 'and says the figures are before GST');
+
+  // The two terms attached to those figures, asserted on the whole block rather
+  // than on ITEMS — the credit lives in the intro and the refund rule in the
+  // outro, and both would survive every assertion above while being deleted.
+  //
+  // The four terms the client settled on 2026-08-14, each asserted on the joined
+  // constants. Every other terms assertion compares the email to whatever the
+  // constants currently say, precisely so a client wording edit does not redden
+  // the gate. THESE FOUR ARE THE EXCEPTIONS, for the same reason GST is one:
+  // they are the substance of what the customer ticks a box to accept. A
+  // substantive reword of one of them SHOULD stop the build and get a human
+  // look. That is the trade, and it is the opposite of the trade made above.
+  //
+  // MATCHED ON POLARITY, NOT ON PRESENCE — this is the correction that matters.
+  // The first version of the refund check was `/refund/i`, which is satisfied by
+  // "It is FULLY REFUNDABLE if you decide not to go ahead" — the exact negation
+  // of the client's decision. A review proved it by writing that sentence and
+  // watching every gate stay green. Its red row had only ever DELETED the word,
+  // which demonstrates the weaker "something mentioning refunds exists"
+  // property while reading like the stronger one. Same defect the earlier review
+  // found in the `showForm` pin, in a different costume.
+  //
+  // So each check names the accepted PHRASINGS of the correct claim, and the
+  // credit check additionally refuses a negated one. Alternations, not exact
+  // sentences, so "no refunds" or "we deduct it from your invoice" still pass.
+  const terms = [FEE_TERMS_INTRO, ...FEE_TERMS_ITEMS, ...FEE_TERMS_OUTRO].join(' ');
+  check(
+    /(?:credited?|comes? off|deducted?)/i.test(terms) &&
+      /invoice/i.test(terms) &&
+      !/(?:not|never|non|no longer|don't|doesn't|won't)\s+\w*\s*(?:credit|deduct)/i.test(terms),
+    'and that the fee comes back off the final invoice — stated, and not negated',
+  );
+  check(
+    /(?:not refundable|non-?refundable|no refunds?|isn't refundable)/i.test(terms),
+    'and that it is NOT refundable otherwise — the term most likely to be disputed, so it is disclosed where the box is ticked',
+  );
+  // The other two disclosures the revision named as material and then did not
+  // assert. Both were deletable with every gate green until now: the payment
+  // timing is the answer to the previous review's most material open question
+  // (when does the charge land?), and "nothing is charged when you book" is what
+  // stops a visitor ticking a box beside "$1,199" believing the next button
+  // bills them.
+  // ANCHORED TO THE PAYMENT VERB. The first version matched a bare
+  // `on the day`, which the outro's "Tell the tech on the day which of these
+  // you want" satisfies — a sentence about choosing a TIER, not about when
+  // money changes hands. Deleting "paid at the end of the visit" left this
+  // green. Caught on its own red pass; the timing phrase has to sit within a
+  // clause of the paying for it to mean anything.
+  check(
+    /pa(?:id|y|yable|ying)\b[^.]{0,40}(?:end of the visit|at the visit|on site|on the day)/i.test(terms),
+    'and WHEN the fee is payable, which is what the customer is agreeing to',
+  );
+  check(
+    /(?:nothing is charged|not charged|no charge|nothing to pay)/i.test(terms),
+    'and that nothing is charged at booking time — the site never takes money',
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,14 @@
     MAX_FILE_BYTES,
   } from '../lib/booking-config';
   import type { Confirmation } from '../lib/booking-confirmation';
-  import { EMAILED_LINE } from '../lib/booking-copy';
+  import {
+    EMAILED_LINE,
+    FEE_TERMS_ACK_LABEL,
+    FEE_TERMS_HEADING,
+    FEE_TERMS_INTRO,
+    FEE_TERMS_ITEMS,
+    FEE_TERMS_OUTRO,
+  } from '../lib/booking-copy';
   import {
     reportBookingConversion,
     reportBookingFunnelEvent,
@@ -572,8 +579,16 @@
           <legend class="font-display font-bold text-xl text-yeg-text mb-1">
             When should we come out?
           </legend>
+          <!--
+            BK-27: this line used to open "Free on-site assessment", which the
+            fee terms made conditional. It is inside the form whose step 3 now
+            states the condition in full, so it says "about 30 minutes" and
+            leaves the price to the place that qualifies it — a bare "free"
+            two steps before the terms box is the contradiction the ticket
+            exists to remove.
+          -->
           <p class="text-sm text-yeg-text-secondary mb-5">
-            Free on-site assessment, about 30 minutes. All times are Edmonton time.
+            On-site assessment, about 30 minutes. All times are Edmonton time.
           </p>
 
           {#if loadingAvailability}
@@ -865,6 +880,35 @@
                   </li>
                 {/each}
               </ul>
+            {/if}
+          </div>
+
+          <!--
+            BK-27. The terms box and its checkbox are one unit and must stay
+            adjacent in this order: `FEE_TERMS_ACK_LABEL` says "the assessment
+            terms above", which is a claim about this markup. Moving the box, or
+            putting the SMS consent between them, makes the label a lie.
+          -->
+          <div class="rounded-lg p-4 mb-3 text-sm" style="background-color:rgba(0,0,0,0.03)">
+            <p class="font-semibold text-yeg-text mb-1">{FEE_TERMS_HEADING}</p>
+            <p class="text-yeg-text-secondary">{FEE_TERMS_INTRO}</p>
+            <ul class="mt-2 space-y-1 text-yeg-text-secondary list-disc pl-5">
+              {#each FEE_TERMS_ITEMS as item}
+                <li>{item}</li>
+              {/each}
+            </ul>
+            {#each FEE_TERMS_OUTRO as line}
+              <p class="text-yeg-text-secondary mt-2">{line}</p>
+            {/each}
+          </div>
+
+          <div class="mb-5">
+            <label class="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" class="mt-1" bind:checked={values.termsAck} />
+              <span class="text-sm text-yeg-text">{FEE_TERMS_ACK_LABEL}</span>
+            </label>
+            {#if errors.terms_ack}
+              <p class="text-red-500 text-xs mt-1" role="alert">{errors.terms_ack}</p>
             {/if}
           </div>
 

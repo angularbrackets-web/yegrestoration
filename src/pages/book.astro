@@ -5,10 +5,33 @@ import Footer from '../components/Footer.astro';
 import BookingForm from '../components/BookingForm.svelte';
 import { BUSINESS } from '../data/services';
 import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
+import {
+  FEE_TERMS_HEADING,
+  FEE_TERMS_INTRO,
+  FEE_TERMS_ITEMS,
+  FEE_TERMS_OUTRO,
+} from '../lib/booking-copy';
 
+// BK-27 reworded the rendered header, and `verify-cutover.ts` now PINS the
+// template against "free assessment" — but the pin stops at the frontmatter
+// fence, and this is why.
+//
+// The 2026-08-14 credit model made "free assessment" false at the point of
+// sale: every customer pays on the day. On the rendered page that mattered
+// immediately, because the words sat inches from the box quoting $399. Up here
+// it is a different trade-off. `title` is the page's SEARCH surface — "book a
+// free assessment" is the query people type — and it is one of ~50 such strings
+// across the site whose sweep is BK-29, a ticket that is already a hard blocker
+// on deploying this one. Changing it here alone would split that decision across
+// two commits and leave the nav and service pages disagreeing with the tab.
+//
+// So: the title and the schema `name` are BK-29's, deliberately, and the pin is
+// scoped to say so. The DESCRIPTION is reworded — it is a full sentence with
+// room for the mechanism, Google renders it verbatim under the title, and
+// "credited back in full" is both accurate and no worse as a search snippet.
 const title = 'Book a Free Assessment | YEG Restoration Edmonton';
 const description =
-  'Pick a time for a free on-site restoration assessment in Edmonton. About 30 minutes, no obligation.';
+  'Pick a time for an on-site restoration assessment in Edmonton. About 30 minutes — the fee is credited back in full when you go ahead with the work.';
 
 // INDEXED as of BK-10 — note the absence of `noindex={true}` below. This is
 // the site's quote path now, so it wants to rank; the layout's noindex and the
@@ -65,19 +88,38 @@ const schemas = [
 
       <header class="mb-8">
         <p class="text-xs uppercase tracking-wider text-yeg-text-secondary mb-2">
-          Free assessment
+          Credited in full when you go ahead
         </p>
         <h1 class="font-display font-bold text-3xl sm:text-4xl text-yeg-text mb-3">
           Book a time that works for you
         </h1>
         <p class="text-yeg-text-secondary">
           An IICRC-certified tech comes out, looks at the damage, and tells you what it takes to
-          put it right. About 30 minutes, no obligation.
+          put it right. About 30 minutes.
         </p>
         <p class="text-yeg-text-secondary text-sm mt-2">
           Serving Edmonton and the surrounding communities — outside the area? Call first and we'll
           tell you honestly whether we can get to you.
         </p>
+
+        <!--
+          BK-27. The terms in full, before the form rather than after it: a
+          visitor decides whether to spend the next three steps on this page
+          knowing what the visit can cost. Step 3 shows them again above the
+          checkbox that acknowledges them — that repetition is deliberate, and
+          both renderings read the same constants, so a client wording change
+          lands in both.
+        -->
+        <div class="mt-5 rounded-xl border border-black/10 bg-black/[0.03] px-5 py-4">
+          <p class="text-sm font-semibold text-yeg-text">{FEE_TERMS_HEADING}</p>
+          <p class="text-sm text-yeg-text-secondary mt-1">{FEE_TERMS_INTRO}</p>
+          <ul class="mt-2 space-y-1 text-sm text-yeg-text-secondary list-disc pl-5">
+            {FEE_TERMS_ITEMS.map((item) => <li>{item}</li>)}
+          </ul>
+          {FEE_TERMS_OUTRO.map((line) => (
+            <p class="text-sm text-yeg-text-secondary mt-2">{line}</p>
+          ))}
+        </div>
       </header>
 
       <!--

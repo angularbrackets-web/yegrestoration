@@ -36,6 +36,10 @@ import {
 import {
   CALENDAR_ATTACHED_LINE,
   CANCEL_LINE,
+  FEE_TERMS_HEADING,
+  FEE_TERMS_INTRO,
+  FEE_TERMS_ITEMS,
+  FEE_TERMS_OUTRO,
   HAVE_READY_HEADING,
   HAVE_READY_ITEMS,
   TIMEZONE_NOTE,
@@ -241,6 +245,23 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...HAVE_READY_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
+    // BK-27. The terms the customer ticked a box to acknowledge, written back
+    // to them in the message they keep. It is static copy — no field on
+    // `BookingNotificationInput` — because it documents what the form said at
+    // submission, not a per-booking value; the acknowledgment itself is the
+    // `terms_acked_at` stamp on the row.
+    //
+    // Handoff to BK-23: when the confirmation splits into "we have your
+    // request" (at submission) and "you're booked" (at approval), this section
+    // belongs in the FIRST of the two, because that is the message that
+    // corresponds to the moment the box was ticked. Keeping it in both is
+    // recommended and is BK-23's call.
+    `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(FEE_TERMS_HEADING)}</h2>`,
+    `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`,
+    '<ul style="margin:0 0 16px;padding-left:20px;">',
+    ...FEE_TERMS_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
+    '</ul>',
+    ...FEE_TERMS_OUTRO.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
     `<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`,
     `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
@@ -261,6 +282,11 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     '',
     `${HAVE_READY_HEADING}:`,
     ...HAVE_READY_ITEMS.map((item) => `  - ${item}`),
+    '',
+    `${FEE_TERMS_HEADING}:`,
+    FEE_TERMS_INTRO,
+    ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
+    ...FEE_TERMS_OUTRO.flatMap((line) => ['', line]),
     '',
     CALENDAR_ATTACHED_LINE,
     '',

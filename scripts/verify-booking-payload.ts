@@ -39,6 +39,12 @@ function base(overrides: Record<string, unknown> = {}) {
     city: 'Edmonton',
     payment_route: 'private',
     slot_start: SLOT.toISOString(),
+    // BK-27's acknowledgment, required by the public door this file's cases
+    // mostly run through. In the base rather than per-case for the reason the
+    // email is: every pre-existing assertion here is about some OTHER field,
+    // and a base that 422s on this one would make all of them pass for the
+    // wrong reason. The arms that test the acknowledgment itself override it.
+    terms_ack: true,
     ...overrides,
   };
 }
@@ -239,6 +245,53 @@ console.log('\nConsent and draft token');
   check(tok.ok && tok.payload.draftToken === 'v1.abc.123.def', 'draft token must pass through unverified');
   check(errorsFor(base({ draft_token: 42 })).includes('draft_token'), 'non-string draft token rejected');
   console.log('  consent tri-state and token passthrough hold');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nAssessment fee terms (BK-27)');
+// ---------------------------------------------------------------------------
+{
+  // The public door: only a literal `true` clears it.
+  check(
+    errorsFor(base({ terms_ack: undefined })).includes('terms_ack'),
+    'a missing acknowledgment must be rejected on the public form',
+  );
+  check(
+    errorsFor(base({ terms_ack: false })).includes('terms_ack'),
+    'and an explicit refusal must be rejected',
+  );
+  // Every shape a hand-built request can wear that is not the statement the
+  // checkbox makes. `'true'` is the one a naive form serializer produces, and
+  // accepting it would mean the string "false" acknowledged the terms too.
+  for (const value of ['true', 1, 'on', {}] as unknown[]) {
+    check(
+      errorsFor(base({ terms_ack: value })).includes('terms_ack'),
+      `a ${JSON.stringify(value)} acknowledgment must be rejected — only a boolean true counts`,
+    );
+  }
+
+  const acked = parseBookingPayload(base({ terms_ack: true }), opts);
+  check(acked.ok, 'a ticked acknowledgment must parse');
+  check(acked.ok && acked.payload.termsAcked === true, 'and must arrive as termsAcked true');
+
+  // The office door — BK-27 inherits BK-22's exemption through the same
+  // discriminator, so an admin entry carrying no acknowledgment at all parses.
+  check(
+    !adminErrorsFor(base({ terms_ack: undefined })).includes('terms_ack'),
+    'admin entry must be exempt from the acknowledgment',
+  );
+  const adminParsed = parseBookingPayload(base({ terms_ack: undefined }), adminOpts);
+  check(
+    adminParsed.ok && adminParsed.payload.termsAcked === false,
+    'and must record that nothing was acknowledged, rather than defaulting it on',
+  );
+  // The shape rule is NOT part of the exemption: a malformed value is malformed
+  // whichever door it came through.
+  check(
+    adminErrorsFor(base({ terms_ack: 'true' })).includes('terms_ack'),
+    'while a non-boolean is still rejected at the office door',
+  );
+  console.log('  required on the public form, exempt for admin, boolean-only either way');
 }
 
 if (failures > 0) {

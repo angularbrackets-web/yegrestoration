@@ -57,6 +57,8 @@ export type FormValues = {
   policy_number: string;
   claim_number: string;
   smsConsent: boolean;
+  /** BK-27's fee-terms acknowledgment. Unlike `smsConsent`, this one blocks. */
+  termsAck: boolean;
 };
 
 export function emptyFormValues(): FormValues {
@@ -75,6 +77,9 @@ export function emptyFormValues(): FormValues {
     policy_number: '',
     claim_number: '',
     smsConsent: false,
+    // False, and never anything else. A default of true would tick the box for
+    // the visitor, which is not an acknowledgment of anything.
+    termsAck: false,
   };
 }
 
@@ -137,6 +142,13 @@ export const FIELD_STEPS: Readonly<Record<string, Step>> = {
   // visitor reads "Please check your details and try again" with nothing on the
   // page highlighted and no way to tell what is wrong.
   files: 3,
+  // BK-27's acknowledgment does own an input, so its reason for being here is
+  // NOT `files`' reason. `files` is listed because it has no input to hang an
+  // error on at all; this is listed because of step ROUTING — without an entry
+  // `stepForErrors` skips it, and a server 422 whose only field is `terms_ack`
+  // degrades to the generic form message beside an unticked box nobody is told
+  // to tick. Different reason, same conclusion.
+  terms_ack: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -220,8 +232,9 @@ export function validateStep(
     return errors;
   }
 
-  // Step 3 collects a photo or video — required since BK-22 — and SMS consent,
-  // which is not. Consent still never blocks a booking: under CASL it gates
+  // Step 3 collects a photo or video (required since BK-22), the fee-terms
+  // acknowledgment (required since BK-27) and SMS consent, which is not.
+  // Consent still never blocks a booking: under CASL it gates
   // reminders, not the appointment, and that is a legal position rather than a
   // UX preference.
   //
@@ -236,6 +249,13 @@ export function validateStep(
   // dead end out of nothing. The requirement still stops the visitor who
   // attaches nothing at all, who is the person the client actually asked about.
   if (attachmentCount === 0) add('files', 'Add at least one photo or video.');
+  // After the file check, so that a visitor who has done neither reads the two
+  // complaints in the order the page presents them. BK-27: this one mirrors the
+  // server's public arm exactly — an unticked box is a 422 either way, and the
+  // point of checking it here is that the visitor finds out before submitting.
+  if (values.termsAck !== true) {
+    add('terms_ack', 'Please confirm you understand the assessment terms.');
+  }
   return errors;
 }
 
@@ -272,6 +292,12 @@ export function assembleBookingPayload(
     payment_route: values.payment_route,
     slot_start: values.slotStart,
     sms_consent: values.smsConsent === true,
+    // Always sent, never omitted, and always a real boolean. `=== true` rather
+    // than the raw value because the server rejects a non-boolean outright, and
+    // an omitted key reads to the server exactly like a refusal — which for
+    // this field is the correct reading, but it should be the visitor's, not a
+    // side effect of how the payload was assembled.
+    terms_ack: values.termsAck === true,
   };
 
   const optional: [string, string][] = [

@@ -308,6 +308,222 @@ console.log('\n/book/ is indexed; /book/confirmed/ is not (AC4)');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nThe fee terms reach both booking surfaces (BK-27)');
+// ---------------------------------------------------------------------------
+{
+  // The client's decision was that the terms appear on `/book/` AND on the
+  // homepage booking section. Nothing else asserts that: the email script
+  // checks the confirmation, the payload and form scripts check the rule, and
+  // a surface that silently stopped rendering the box would keep every one of
+  // them green while the customer ticks a checkbox agreeing to terms they were
+  // never shown.
+  //
+  // The pin is on the CONSTANTS, not on the prose — the wording is placeholder
+  // pending client sign-off, and a pin on the sentences would fail the day they
+  // sign it off. Comments AND import lines are stripped first: an import line
+  // mentions the identifier without rendering anything, which is the BK-14 trap
+  // where a pin was satisfied by the import it was meant to prove was used.
+  //
+  // THE `//` RULE IS NOT `/\/\/[^\n]*/`, and the difference is a hole a review
+  // walked through. That form is right for frontmatter, where `//` starts a
+  // comment — but this helper is also applied to the rendered TEMPLATE, where
+  // `//` most often appears inside `https://`. Everything after the scheme on
+  // that line then vanishes, so any banned phrase authored on the same line as
+  // an absolute URL is invisible to the pins below. Demonstrated, not theorised:
+  // a reviewer put `<a href="https://yegrestoration.ca/book/" …><span>Book a
+  // Free Assessment</span>` on one line in `ContactSection.astro` and this file
+  // passed green while the phrase rendered into `dist/` on the homepage CTA
+  // card. It was already eating the tails of the `xmlns="http://…"` lines in
+  // that template.
+  //
+  // The lookbehind-free fix: only treat `//` as a comment when it is not
+  // preceded by `:`. Keeps the frontmatter behaviour, drops the hole.
+  const stripForUse = (s: string) =>
+    s
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+      .replace(/^\s*import[\s\S]*?from\s+['"][^'"]+['"];?/gm, '');
+
+  // Entity-normalised before any prose pin reads it: `Free&nbsp;Assessment`
+  // renders identically to `Free Assessment` and would slip a `\s`-based regex.
+  const normalise = (s: string) => s.replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ');
+
+  for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
+    const code = stripForUse(readFileSync(resolve(root, file), 'utf8'));
+    // FEE_TERMS_OUTRO is in this list, not appended to it as an afterthought:
+    // it carries "nothing is charged when you book" and "not refundable if you
+    // decide not to go ahead". A surface that renders the tiers but drops the
+    // outro shows a customer three prices and none of the terms attached to
+    // them, which is worse than showing nothing.
+    for (const constant of [
+      'FEE_TERMS_HEADING',
+      'FEE_TERMS_INTRO',
+      'FEE_TERMS_ITEMS',
+      'FEE_TERMS_OUTRO',
+    ]) {
+      check(code.includes(constant), `${file} renders ${constant}`);
+    }
+  }
+
+  // …and `/contact/` does not. It renders the message form, not a booking
+  // surface, and assessment pricing beside "send us a message" prices a
+  // question. The homepage and `/contact/` share `ContactSection.astro`, so
+  // this is a claim about which ARM of the `showForm` ternary the block sits
+  // in — the one thing a careless edit to that file would break.
+  //
+  // ANCHORED ON `) : (`, THE ARM BOUNDARY — not on `showForm ? (`, which is
+  // where the first version of this check anchored and is why it did not
+  // enforce its own claim. `showForm ? (` is the start of the whole ternary,
+  // so everything after it spans BOTH arms: the block could be moved into the
+  // form arm, rendering assessment pricing on `/contact/`, and this stayed
+  // green. Found by the implementation review, which proved it by planting the
+  // block in the form arm rather than reasoning about it — and the red pass had
+  // not caught it because breaking it in the shared left column confirms only
+  // the weaker "not outside the ternary" property while reading like the
+  // stronger one. An assertion's red must break the thing it actually claims.
+  //
+  // Stripped, so the frontmatter's own `import { FEE_TERMS_… }` is not read as
+  // a rendering — the same trap the pin above avoids, one file further on.
+  const section = stripForUse(readFileSync(resolve(root, 'src/sections/ContactSection.astro'), 'utf8'));
+  const boundary = section.indexOf(') : (');
+  check(boundary > 0, "the ternary's form/CTA arm boundary is where this file expects it");
+  // BOTH constants, not just ITEMS. The first version tested `FEE_TERMS_ITEMS`
+  // alone, so `FEE_TERMS_OUTRO` — which carries the non-refundable term — could
+  // be rendered in the form arm and appear on `/contact/` beside "Send Us a
+  // Message" with this gate green.
+  for (const constant of ['FEE_TERMS_ITEMS', 'FEE_TERMS_OUTRO']) {
+    check(
+      section.slice(boundary).includes(constant),
+      `${constant} sits in the CTA-card arm, which only the homepage renders`,
+    );
+    check(
+      !section.slice(0, boundary).includes(constant),
+      `and ${constant} never in the message-form arm, which is what /contact/ renders`,
+    );
+  }
+  // The claim the terms contradict, pinned on the two surfaces this ticket
+  // owns. "No obligation" is FALSE — under the credit model EVERY customer owes
+  // the fee at the visit, and it is only credited back if they go ahead; the
+  // obligation is not contingent on declining. (The phrase originally went out
+  // because declining carried a potential $699 under the superseded waiver
+  // model. The reason changed; the phrase is if anything more false now.) It
+  // survived BK-27's first pass in `ContactSection.astro`'s own lead paragraph,
+  // one screen above the box that prices the visit (implementation review,
+  // blocker 1). Copy is only ever as true as the last person to remember it, so
+  // this is the reader that remembers.
+  //
+  // Deliberately NOT site-wide: ~50 other unqualified "free assessment" claims
+  // are a recorded Known trap with a client decision attached, and a sweep that
+  // fails on all of them would be turned off within a day. Two files, the two
+  // that render the terms.
+  for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
+    const prose = stripForUse(readFileSync(resolve(root, file), 'utf8'));
+    check(
+      !/no obligation/i.test(prose),
+      `${file}: says "no obligation", which the fee terms it renders contradict`,
+    );
+  }
+
+  // The same reader, for the claim the 2026-08-14 pricing model falsified.
+  //
+  // Under the old model "free assessment" was conditionally true — free for the
+  // customers who went ahead — and the CTA button and headings that said it were
+  // parked for the client (BK-27 Q9). Under the credit model NOBODY gets a free
+  // assessment at the point of sale: every customer pays on the day and the fee
+  // is credited back afterwards. So these strings are now false, and two of them
+  // sat in the same card as the box that prices the visit.
+  //
+  // RENDERED TEMPLATE ONLY, and the boundary is the point. `book.astro`'s
+  // frontmatter still carries "Book a Free Assessment" in its <title> and its
+  // WebPage schema `name` — deliberately, because those are the page's SEARCH
+  // surface and are BK-29's to sweep with the other ~50 site-wide claims.
+  // Pinning the whole file would fail on them today and the pin would be
+  // deleted by Monday.
+  //
+  // The criterion is RENDERED-vs-SEARCH surface. Stating it plainly because an
+  // earlier version of this comment justified the split by "a contradiction in
+  // the priced box's own section", which does not actually produce this
+  // boundary — the <title> is in the same FILE as the priced box and is left
+  // alone. Rendered-vs-search is the line that was really drawn.
+  //
+  // WHAT THIS DOES NOT ENFORCE, because an earlier version of this comment
+  // claimed it did: it is NOT true that "no visitor reads 'free assessment' on
+  // the same screen as the price". This pin reads FILE TEXT, not the rendered
+  // component tree, and `book.astro` mounts <Navbar />, whose desktop pill and
+  // drawer both say it — `dist/client/book/index.html` currently contains the
+  // phrase 7 times. That does not ship, because BK-29 is a declared hard
+  // blocker on this ticket's deploy and owns `Navbar.svelte`. But the claim was
+  // wrong and the kind of wrong that gets copied forward, so: this pin stops
+  // these two FILES from reintroducing the phrase. Whole-page coverage is
+  // BK-29's, and it will need to read `dist/`, not source.
+  const templateOf = (src: string, file: string) => {
+    const lines = src.split('\n');
+    const fences = lines.reduce<number[]>((a, l, i) => (l.trim() === '---' ? [...a, i] : a), []);
+    check(fences.length >= 2 && fences[0] === 0, `${file}: frontmatter fences are where this file expects them`);
+    return lines.slice(fences[1] + 1).join('\n');
+  };
+  for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
+    const raw = readFileSync(resolve(root, file), 'utf8');
+    const template = normalise(stripForUse(templateOf(raw, file)));
+    check(
+      !/free\s+assessment/i.test(template),
+      `${file}: renders "free assessment", which is false under the credit model`,
+    );
+  }
+
+  // THE THIRD SURFACE, and the only one that carries the checkbox.
+  //
+  // The two pins above cover the `.astro` surfaces and the email script covers
+  // both mail bodies — which left the island, where the acknowledgment actually
+  // happens, covered by nothing. A review deleted the whole terms box from step
+  // 3 and every gate stayed green, `svelte-check` included (the orphaned
+  // imports raise no error). The customer would reach step 3, read
+  // FEE_TERMS_ACK_LABEL — "I understand the assessment terms above." — with
+  // nothing above it, tick it, and have `terms_acked_at` stamped against terms
+  // never shown.
+  //
+  // The file's own comment already calls the box-then-checkbox adjacency an
+  // invariant and "a claim about this markup". This is that claim's gate.
+  // ORDER IS ASSERTED, not just presence: a box rendered BELOW the checkbox
+  // satisfies every `includes` while making the label's "above" a lie.
+  const island = stripForUse(readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8'));
+  for (const constant of [
+    'FEE_TERMS_HEADING',
+    'FEE_TERMS_INTRO',
+    'FEE_TERMS_ITEMS',
+    'FEE_TERMS_OUTRO',
+    'FEE_TERMS_ACK_LABEL',
+  ]) {
+    check(island.includes(constant), `the booking island renders ${constant}`);
+  }
+  const boxAt = island.indexOf('FEE_TERMS_HEADING');
+  const ackAt = island.indexOf('FEE_TERMS_ACK_LABEL');
+  const outroAt = island.indexOf('FEE_TERMS_OUTRO');
+  check(
+    boxAt > 0 && ackAt > boxAt,
+    'the island\'s terms box renders ABOVE its acknowledgment label, which is what that label claims',
+  );
+  check(
+    outroAt > 0 && ackAt > outroAt,
+    'and the outro — the non-refundable term — is above it too, not stranded below the checkbox',
+  );
+  check(
+    island.includes('values.termsAck'),
+    'and the checkbox is still bound to the field the server enforces',
+  );
+
+  // NOT a check on `contact.astro`. The first version asserted that file
+  // contains no `FEE_TERMS` — which it cannot, since all it renders is
+  // `<ContactSection showForm={true} />`; the string could only appear there by
+  // someone importing a constant into a file that has no use for it. A check
+  // that cannot fail regardless of what the reviewed component does is the
+  // repo's own documented "a pin must be anchored to the construct it is about"
+  // trap, so it is gone rather than kept for reassurance.
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nBuilding with sentinel tracking labels…');
 // ---------------------------------------------------------------------------
 // The build runs even when part 1 has already failed. It is half a minute of

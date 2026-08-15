@@ -51,6 +51,12 @@ function values(overrides: Partial<FormValues> = {}): FormValues {
     email: 'sam@example.com',
     service: 'water',
     address: '123 Maple St',
+    // BK-27. `emptyFormValues()` spreads in above with `termsAck: false`, which
+    // is the right production default and the wrong test default: every step-3
+    // case here is about something else, and inheriting an untickable box would
+    // turn each of them green-for-the-wrong-reason. The arms below that test
+    // the acknowledgment override it.
+    termsAck: true,
     ...overrides,
   };
 }
@@ -140,6 +146,29 @@ console.log('Step validation');
     fieldsFor(3, values(), 1).length === 0,
     'one attachment must satisfy step 3',
   );
+
+  // BK-27's acknowledgment, both directions, and the two requirements
+  // independently: a visitor who has done neither must be told about both, or
+  // fixing one reveals the other and step 3 becomes a game of whack-a-mole.
+  check(
+    fieldsFor(3, values({ termsAck: false }), 1).includes('terms_ack'),
+    'step 3 must require the fee-terms acknowledgment',
+  );
+  check(
+    fieldsFor(3, values({ termsAck: true }), 1).length === 0,
+    'a ticked acknowledgment plus an attachment must satisfy step 3',
+  );
+  {
+    const both = fieldsFor(3, values({ termsAck: false }), 0);
+    check(both.includes('files') && both.includes('terms_ack'), 'both step-3 rules report together');
+    check(both.indexOf('files') < both.indexOf('terms_ack'), 'in the order the page presents them');
+  }
+  // The acknowledgment is a step-3 rule and only a step-3 rule. If it leaked
+  // into step 2, a visitor could never leave the page that collects it.
+  check(
+    !fieldsFor(2, values({ termsAck: false })).includes('terms_ack'),
+    'and it must never block step 2, which is where the box does not exist yet',
+  );
   console.log('  required, optional, and conditional rules hold');
 }
 
@@ -161,6 +190,13 @@ console.log('\nStep routing for server field errors');
   // the generic form error, and the visitor reads "please check your details"
   // with nothing highlighted and no way to learn what is wrong.
   check(stepForErrors([{ field: 'files', message: 'x' }]) === 3, 'files routes to step 3');
+  // BK-27: the box IS on step 3, but without the FIELD_STEPS entry a server 422
+  // naming only `terms_ack` degrades to the generic form message — beside an
+  // unticked checkbox the visitor is never told to tick.
+  check(
+    stepForErrors([{ field: 'terms_ack', message: 'x' }]) === 3,
+    'terms_ack routes to step 3',
+  );
   check(stepForErrors([{ field: '_', message: 'x' }]) === null, 'an unmapped field routes nowhere');
   check(stepForErrors([]) === null, 'no errors routes nowhere');
   console.log('  earliest mappable step wins, unmapped routes to null');
@@ -179,6 +215,13 @@ console.log('\nPayload assembly');
     'draft_token must be present when a draft exists',
   );
   check(typeof payload.sms_consent === 'boolean', 'sms_consent must always be a boolean');
+  // Always sent and always a boolean — never omitted. The server 422s on a
+  // non-boolean, and an absent key is indistinguishable from a refusal.
+  check(typeof payload.terms_ack === 'boolean', 'terms_ack must always be a boolean');
+  check(
+    assembleBookingPayload(values({ termsAck: false }), null).terms_ack === false,
+    'and an unticked box must be sent as false rather than dropped',
+  );
   check(payload.slot_start === SLOT, 'slot_start must be posted back verbatim');
 
   const priv = assembleBookingPayload(
@@ -232,6 +275,20 @@ console.log('\nAssembled payloads survive the real server validator');
   check(plain.ok, `a private-route payload must parse server-side (got ${JSON.stringify(plain.ok ? [] : plain.errors)})`);
   check(plain.ok && plain.payload.draftToken === null, 'an omitted draft_token reads as null server-side');
   check(plain.ok && plain.payload.smsConsent === false, 'consent must arrive false');
+  // BK-27, the end-to-end shape claim: the island's own ticked box is what the
+  // server reads as an acknowledgment. The mirror image matters more — an
+  // unticked box must produce a payload the server REFUSES, because a client
+  // that quietly assembles `terms_ack: true` would acknowledge terms on the
+  // customer's behalf, which is the one thing this feature cannot do.
+  check(plain.ok && plain.payload.termsAcked === true, 'a ticked box must arrive as an acknowledgment');
+  const unticked = parseBookingPayload(
+    assembleBookingPayload(values({ termsAck: false }), null),
+    opts,
+  );
+  check(
+    !unticked.ok && unticked.errors.some((e) => e.field === 'terms_ack'),
+    'an unticked box must be refused by the server, not assembled away',
+  );
 
   const consented = parseBookingPayload(
     assembleBookingPayload(values({ smsConsent: true }), 'v1.a.b.c'),

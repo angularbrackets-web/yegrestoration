@@ -324,6 +324,24 @@ function statusClasses(status: Appointment['status']) {
             </dd>
           </div>
           <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Assessment terms</dt>
+            <dd class="text-white">
+              {appointment.terms_acked_at
+                ? formatAdminTimestamp(appointment.terms_acked_at)
+                : appointment.source === 'admin'
+                  ? <span class="text-zinc-500">Exempt — office entry</span>
+                  /*
+                    "Not recorded", not "Not acknowledged". A web row cannot
+                    reach this arm once BK-27 is deployed — the endpoint refuses
+                    the booking — so the only rows that ever show it are the
+                    handful that predate migration 005. "Not acknowledged" reads
+                    as a customer who refused; they were never asked.
+                  */
+                  : <span class="text-zinc-500">Not recorded — predates the terms</span>
+              }
+            </dd>
+          </div>
+          <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Reminder</dt>
             <dd class="text-white">
               {appointment.reminder_sent_at

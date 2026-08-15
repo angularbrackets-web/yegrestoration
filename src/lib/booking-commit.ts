@@ -62,13 +62,14 @@ export async function insertBooking(
       INSERT INTO appointments (
         name, phone, email, service, description, address, city, postal_code,
         payment_route, insurer_name, policy_number, claim_number,
-        slot_start, source, sms_consent_at, admin_notes
+        slot_start, source, sms_consent_at, terms_acked_at, admin_notes
       ) VALUES (
         ${p.name}, ${p.phone}, ${p.email}, ${p.service}, ${p.description},
         ${p.address}, ${p.city}, ${p.postal_code},
         ${p.payment_route}, ${p.insurer_name}, ${p.policy_number}, ${p.claim_number},
         ${p.slotStart.toISOString()}, ${source},
-        ${p.smsConsent ? now.toISOString() : null}, ${adminNotes}
+        ${p.smsConsent ? now.toISOString() : null},
+        ${p.termsAcked ? now.toISOString() : null}, ${adminNotes}
       )
       ON CONFLICT (slot_start) WHERE status <> 'cancelled' DO NOTHING
       RETURNING id

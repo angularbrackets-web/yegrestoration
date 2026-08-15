@@ -75,6 +75,12 @@ export type Appointment = {
   source: 'web' | 'admin';
   /** Timestamp of CASL opt-in. Null means no consent — do not send SMS. */
   sms_consent_at: Date | null;
+  /**
+   * When the customer acknowledged the assessment fee terms (BK-27). Null is
+   * correct and permanent for admin entries — exempt, the office explains the
+   * terms on the phone — and for every row that predates migration 005.
+   */
+  terms_acked_at: Date | null;
   reminder_sent_at: Date | null;
   /** Set only when the customer's confirmation email actually sent. NULL = never sent. */
   confirmation_sent_at: Date | null;

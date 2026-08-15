@@ -207,6 +207,13 @@ function baseFields(slot: Date, overrides: Record<string, unknown> = {}) {
     city: 'Edmonton',
     payment_route: 'private',
     slot_start: slot.toISOString(),
+    // BK-27: the public door refuses a booking without this, so it belongs in
+    // the SHARED builder rather than in the arms that happen to think about it.
+    // Putting it in `payload()` alone would 422 every `payloadWithoutFiles`
+    // call for the wrong reason — the file arms would still be red, still
+    // "pass", and would have stopped testing files at all. Same shape of trap
+    // as BK-22's draft-token blocker, one layer down.
+    terms_ack: true,
     ...overrides,
   };
 }
@@ -362,6 +369,11 @@ try {
             claim_number: null,
             slotStart: slot,
             smsConsent: false,
+            // These racers go through `insertBooking` directly, below the
+            // parser, so the value here is the office door's: an admin entry
+            // acknowledges nothing (BK-27). The stamp assertions live in the
+            // endpoint arms, which is where the public requirement is enforced.
+            termsAcked: false,
             draftToken: null,
           },
           racerDrafts[i],
@@ -673,6 +685,86 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  console.log('\nAssessment fee terms (BK-27)');
+  // -------------------------------------------------------------------------
+  {
+    // At the endpoint, not the parser, for the reason the email arm above
+    // exists: `verify:booking:payload` proves the RULE, and only this proves
+    // the route asks for it. Change `entry: 'public'` at `create.ts`'s
+    // `parseBookingPayload` call and every parser assertion stays green while
+    // the public form quietly stops requiring the acknowledgment.
+    const withoutAck = payload(nextSlot()) as Record<string, unknown>;
+    delete withoutAck.terms_ack;
+    const noAck = await post(withoutAck);
+    check(noAck.status === 422, `a public POST with no acknowledgment must 422 (got ${noAck.status})`);
+    check(
+      Array.isArray(noAck.body?.fields) &&
+        noAck.body.fields.some((f: { field: string }) => f.field === 'terms_ack'),
+      'and it must name the `terms_ack` field, or the island cannot route it to step 3',
+    );
+
+    const refused = await post(payload(nextSlot(), { terms_ack: false }));
+    check(refused.status === 422, `an explicit refusal must 422 (got ${refused.status})`);
+
+    // The happy path, and the stamp. `terms_acked_at` is the whole record of
+    // the acknowledgment — a 201 that writes NULL is a booking nobody can prove
+    // agreed to anything.
+    const ackedSlot = nextSlot();
+    const before = Date.now();
+    const acked = await post(payload(ackedSlot, { name: `${NAME} terms` }));
+    check(acked.status === 201, `an acknowledged booking must commit (got ${acked.status})`);
+    const ackRow = (await sql`
+      SELECT terms_acked_at, source FROM appointments WHERE id = ${acked.body?.id}
+    `) as { terms_acked_at: Date | null; source: string }[];
+    check(ackRow[0]?.terms_acked_at != null, 'and it must stamp terms_acked_at');
+    if (ackRow[0]?.terms_acked_at) {
+      // Bounded on both sides. `!= null` alone passes for a column defaulting
+      // to some fixed instant, or to the epoch.
+      const stamped = new Date(ackRow[0].terms_acked_at).getTime();
+      check(
+        stamped >= before - 60_000 && stamped <= Date.now() + 60_000,
+        'with the instant of the booking, not a default',
+      );
+    }
+
+    // The office door, through the same statement the admin route runs. The
+    // exemption is not "admin sends true anyway" — it is that nothing is
+    // acknowledged and nothing is stamped, with no second statement to do it.
+    const adminSlot = nextSlot();
+    const adminCreated = await insertBooking(
+      sql,
+      {
+        name: `${NAME} terms admin`,
+        phone: '7805550134',
+        email: null,
+        service: 'water',
+        description: null,
+        address: '1 Test Way',
+        city: 'Edmonton',
+        postal_code: null,
+        payment_route: 'private',
+        insurer_name: null,
+        policy_number: null,
+        claim_number: null,
+        slotStart: adminSlot,
+        smsConsent: false,
+        termsAcked: false,
+        draftToken: null,
+      },
+      null,
+      new Date(),
+      'admin',
+    );
+    check(adminCreated !== null, 'an admin entry must commit');
+    const adminRow = (await sql`
+      SELECT terms_acked_at FROM appointments WHERE id = ${adminCreated?.id ?? -1}
+    `) as { terms_acked_at: Date | null }[];
+    check(adminRow[0]?.terms_acked_at === null, 'and must leave terms_acked_at NULL — exempt');
+
+    console.log('  required and stamped on the public door, NULL and exempt on the office door');
+  }
+
+  // -------------------------------------------------------------------------
   console.log('\nDraft token integrity');
   // -------------------------------------------------------------------------
   {
@@ -820,6 +912,7 @@ try {
           claim_number: null,
           slotStart: nextSlot(),
           smsConsent: false,
+          termsAcked: false,
           draftToken: null,
         },
         null,

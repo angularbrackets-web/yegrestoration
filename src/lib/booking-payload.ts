@@ -55,6 +55,12 @@ export type BookingPayload = {
   slotStart: Date;
   /** Present only when consent was given; its presence IS the consent (CASL). */
   smsConsent: boolean;
+  /**
+   * Whether the assessment fee terms were acknowledged (BK-27). Always false on
+   * an admin entry, which is exempt — see `ParseOptions.entry`. `insertBooking`
+   * turns true into a `terms_acked_at` stamp.
+   */
+  termsAcked: boolean;
   /** The raw token, still unverified. The endpoint decides what it means. */
   draftToken: string | null;
 };
@@ -227,6 +233,23 @@ export function parseBookingPayload(input: unknown, options: ParseOptions): Pars
     add('sms_consent', 'Consent must be true or false.');
   }
 
+  // BK-27's fee-terms acknowledgment. Two checks, deliberately separate: the
+  // shape check runs on both doors, because `terms_ack: "true"` is a malformed
+  // request whichever door it came through, while the *requirement* is public
+  // only (the office explains the terms on the phone — the same exemption BK-22
+  // gave email and photos, through the same discriminator).
+  //
+  // The requirement tests `!== true` rather than falsiness so that only a
+  // literal boolean true clears it. An acknowledgment is a statement the
+  // customer made; `1`, `"on"` and `"true"` are shapes a hand-built request can
+  // wear, and none of them is that statement.
+  const termsRaw = raw.terms_ack;
+  if (termsRaw !== undefined && typeof termsRaw !== 'boolean') {
+    add('terms_ack', 'Acknowledgment must be true or false.');
+  } else if (options.entry === 'public' && termsRaw !== true) {
+    add('terms_ack', 'Please confirm you understand the assessment terms.');
+  }
+
   const draftTokenRaw = raw.draft_token;
   if (draftTokenRaw !== undefined && typeof draftTokenRaw !== 'string') {
     add('draft_token', 'Invalid upload session.');
@@ -251,6 +274,10 @@ export function parseBookingPayload(input: unknown, options: ParseOptions): Pars
       claim_number,
       slotStart: slotStart as Date,
       smsConsent: consentRaw === true,
+      // Not `options.entry === 'public'`: what is recorded is what the customer
+      // actually ticked, not what the door required. An admin entry therefore
+      // carries false and stamps nothing, which is what the exemption means.
+      termsAcked: termsRaw === true,
       draftToken: typeof draftTokenRaw === 'string' ? draftTokenRaw : null,
     },
   };

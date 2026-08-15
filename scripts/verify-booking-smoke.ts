@@ -358,6 +358,10 @@ try {
       address: '123 Smoke St',
       description: 'Automated smoke test.',
       smsConsent: true,
+      // Required on the public door since BK-27. `emptyFormValues()` defaults
+      // it to false — deliberately, so an unticked box fails closed — which
+      // makes this line the difference between a smoke run and a 422.
+      termsAck: true,
     },
     draft.draftToken,
   );

@@ -103,3 +103,107 @@ export const RESTORED_LEAD =
 
 export const RESTORED_CALENDAR_LINE =
   'A calendar invite is attached — open it to put the appointment back on your calendar.';
+
+// ---------------------------------------------------------------------------
+// The assessment fee terms (BK-27)
+//
+// THE PRICING MODEL CHANGED ON 2026-08-14, AFTER THIS BLOCK WAS FIRST WRITTEN.
+// The earlier version said the assessment "costs you nothing if you go ahead"
+// and priced only the walk-away. That was a *waiver* model and it is gone.
+// Under the settled model EVERY customer pays at the end of the visit, and the
+// amount is CREDITED IN FULL against the final invoice if they go ahead — so it
+// costs nothing in the end, but it is never free at the point of sale. The
+// difference is not a nuance: it is the difference between "free assessment"
+// being conditionally true and being false, which is why BK-29 (the site-wide
+// "free assessment" sweep) is a hard blocker on deploying this.
+//
+// THE FIGURES, THE THREE TIERS AND THE CREDIT ARE THE CLIENT'S OWN, relayed
+// 2026-08-14 — $399 / $699 / $1,199, all + GST, all credited in full on
+// proceeding, all non-refundable otherwise, paid on site, nothing charged at
+// booking. They are not implementer drafting and must not be edited on
+// anybody's judgment. The SENTENCES around them are ours and may be tightened.
+//
+// This is customer-visible *pricing*: a wrong number here is a dispute at the
+// kitchen table, not a typo.
+//
+// The dollar figures live in ONE place — here. The verify script asserts these
+// constants against the email and the two surfaces rather than against retyped
+// literals, so a client edit does not fail the gate, but it separately asserts
+// that these strings still contain the numbers, so an edit cannot silently
+// delete the price either.
+// ---------------------------------------------------------------------------
+
+export const FEE_TERMS_HEADING = 'Assessment terms';
+
+/**
+ * The baseline and the credit, before the tiers rather than after them. A
+ * visitor who reads only this line has read the two facts that decide whether
+ * they book: there is a fee, and it comes back off the invoice.
+ *
+ * "Paid at the end of the visit" is load-bearing. The implementation review's
+ * open question Q8 was that a customer ticks a box agreeing to a charge with no
+ * surface saying WHEN it lands; the client settled it (on site, at the end of
+ * the visit), so the answer is stated here rather than left to be inferred.
+ */
+export const FEE_TERMS_INTRO =
+  'The assessment is paid at the end of the visit, starting at $399 + GST. If you go ahead with the restoration work, we credit the full amount against your final invoice.';
+
+/**
+ * The three tiers, in the client's own figures (relayed 2026-08-14).
+ *
+ * Three things here are the client's statement rather than drafting, and none
+ * of them may be "tidied":
+ *
+ *   - **`+ GST`.** The figures are before tax. Dropping it would understate a
+ *     real price by 5%, which is the direction that ends in an argument at the
+ *     kitchen table. Asserted separately in `verify-booking-email.ts`.
+ *   - **`$1,199`, not "up to $1,200".** An early relay said "up to $1,200"; the
+ *     client's own wording is a fixed $1,199. An "up to" on a fixed price
+ *     invites the customer to expect less than they will be billed.
+ *   - **"includes the report and estimate".** The tiers are alternatives, not
+ *     line items. The clause exists so that $399 + $699 + $1,199 is not a
+ *     reading anybody can arrive at honestly (BK-27 Q4, confirmed).
+ */
+export const FEE_TERMS_ITEMS: readonly string[] = [
+  '$399 + GST — the on-site assessment',
+  '$699 + GST — the assessment plus a written cause-of-loss report and a repair estimate',
+  '$1,199 + GST — adds a sketch or diagram you can use for an insurance claim, and includes the report and estimate',
+];
+
+/**
+ * What the list cannot say, and what the customer is actually agreeing to.
+ *
+ * Two sentences, two jobs, and neither is decoration:
+ *
+ *   - **Nothing is charged at booking.** The site never takes money (client,
+ *     locked). Without this line a visitor ticking a box beside "$1,199" has
+ *     every reason to think the next button charges them.
+ *   - **The tier is settled on the day.** There is no tier picker on the form
+ *     yet — that is BK-31 — so the drafted "whichever you choose" would have
+ *     been a claim about a control that does not exist. It said "you can move up
+ *     to a higher one then" for a while, which a review pointed out presumes a
+ *     baseline the form never collects: you cannot upgrade from a choice you
+ *     were never asked to make. Dropped. Choosing on the day is non-binding by
+ *     construction, so the client's "not binding" point needs no sentence until
+ *     BK-31 gives the customer something to be bound to — and that sentence is
+ *     BK-31's to write.
+ *   - **Non-refundable, stated at the point of acknowledgment.** The client was
+ *     explicit that the fee is not refundable if the customer does not proceed,
+ *     and an undisclosed non-refundable term is the one most likely to be
+ *     disputed. It renders inside the same box as the checkbox on every surface,
+ *     which is what makes the acknowledgment mean anything.
+ */
+export const FEE_TERMS_OUTRO: readonly string[] = [
+  'Nothing is charged when you book. Tell the tech on the day which of these you want.',
+  'Whichever you choose, the full amount comes off your invoice if you hire us. It is not refundable if you decide not to go ahead.',
+];
+
+/**
+ * The checkbox label.
+ *
+ * It references the box rather than restating the figures, so the numbers exist
+ * once. The rendered terms box must therefore sit immediately above the
+ * checkbox on every surface that shows one — "above" is a claim this label
+ * makes about the page.
+ */
+export const FEE_TERMS_ACK_LABEL = 'I understand the assessment terms above.';
