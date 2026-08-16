@@ -611,6 +611,67 @@ console.log('\nWhat actually reaches the browser (AC5)');
   check(!sitemap.includes('/book/confirmed/'), 'and /book/confirmed/ is not');
   check(!sitemap.includes('/admin'), 'and neither is anything under /admin');
 
+  // -------------------------------------------------------------------------
+  // BK-29: "free assessment" reaches the browser NOWHERE.
+  //
+  // THIS READS THE BUILT OUTPUT, AND THAT IS THE WHOLE POINT. BK-27 pinned the
+  // two booking surfaces at SOURCE level, which is narrower and fails earlier
+  // with a better message — but `/book/` rendered the phrase 7 times without
+  // `book.astro` containing it once, because `<Navbar />` does. A source-level
+  // sweep of the page files passes while the page says it. Chrome, layouts and
+  // island bundles are only visible here.
+  //
+  // Scoped to `.html` AND `.js`: a Svelte island's strings compile into its
+  // bundle, so a client-rendered CTA would never appear in the HTML.
+  //
+  // EVERY offending file is reported, not the first. A 51-claim sweep gets
+  // iterated on, and a gate that names one file per run turns a morning into a
+  // day.
+  //
+  // MATCHED ON THE CLAIM, NOT ON THE ADJACENT PAIR OF WORDS. The first version
+  // was `/free(\s|&nbsp;)+assessments?/i`, which reads like a check on "does
+  // this page say the assessment is free" and is actually a check on whether
+  // two specific words are neighbours. Its own red pass caught it: the page at
+  // `/book/confirmed/` says "Your **free on-site restoration** assessment is
+  // booked" — three words in between — and stayed green. It had appeared in the
+  // first red run only because the Navbar's "Free Assessment" was still on the
+  // page, so the file looked covered while the claim on it was invisible.
+  //
+  // Two shapes, because the claim has two grammars: the adjectival ("free
+  // on-site assessment") and the predicative ("the assessment is free"). Both
+  // bounded by `[^.<>]` so a match cannot run across a sentence break or out of
+  // one HTML element into another — that bound is what keeps "…frees up your
+  // crew. The assessment…" from reading as a hit.
+  //
+  // No separate entity handling needed now: `&nbsp;` is ordinary text to
+  // `[^.<>]`. `normalise()` is still applied for the source-level pins, where
+  // the regex is tighter.
+  const BANNED_SHAPES = [
+    /\bfree[^.<>]{0,40}?assessments?\b/i,
+    /\bassessments?\b[^.<>]{0,24}?\b(?:is|are|'s)\s+free\b/i,
+  ];
+  const BANNED = { test: (s: string) => BANNED_SHAPES.some((r) => r.test(s)) };
+  const offenders = bundles.filter((f) => BANNED.test(readFileSync(f, 'utf8')));
+  check(
+    offenders.length === 0,
+    offenders.length === 0
+      ? 'no built page or bundle claims a "free assessment"'
+      : `"free assessment" reaches the browser in ${offenders.length} built file(s): ${offenders
+          .map((f) => relative(root, f))
+          .join(', ')}`,
+  );
+
+  // `llms.txt` is generated, is not `.html` or `.js`, and the glob above would
+  // miss it. It is also the file an AI assistant quotes with no page around it
+  // to qualify the claim, which makes an inaccuracy here worse than one on a
+  // marketing page rather than more obscure.
+  const llms = resolve(clientDir, 'llms.txt');
+  check(existsSync(llms), 'llms.txt was generated');
+  check(
+    existsSync(llms) && !BANNED.test(readFileSync(llms, 'utf8')),
+    'and llms.txt does not tell an assistant the assessment is free',
+  );
+
   // The robots meta specifically, not the word anywhere in the file: Astro
   // ships HTML comments, so a comment ABOUT noindex would otherwise read as a
   // noindex. (That is not hypothetical — it is how this assertion first went

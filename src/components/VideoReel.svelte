@@ -90,7 +90,7 @@
           Every project tells a story. Watch our teams respond, remediate, and rebuild — returning
           homes and businesses to better than before.
         </p>
-        <a href="/book/" class="cta-primary">Book a Free Assessment</a>
+        <a href="/book/" class="cta-primary">Book Your Assessment</a>
       </div>
 
       <!-- Right: Video Accordion -->

@@ -346,7 +346,7 @@
           onclick={(e) => handleLinkClick(e, '/book/')}
           class="flex items-center gap-2 bg-yeg-amber/10 hover:bg-yeg-amber/[0.15] border border-yeg-amber-deep/30 hover:border-yeg-amber-deep/50 text-yeg-amber-deep rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200"
         >
-          Free Assessment
+          Book Assessment
         </a>
         <a
           href="tel:+17804793285"
@@ -458,7 +458,7 @@
         onclick={(e) => handleLinkClick(e, '/book/')}
         class="flex items-center justify-center gap-2.5 w-full py-3.5 bg-yeg-amber/10 border border-yeg-amber-deep/30 text-yeg-amber-deep rounded-xl font-semibold text-base hover:bg-yeg-amber/[0.15] hover:border-yeg-amber-deep/50 transition-all"
       >
-        Book a Free Assessment
+        Book Your Assessment
       </a>
       <a
         href="tel:+17804793285"

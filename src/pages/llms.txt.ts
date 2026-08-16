@@ -35,7 +35,7 @@ Key facts:
 
 - 24/7 emergency response, on-site in Edmonton in about 60 minutes
 - Serving Edmonton and surrounding Alberta communities (St. Albert, Sherwood Park, Spruce Grove, Leduc, Fort Saskatchewan, and more) since ${BUSINESS.foundingYear}
-- IICRC-certified crews, free assessments, written guarantee
+- IICRC-certified crews, written scopes, written guarantee
 - Direct insurance billing — we work with all major Canadian insurers
 - Phone: ${BUSINESS.phone} · Email: ${BUSINESS.email}
 
@@ -51,7 +51,7 @@ ${otherServices.join('\n')}
 
 - [Insurance Claims Guide](${site}/insurance-claims/): How the insurance claim process works with restoration, and how direct billing removes the paperwork burden.
 - [About](${site}/about/): Who we are, certifications, and how we work.
-- [Book an Assessment](${site}/book/): Pick a time for a free on-site assessment — about 30 minutes, confirmed instantly. This is the way to request a quote.
+- [Book an Assessment](${site}/book/): Pick a time for an on-site assessment — about 30 minutes, confirmed instantly. The assessment is paid at the end of the visit and credited in full against the final invoice if the customer goes ahead with the work. This is the way to request a quote.
 - [Contact](${site}/contact/): Send a message with a question, or reach the 24/7 emergency line.
 
 ## Blog

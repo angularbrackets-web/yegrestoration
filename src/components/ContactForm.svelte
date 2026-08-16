@@ -124,7 +124,7 @@
           Have a question or want a quote? Send us a message
         </h3>
         <p class="text-sm text-yeg-text-secondary">
-          We answer every message the same business day. Ready to book a free on-site assessment
+          We answer every message the same business day. Ready to book an on-site assessment
           instead? <a class="text-yeg-amber-deep font-semibold" href="/book/">Pick a time</a>.
         </p>
       </div>

@@ -27,7 +27,7 @@ export const BUSINESS = {
   // the about page so search engines and AI assistants see one consistent
   // description of who we are. Edit here, never inline.
   description:
-    'YEG Restoration is a 24/7 emergency property restoration company serving Edmonton and surrounding Alberta communities since 2008. IICRC-certified crews handle water damage, fire and smoke damage, mold removal, sewage cleanup, and storm damage repair — with free assessments, a written guarantee, and direct insurance billing.',
+    'YEG Restoration is a 24/7 emergency property restoration company serving Edmonton and surrounding Alberta communities since 2008. IICRC-certified crews handle water damage, fire and smoke damage, mold removal, sewage cleanup, and storm damage repair — with written scopes, a written guarantee, and direct insurance billing.',
 } as const;
 
 export interface ServiceFaq {
@@ -100,10 +100,10 @@ export const services: Service[] = [
       h1: 'Water Damage Restoration in Edmonton',
       metaTitle: '24/7 Water Damage Restoration Edmonton | YEG Restoration',
       metaDescription:
-        'Flooded basement or burst pipe? A crew is at your door in about 60 minutes, 24/7. Free assessment, direct insurance billing. Call (780) 479-3285.',
+        'Flooded basement or burst pipe? A crew is at your door in about 60 minutes, 24/7. Written scope, direct insurance billing. Call (780) 479-3285.',
       heroTagline: 'On-site in about 60 minutes — any hour, any day',
       heroCopy:
-        'Every hour water sits, it soaks deeper into your floors, walls, and framing. Call now and an IICRC-certified crew starts extraction today — free assessment, written guarantee, and we bill your insurance directly.',
+        'Every hour water sits, it soaks deeper into your floors, walls, and framing. Call now and an IICRC-certified crew starts extraction today — written scope, written guarantee, and we bill your insurance directly.',
       process: [
         {
           step: '01',
@@ -175,10 +175,10 @@ export const services: Service[] = [
       h1: 'Fire & Smoke Damage Restoration in Edmonton',
       metaTitle: 'Fire & Smoke Damage Restoration Edmonton | YEG Restoration',
       metaDescription:
-        'After the fire truck leaves, call us. 24/7 board-up, soot removal & odour elimination. Free assessment, direct insurance billing. (780) 479-3285.',
+        'After the fire truck leaves, call us. 24/7 board-up, soot removal & odour elimination. Written scope, direct insurance billing. (780) 479-3285.',
       heroTagline: 'The fire is out. Now get your home back.',
       heroCopy:
-        'Soot keeps corroding surfaces and smoke keeps sinking into walls long after the flames are out. Our IICRC-certified crew secures your home today, then removes every trace — the damage, the residue, and the smell — while we handle your insurance claim directly. Free assessment, written guarantee.',
+        'Soot keeps corroding surfaces and smoke keeps sinking into walls long after the flames are out. Our IICRC-certified crew secures your home today, then removes every trace — the damage, the residue, and the smell — while we handle your insurance claim directly. Written scope, written guarantee.',
       process: [
         {
           step: '01',
@@ -218,7 +218,7 @@ export const services: Service[] = [
         {
           question: 'Can I stay in my home during fire restoration?',
           answer:
-            'It depends on the extent of the damage. Small, contained fires often allow you to stay while we work; significant smoke contamination or structural damage usually means a temporary move — which your policy’s additional living expense coverage typically pays for. We give you a straight answer at the free assessment, not a sales pitch.',
+            'It depends on the extent of the damage. Small, contained fires often allow you to stay while we work; significant smoke contamination or structural damage usually means a temporary move — which your policy’s additional living expense coverage typically pays for. We give you a straight answer at the assessment, not a sales pitch.',
         },
         {
           question: 'How long does fire damage restoration take?',
@@ -250,14 +250,14 @@ export const services: Service[] = [
       h1: 'Mold Removal in Edmonton',
       metaTitle: 'Mold Removal & Remediation Edmonton | YEG Restoration',
       metaDescription:
-        'Certified mold removal in Edmonton — containment, HEPA filtration, and the moisture fix that stops it coming back. Free assessment: (780) 479-3285.',
+        'Certified mold removal in Edmonton — containment, HEPA filtration, and the moisture fix that stops it coming back. Call (780) 479-3285.',
       heroTagline: 'Removed at the root — not painted over',
       heroCopy:
-        'Mold you can see is usually a fraction of what’s growing behind the wall. Our IICRC-certified crew contains it, removes it safely, and fixes the moisture problem that caused it — so it doesn’t come back. Free assessment, written guarantee.',
+        'Mold you can see is usually a fraction of what’s growing behind the wall. Our IICRC-certified crew contains it, removes it safely, and fixes the moisture problem that caused it — so it doesn’t come back. Written scope, written guarantee.',
       process: [
         {
           step: '01',
-          timing: 'Free assessment',
+          timing: 'Assessment',
           title: 'Find all of it',
           copy: 'Moisture meters and inspection find the full extent — including growth inside walls and under floors that surface cleaning misses. You get a written scope before any work starts.',
         },
@@ -278,7 +278,7 @@ export const services: Service[] = [
         {
           question: 'Is mold in my house dangerous to my family?',
           answer:
-            'It can be — mold exposure commonly triggers allergy symptoms, congestion, and breathing irritation, and it’s a bigger risk for children, seniors, asthmatics, and anyone immunocompromised. Health Canada recommends removing any indoor mold growth regardless of the type. If you can see or smell mold, it’s worth a free assessment to find out how far it actually goes.',
+            'It can be — mold exposure commonly triggers allergy symptoms, congestion, and breathing irritation, and it’s a bigger risk for children, seniors, asthmatics, and anyone immunocompromised. Health Canada recommends removing any indoor mold growth regardless of the type. If you can see or smell mold, it’s worth an assessment to find out how far it actually goes.',
         },
         {
           question: 'Can I remove mold myself?',
@@ -288,7 +288,7 @@ export const services: Service[] = [
         {
           question: 'How much does mold removal cost in Edmonton?',
           answer:
-            'It depends on how far the growth extends and what has to be removed — which is exactly why we start with a free assessment and a written scope, so you know the cost before any work begins. If the mold was caused by a sudden covered water loss, your insurance may cover remediation, and we bill the insurer directly.',
+            'It depends on how far the growth extends and what has to be removed — which is exactly why we start with an assessment and a written scope, so you know the cost before any work begins. If the mold was caused by a sudden covered water loss, your insurance may cover remediation, and we bill the insurer directly.',
         },
         {
           question: 'Will the mold come back after removal?',
@@ -343,7 +343,7 @@ export const services: Service[] = [
       h1: 'Sewage Cleanup in Edmonton',
       metaTitle: 'Sewage Backup Cleanup Edmonton | 24/7 | YEG Restoration',
       metaDescription:
-        'Sewage backup? It’s Category 3 water — keep your family away. Certified 24/7 cleanup, free assessment, direct insurance billing. (780) 479-3285.',
+        'Sewage backup? It’s Category 3 water — keep your family away. Certified 24/7 cleanup, written scope, direct insurance billing. (780) 479-3285.',
       heroTagline: 'Don’t touch it. Call us.',
       heroCopy:
         'Sewage backup is Category 3 “black water” — it carries bacteria and viruses that make it a health hazard, not a cleanup chore. Our certified crew extracts it, disinfects everything it touched, and disposes of what can’t be saved. On-site in about 60 minutes, and we bill your insurance directly.',
@@ -386,7 +386,7 @@ export const services: Service[] = [
         {
           question: 'Can I clean up a small sewage spill myself?',
           answer:
-            'We don’t recommend it. Even a small backup contaminates porous materials — carpet, drywall, insulation — that look fine after wiping but hold bacteria inside. Proper cleanup means removing those materials and disinfecting with the right agents and protective equipment. Our assessment is free, so it costs nothing to find out what the spill actually touched.',
+            'We don’t recommend it. Even a small backup contaminates porous materials — carpet, drywall, insulation — that look fine after wiping but hold bacteria inside. Proper cleanup means removing those materials and disinfecting with the right agents and protective equipment. The assessment gives you a written scope, so you know exactly what the spill actually touched.',
         },
         {
           question: 'How fast can you get here?',

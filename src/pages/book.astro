@@ -12,24 +12,22 @@ import {
   FEE_TERMS_OUTRO,
 } from '../lib/booking-copy';
 
-// BK-27 reworded the rendered header, and `verify-cutover.ts` now PINS the
-// template against "free assessment" — but the pin stops at the frontmatter
-// fence, and this is why.
+// BK-27 reworded the rendered header and pinned the template; BK-29 finished
+// the job here, in the frontmatter, which BK-27's source-level pin deliberately
+// did not reach.
 //
 // The 2026-08-14 credit model made "free assessment" false at the point of
-// sale: every customer pays on the day. On the rendered page that mattered
-// immediately, because the words sat inches from the box quoting $399. Up here
-// it is a different trade-off. `title` is the page's SEARCH surface — "book a
-// free assessment" is the query people type — and it is one of ~50 such strings
-// across the site whose sweep is BK-29, a ticket that is already a hard blocker
-// on deploying this one. Changing it here alone would split that decision across
-// two commits and leave the nav and service pages disagreeing with the tab.
+// sale: every customer pays on the day. BK-27 left the title and the schema
+// `name` alone because they are the page's SEARCH surface — "book a free
+// assessment" is the query people type — and changing them alone would have
+// left the nav and the service pages disagreeing with the tab. BK-29 changes
+// all of it in one commit, which is what that deferral was waiting for.
 //
-// So: the title and the schema `name` are BK-29's, deliberately, and the pin is
-// scoped to say so. The DESCRIPTION is reworded — it is a full sentence with
-// room for the mechanism, Google renders it verbatim under the title, and
-// "credited back in full" is both accurate and no worse as a search snippet.
-const title = 'Book a Free Assessment | YEG Restoration Edmonton';
+// The lost keyword is a real cost and it is accepted rather than overlooked:
+// the page still ranks for "book assessment edmonton" and the description
+// carries the mechanism. Claiming a price of zero to hold a keyword is not a
+// trade this site gets to make.
+const title = 'Book an Assessment | YEG Restoration Edmonton';
 const description =
   'Pick a time for an on-site restoration assessment in Edmonton. About 30 minutes — the fee is credited back in full when you go ahead with the work.';
 
@@ -42,7 +40,7 @@ const schemas = [
   {
     '@context': 'https://schema.org',
     '@type': 'WebPage',
-    name: 'Book a Free Assessment',
+    name: 'Book an Assessment',
     description,
     url: `${BUSINESS.url}/book/`,
     mainEntity: { '@id': BUSINESS_ID },

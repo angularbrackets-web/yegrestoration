@@ -11,7 +11,7 @@ import { faqPageSchema, breadcrumbSchema } from '../lib/seo';
 
 const metaTitle = 'Insurance Claims Help Edmonton | YEG Restoration';
 const metaDescription =
-  'We handle your restoration insurance claim and bill your insurer directly — you typically pay just your deductible. Free assessment: (780) 479-3285.';
+  'We handle your restoration insurance claim and bill your insurer directly — you typically pay just your deductible. Call (780) 479-3285.';
 
 // 4-step claim walkthrough. ProcessSection's grid is 3-wide, so this section
 // is built inline on the same card styling — static, no entrance animation
@@ -67,7 +67,7 @@ const faqs: ServiceFaq[] = [
   {
     question: 'Will my insurance premiums go up if I file a claim?',
     answer:
-      'Possibly — it depends on your insurer, your claim history, and the size of the loss. That’s why small damage isn’t always worth claiming. At the free assessment we give you a written scope with real costs, so you can compare the repair against your deductible and likely premium impact and decide with actual numbers.',
+      'Possibly — it depends on your insurer, your claim history, and the size of the loss. That’s why small damage isn’t always worth claiming. At the assessment we give you a written scope with real costs, so you can compare the repair against your deductible and likely premium impact and decide with actual numbers.',
   },
   {
     question: 'What if my claim is denied?',
@@ -174,7 +174,7 @@ const schemas = [
               href="/book/?route=insurance"
               class="inline-flex items-center gap-2 px-5 py-3 rounded-full border border-black/15 text-yeg-text-secondary hover:text-yeg-text hover:border-black/25 transition-all duration-200 text-sm font-medium"
             >
-              Book Free Assessment
+              Book Assessment
               <span aria-hidden="true">&rarr;</span>
             </a>
           </div>
@@ -300,21 +300,21 @@ const schemas = [
       <div class="relative z-10 px-6 lg:px-[8vw]">
         <div class="max-w-2xl mx-auto text-center">
           <p class="text-xs font-medium text-yeg-amber-deep uppercase tracking-widest mb-3">
-            Free Assessment
+            Book an Assessment
           </p>
           <h2 class="font-display font-extrabold text-display-lg text-yeg-text mb-4">
             Get Help With Your Claim
           </h2>
           <p class="text-yeg-text-secondary text-lg mb-8">
-            Book a free on-site assessment and we'll document the damage the way your insurer
-            needs it — photos, scope, and moisture readings. About 30 minutes, no obligation.
+            Book an on-site assessment and we'll document the damage the way your insurer
+            needs it — photos, scope, and moisture readings. About 30 minutes.
             Active emergency? Call
             <a href={BUSINESS.phoneHref} class="font-semibold text-yeg-text hover:text-yeg-amber-deep transition-colors whitespace-nowrap">{BUSINESS.phone}</a>
             first — we answer live, 24/7.
           </p>
           <div class="flex flex-wrap items-center justify-center gap-4">
             <a href="/book/?route=insurance" class="cta-primary">
-              <span>Book a Free Assessment</span>
+              <span>Book Your Assessment</span>
               <span aria-hidden="true">&rarr;</span>
             </a>
             <a
