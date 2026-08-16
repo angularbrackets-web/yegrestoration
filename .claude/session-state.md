@@ -1,9 +1,11 @@
-# Session state — saved 2026-08-15 (Opus session: BK-27 copy revision, re-review, BK-29 draft)
+# Session state — saved 2026-08-16 (Opus session: BK-27 + BK-29 shipped to production)
 
 ## Read this first
 
-**BK-27 is committed and reviewed. It is NOT pushed, and pushing is the deploy.**
-Nothing in this session reached production.
+**BK-27 and BK-29 are DEPLOYED (2026-08-16).** Migration 005 was applied to
+production first, then 7 commits were pushed (`ec2d31d..1de17d0`) — which also
+carried BK-22, live code that had never deployed. Verified against the live
+site. Nothing is pending release.
 
 Everything durable is in the repo. This file is orientation, not the source of
 truth: `/CLAUDE.md` (process), `docs/booking/ROADMAP.md` (phases, Known traps,
@@ -11,12 +13,13 @@ P8), `docs/booking/tickets/BK-27.md` and `BK-29.md`.
 
 ## Exact tree state
 
-- **Working tree clean.** Both commits landed this session:
-  - `c20ade0` BK-29 draft
-  - `a1eedc9` BK-27 implementation
-- **5 unpushed commits on `main`**: the two above plus `95e0773`, `2adc752`
-  (BK-22 — live code that has never deployed) and `0daa89d`.
-- Migration 005 is **applied to dev**, **still pending on production**.
+- **Working tree clean, nothing unpushed.** `origin/main` == `main` == `1de17d0`.
+- Migration 005 is applied to **both** dev and production (`migrate --status`
+  bare = prod shows all five `✓`).
+- Live verification done: 12 pages + `llms.txt` return 0 "free assessment"
+  claims; `/book/` serves all three tiers, the terms box, the credit line and
+  the non-refundable line; `verify:booking:smoke` confirms both stamp columns
+  write without a type error.
 
 ## What BK-27 shipped
 
@@ -54,35 +57,38 @@ the violation shipped**, each proved by planting rather than argument:
 - The island's terms box — the only surface with the checkbox — had no pin.
 - `/refund/i` matched "It is **fully** refundable", the client's exact negation.
 
-**The recurring error, now four times in this ticket: writing a disclosure check
-as a keyword search.** A keyword red proves a weaker property than the assertion
+**The recurring error, five times across P8: writing a disclosure check as a
+keyword search.** (The fifth was BK-29's own dist gate, which matched `free`
+adjacent to `assessment` and missed "free on-site assessment".) A keyword red proves a weaker property than the assertion
 claims. What works is naming the accepted phrasings of the correct claim and
 explicitly refusing its negation. Written up in BK-27.md under "Re-review".
 
 ## Next actions, in order
 
-1. **Implement BK-29** (`docs/booking/tickets/BK-29.md`, drafted, plan review not
-   run). 51 claims / 22 files. **Its gate must read `dist/`, not source.** Expect
-   the new pin to be red until the sweep finishes — that is the intended
-   sequence, written into the ticket.
-2. **Apply migration 005 to production BEFORE the push.** New code names the
-   column, so new-code-on-old-schema 500s every booking, and production holds 5
-   real appointment rows.
-3. **Push BK-27 + BK-29 together.** Neither deploys alone.
-4. **BK-31** (tier selection at booking) after that. It owns rewriting the
-   outro's "Tell the tech on the day…" once a picker exists.
-5. BK-28 (homepage availability preview) and BK-23 remain queued behind P8.
+Nothing is blocked and nothing is pending release.
 
-## Open with the client
+1. **BK-31** — assessment tier selection at booking. The form has no picker, so
+   the copy currently says "Tell the tech on the day which of these you want."
+   BK-31 owns rewriting that line once a picker exists, and owns recording WHICH
+   tier was chosen (the re-review's S2 accepted that `terms_acked_at` proves a
+   box was ticked, not what it said).
+2. **BK-28** (homepage availability preview) and **BK-23** (review lifecycle),
+   both queued behind P8. BK-23 must move the fee-terms echo into the
+   application-received email when it splits the confirmation — handoff is in
+   BK-27's Sequencing section.
+3. Post-deploy exercises still owed from earlier tickets: BK-08 / BK-09 / BK-10
+   / BK-14 / BK-16.
 
-1. **Sign-off on BK-29's replacement wording** — ~51 customer-facing claims.
-2. **Wasted-trip charge?** Recommendation given: publish the expectation, charge
-   nothing at launch, revisit when card-on-site is live.
-3. **Insurance route** — confirm the credit applies to the customer's own share,
-   and mind the framing (never "we help with your deductible").
-4. Whether the ack should record **which tier** was chosen (recommended, BK-31).
-5. **Google Ads copy** likely still says "free assessment", and indexed
-   titles/descriptions will for weeks after deploy. The account is the user's.
+## Post-deploy watch items (2026-08-16)
+
+- **First real booking through the new form.** The path is verified end-to-end
+  on the dev branch, and production's schema is confirmed, but no production
+  booking has run through it yet. Worth eyeballing the first one: the row should
+  carry a non-null `terms_acked_at`, and the customer's confirmation email
+  should contain the "Assessment terms" section in both HTML and text.
+- **Google Ads copy and indexed snippets.** Ads may still say "free
+  assessment" — the account is the user's, not reachable from here. Search
+  results will lag the deploy by weeks; that is expected, not a fault.
 
 ## Older open user actions (unchanged, remind gently)
 
@@ -102,8 +108,11 @@ explicitly refusing its negation. Written up in BK-27.md under "Re-review".
 
 - Run `verify:booking:commit` with **no `DATABASE_URL` override** — it reads
   `DATABASE_URL_DEV` itself and refuses if that host equals `DATABASE_URL`'s.
-- **Never run `verify:booking:smoke` locally** — it POSTs to the deployed site.
-  Its fixture carries `termsAck: true`; it belongs to the post-deploy pass.
+- **`verify:booking:smoke` IS safe to run locally — an earlier note here said
+  the opposite and was wrong.** It starts a local server on port 4333 against
+  the Neon DEV branch, refuses outright if `DATABASE_URL_DEV` resolves to the
+  production host, and deletes the appointment, files and blackout it creates.
+  It never touches production. Run it after any change to the commit path.
 - The implementer/reviewer **cannot log into production admin** —
   `ADMIN_PASSWORD` pulls as `""` (the `vercel env pull` trap). `DATABASE_URL`
   **is** real, so `npm run migrate -- --status` (bare = prod) works.

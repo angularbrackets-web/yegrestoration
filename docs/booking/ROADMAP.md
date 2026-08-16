@@ -51,35 +51,31 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
-- **"Free assessment" is claimed unconditionally across ~50 places in `src/`,
-  and since the 2026-08-14 pricing model the claim is FALSE, not merely
-  conditional.** Under the credit model every customer pays at the visit and the
-  fee is credited back if they proceed — so nobody gets a free assessment at the
-  point of sale. This upgraded the trap: BK-27's first pass could argue the claim
-  held for the customers who went ahead; that argument is gone. **Severity raised
-  to high, and BK-29 is now a hard blocker on BK-27's deploy** rather than a
-  follow-up, because the two claims land on the same screen.
-  BK-27 reworded the two *booking* surfaces (`/book/`'s header and
-  `ContactSection.astro`'s CTA card) and put the terms in full on both, plus in
-  the confirmation email; the 2026-08-14 revision additionally removed the two
-  "Free Assessment" strings inside those surfaces (the CTA button and the
-  homepage `<h2>`) and pinned both templates against the phrase in
-  `verify-cutover.ts`. `book.astro`'s `<title>` and WebPage schema `name` were
-  left for BK-29 on purpose — search surface, and one decision should not split
-  across two commits. Everything else still says "free assessment" flat:
-  every service page (`[service].astro`, `data/services.ts` SEO copy and FAQ
-  answers), `about.astro`, `insurance-claims.astro`, `Navbar.svelte`,
-  `Layout.astro`'s default meta description, `BlogLayout.astro`, three blog
-  posts, `llms.txt`, `TestimonialsSection.astro`, `ServiceHero.astro`,
-  `VideoReel.svelte`, `ContactForm.svelte` and `contact.astro`. **Severity:
-  high** (raised from medium 2026-08-14) — it is not a code defect, it is ~50
-  customer-facing claims that are now simply untrue, and one of them
-  (`llms.txt`/meta descriptions) is what an AI assistant will quote. It is also
-  a *client copy* decision, not the implementer's: how hard to qualify a
-  marketing claim is a business call. **Owner: BK-29**, which ships with BK-27
-  as one message. Found during BK-27's implementation, 2026-08-13; not fixed inline
-  because BK-27's scope is the booking surfaces and a 50-file copy sweep is
-  neither reviewable as part of this diff nor decidable without the client.
+- **RESOLVED 2026-08-16 by BK-29 — kept for the lesson, not as open work.**
+  "Free assessment" was claimed unconditionally in 51 places across 22 files.
+  The 2026-08-14 credit model made the claim FALSE rather than merely
+  conditional: every customer pays at the visit and only gets it back by going
+  ahead, so nobody gets a free assessment at the point of sale. Swept and
+  deployed with BK-27; a live check across 12 pages plus `llms.txt` returns 0.
+
+  **Three things worth carrying forward:**
+
+  1. **A source-level grep of the page files would have passed.** `<Navbar />`
+     put the phrase into 16 built files — including `404.html` and
+     `blog/index.html`, which appear in no source inventory because they inherit
+     it from a layout. The gate that holds this now reads `dist/`, after the
+     build, in `verify-cutover.ts`. Any future claim-sweep needs the same shape.
+  2. **`llms.txt` needs its own assertion.** It is neither `.html` nor `.js`, so
+     the glob misses it, and it is the surface an AI assistant quotes with no
+     page around it to qualify anything.
+  3. **The first version of that gate matched `free` ADJACENT to `assessment`,**
+     so `/book/confirmed/`'s "Your free on-site restoration assessment is
+     booked" stayed green — and it had looked covered in the first red run only
+     because the Navbar string was still on the page. Two shapes now, for the
+     claim's adjectival and predicative grammars. See BK-29's implementation
+     notes; this was the fifth instance in P8 of an assertion written against a
+     token instead of a claim.
+
 - **A Blob/upload-token failure now kills the booking with no phone fallback
   and no funnel event.** BK-22's Q2 names two live causes of "photos are
   impossible to attach": the draft route's 429, and *a Blob/env
@@ -658,7 +654,7 @@ material if it ever gains requirements).
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-27 | Assessment fee terms — `booking-copy.ts` constants (**five**: heading, intro, three tiers, outro), step-3 required ack, `terms_acked_at` column (**migration 005**, applied to dev), public-only enforcement via the `entry` seam, both booking surfaces reworded + pinned against "free assessment", confirmation-email echo | Reviewed | **reviewed 2026-08-15 — ready to commit.** Two fresh-agent rounds: the mechanism 2026-08-14 (2 blockers / 4 should-fixes / 3 nits) and the copy revision 2026-08-15 (0 blockers / 4 should-fixes / 3 nits). **All folded in, nothing refused, nothing disputed.** The revision brought the credit model, three tiers ($399 / $699 / $1,199 + GST), `FEE_TERMS_OUTRO` (nothing-charged-at-booking + the non-refundable disclosure), five render surfaces and three pins in `verify-cutover.ts`. 19 red rows logged (l–ad). The re-review's sharpest catch: `stripForUse` was deleting the template after every `https://`, so the "free assessment" pin passed green while the phrase rendered into `dist/`. Plan review skipped on the user's instruction (recorded in the ticket). **Push blocks on: BK-29 and migration 005 on production** — see Rollout |
+| BK-27 | Assessment fee terms — `booking-copy.ts` constants (**five**: heading, intro, three tiers, outro), step-3 required ack, `terms_acked_at` column (**migration 005**, applied to dev), public-only enforcement via the `entry` seam, both booking surfaces reworded + pinned against "free assessment", confirmation-email echo | Reviewed | **DEPLOYED 2026-08-16** (`a1eedc9`; migration 005 applied to production first). Two fresh-agent rounds: the mechanism 2026-08-14 (2 blockers / 4 should-fixes / 3 nits) and the copy revision 2026-08-15 (0 blockers / 4 should-fixes / 3 nits). **All folded in, nothing refused, nothing disputed.** The revision brought the credit model, three tiers ($399 / $699 / $1,199 + GST), `FEE_TERMS_OUTRO` (nothing-charged-at-booking + the non-refundable disclosure), five render surfaces and three pins in `verify-cutover.ts`. 19 red rows logged (l–ad). The re-review's sharpest catch: `stripForUse` was deleting the template after every `https://`, so the "free assessment" pin passed green while the phrase rendered into `dist/`. Plan review skipped on the user's instruction (recorded in the ticket). Verified live: `/book/` serves all three tiers, the terms box, the credit and the non-refundable line; the smoke test confirms both stamp columns write without a type error |
 | BK-28 | Homepage availability preview — pure `booking-preview.ts` + `AvailabilityPreview.svelte` island (`client:visible`, zero-CLS skeleton), `?slot=` prefill hardened (grid check + extracted reconcile helper) | Reviewed (narrow — `?slot=` feeds the public write path; LCP/CLS) | draft — same session plan; implement after BK-27 (shared files) |
 
 **The pricing model changed on 2026-08-14, after BK-27 was built and reviewed.**
@@ -678,7 +674,7 @@ Two consequences for the phase:
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-29 | Remove "free assessment" site-wide (~50 places: every service page, `data/services.ts` SEO copy + FAQs, `about`, `insurance-claims`, `Navbar`, `Layout`'s default meta description, `BlogLayout`, 3 blog posts, `llms.txt`, `TestimonialsSection`, `ServiceHero`, `VideoReel`, `ContactForm`, `contact.astro`) — **plus `book.astro`'s `<title>` and WebPage schema `name`**, which BK-27's revision deliberately left for this ticket so the search surface changes in one commit | Light (copy) | **implemented 2026-08-15** (`tickets/BK-29.md`) — Light tier, no reviews by design; gates green, 7 red rows. Swept all 51 claims across 22 files; **0 now reach the browser** (was 18 built files). New gate in `verify-cutover.ts` reads `dist/`, not source — `<Navbar />` alone put the phrase into 16 built files including `404.html` and `blog/index.html`, which no source inventory listed. Figures stayed in `booking-copy.ts`: marketing surfaces dropped the claim rather than restating the price, and "free" was replaced by "written scope", already claimed site-wide. Also removed a surviving "no obligation" on `insurance-claims.astro`. **BK-27's deploy is now unblocked except for migration 005 on production** |
+| BK-29 | Remove "free assessment" site-wide (~50 places: every service page, `data/services.ts` SEO copy + FAQs, `about`, `insurance-claims`, `Navbar`, `Layout`'s default meta description, `BlogLayout`, 3 blog posts, `llms.txt`, `TestimonialsSection`, `ServiceHero`, `VideoReel`, `ContactForm`, `contact.astro`) — **plus `book.astro`'s `<title>` and WebPage schema `name`**, which BK-27's revision deliberately left for this ticket so the search surface changes in one commit | Light (copy) | **DEPLOYED 2026-08-16** (`1de17d0`) — Light tier, no reviews by design; gates green, 7 red rows. Swept all 51 claims across 22 files; **0 now reach the browser** (was 18 built files). New gate in `verify-cutover.ts` reads `dist/`, not source — `<Navbar />` alone put the phrase into 16 built files including `404.html` and `blog/index.html`, which no source inventory listed. Figures stayed in `booking-copy.ts`: marketing surfaces dropped the claim rather than restating the price, and "free" was replaced by "written scope", already claimed site-wide. Also removed a surviving "no obligation" on `insurance-claims.astro`. **Shipped with BK-27; live sweep confirms 0 claims across 12 pages plus `llms.txt`** |
 | BK-31 | Assessment tier selection at booking — form control, `assessment_tier` column, validation, both emails, admin display + edit for upgrades. Non-binding by design: the form must say the choice can change on the day | Reviewed | proposed — ships after BK-27 + BK-29 |
 
 Recommended sequence: **BK-27 (new copy) + BK-29 ship together**, then BK-31.
