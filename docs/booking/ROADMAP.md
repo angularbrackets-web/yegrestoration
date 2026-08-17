@@ -51,6 +51,88 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **`/api/booking/upload-token/`'s byte cap can be bypassed by re-declaring a
+  smaller size, and `size_bytes` is never corrected to the truth.** Found in
+  BK-34a's implementation review, on the appointment route, and fixed there;
+  this is the untouched twin on the draft route (`upload-token.ts:95-122`).
+  Two facts combine. First, `size_bytes` is only ever the size the CLIENT
+  declared — `onUploadCompleted` receives no size from Vercel, so migration
+  002's comment that it is "overwritten with the true size when the
+  upload-completed callback fires" (`scripts/migrations/002-booking.ts:97-98`)
+  is **not true**, and never has been. Second, the totals query excludes the
+  current pathname so a retry does not consume a slot, and the upsert does
+  `SET size_bytes = EXCLUDED.size_bytes`. So: declare 100 MB, upload 100 MB,
+  re-mint the same pathname declaring 1 byte, and the row is rewritten downward
+  while the object stays. Ten rounds put ~1 GB in the store against a 300 MB
+  cap. The **file-count** cap still holds at 10 rows, so this is a ~3.3×
+  storage-cost overrun, not unbounded, and it needs no authentication beyond a
+  draft token — which is itself unthrottled at the upload-token route (the
+  standing trap below). **Severity: medium** — cost, not correctness or
+  disclosure. **Owner: BK-11** (the upload-hardening ticket). The fix that
+  landed on the appointment side is
+  `SET size_bytes = GREATEST(appointment_files.size_bytes, EXCLUDED.size_bytes)`,
+  which keeps honest retries working and makes the budget monotonic; the
+  migration comment should be corrected in the same pass.
+- **"Payment before dispatch" makes an email address mandatory for a phone
+  booking, and the client's P7 exemption says it is not.** The payment link is
+  emailed. No email → no link → no payment → no dispatch, so a phone booking
+  without one cannot be completed at all. SMS delivery of the link is BK-34b,
+  which is blocked on the Twilio number, so there is no second channel today.
+  P7's exemption ("if we enter ourselves we will ask them to text
+  pictures/videos") was written when an admin entry was confirmed on save; it
+  did not contemplate a payment step. **Severity: blocking for BK-23/BK-32** —
+  not a nice-to-have, because the office will hit it on the first phone booking
+  from someone who does not use email. Three ways out, none of them the
+  implementer's to pick: make email required on the admin form (overturns the
+  exemption), hold such bookings until BK-34b lands (couples the flip to
+  Twilio), or let the office take payment by a means outside this system
+  (currently out of scope, and would need a `payment_method = 'onsite'` path
+  that the client has just ruled out). **Raised with the client 2026-08-16, as
+  a forced consequence of their own decision rather than a new question.**
+- **A 2am emergency auto-expires within 15 minutes unless the pay-now branch
+  exists.** `payment_due_at = min(approved_at + 12h, slot_start − 4h)` is
+  already in the past for a booking made at 02:00 for 03:00, so BK-32's expiry
+  cron cancels it on its next pass. The 24h web notice floor does not save this
+  — admin entries keep the 4h floor and emergencies bypass even that, which is
+  the whole point of the phone path. The pay-now branch (P9 decisions above)
+  is what makes "payment always precedes dispatch" survivable for the jobs the
+  client most cares about. **Owner: BK-32**, and it is not optional.
+- **The Resend idempotency prefix will silently eat every P9 email after the
+  first.** `booking-notify.ts:186` and `:244` both call
+  `createResendSender(apiKey, \`booking-${plan.bookingId}\`)`, and
+  `createResendSender` sends `Idempotency-Key: ${keyPrefix}:${message.to}`
+  (`:117`). Today one booking sends the customer exactly one message, so a
+  fixed per-booking prefix is correct. Under P9 one booking sends the same
+  address up to four — request-received, payment link, confirmation, and
+  decline-or-expiry — all with the byte-identical key
+  `booking-<id>:<their@email>`. Resend collapses everything after the first
+  into a duplicate of the first **and returns success**. The customer gets "we
+  have your request" three more times and never sees the payment link.
+  **Severity: critical, and invisible twice over** — `BOOKING_NOTIFY_DISABLED`
+  mutes the sender entirely in dev, and a collapsed send logs nothing in
+  production. This is the same defect class BK-16 already fixed on the calendar
+  side; `inviteIdempotencyPrefix` (`booking-ics.ts:156`) exists precisely
+  because a fixed prefix collapsed CANCEL into REQUEST. **Owner: BK-23, and it
+  is the first task of Deploy 2** — the prefix must carry the transition.
+- **`update.ts`'s ICS boundary is keyed on the literal `'cancelled'`, and P9
+  gives it three exits instead of one.** `update.ts:209-213` computes
+  `wasCancelled` / `isCancelled` and derives the ICS kind from them. With
+  `declined` and `payment_expired` also releasing the slot, the rule has to
+  become "leaving a slot-holding status", not "entering `cancelled`" — else a
+  `confirmed → payment_expired` edit leaves a live invite on two calendars with
+  nothing to clear it. **The decline and expire branches are no-ops by
+  construction today** and that is deliberate, not an omission: invites only
+  issue at payment-confirmed, so a row that reaches `declined` from
+  `pending_review` never had one. The guard is "was an invite ever issued",
+  which is what makes the branch correct rather than dead. **Owner: BK-23.**
+- **A `GST_REGISTRATION_NUMBER` env var cannot put the number on a Stripe
+  receipt.** Stripe renders business and tax info on Checkout receipts from
+  Dashboard settings (or through Stripe Tax / Invoicing), not from anything
+  passed into the session. The env var correctly drives *our* emails; the
+  receipt needs a Dashboard configuration step that no amount of code will
+  cover. **Severity: low technically, high operationally** — it is the kind of
+  thing found at go-live, by an accountant. **Owner: BK-32**, recorded as a
+  rollout task rather than an implementation one.
 - **RESOLVED 2026-08-16 by BK-29 — kept for the lesson, not as open work.**
   "Free assessment" was claimed unconditionally in 51 places across 22 files.
   The 2026-08-14 credit model made the claim FALSE rather than merely
@@ -697,6 +779,166 @@ client floated is documented as an options report at
 with recommendation); awaiting the client's direction before any tickets
 exist.
 
+**SUPERSEDED IN PART BY P9 (2026-08-16).** Three P8 statements are dead:
+"nothing is charged at booking", "paid on site only", and "tell the tech on the
+day which of these you want". The client moved to prepay-after-approval on
+2026-08-16. BK-27 shipped and is not being reverted — its terms constants are
+rewritten by BK-36, and the sentence about BK-31 being "non-binding by design"
+is deleted, not softened. Read P9 before touching booking copy or the fee
+terms; BK-27's "Client pricing model — FINAL, 2026-08-14" block is now
+history, not direction.
+
+### P9 — Prepay after review (client change request 2026-08-16)
+
+**A web booking is a request until the office approves it AND the customer
+pays.** This completes the reversal P7 began: P7 made a booking an application,
+P9 makes payment the thing that confirms it. Client-confirmed 2026-08-16;
+audit, mechanism spec and draft copy in `docs/booking/prepay-flow-spec.md`,
+which is the long form of everything below and should be read before any P9
+ticket is implemented.
+
+```
+submit request ──▶ pending_review ──▶ approved_awaiting_payment ──▶ confirmed ──▶ completed
+   (photos req'd)      │  hold             │  hold                     │  hold        │ hold
+                       ├─▶ declined        └─▶ payment_expired         ├─▶ cancelled  └─▶ no_show
+                       │   (release)           (release)               │   (release)      (hold)
+              request-received email     payment-link email     "you're booked" + ICS + SMS
+              (no ICS, no "booked")      (deadline stated)      reminder eligibility starts
+```
+
+**Decisions (client, 2026-08-16 — final, do not relitigate):**
+
+- **Status rename `booked` → `confirmed`**, in the same migration that adds the
+  new statuses. Under prepay, "booked" is the word for the thing that has not
+  happened yet. All three enum sites move together: `db.ts`'s
+  `AppointmentStatus`, the DB `CHECK`, and `APPOINTMENT_STATUSES` in
+  `booking-admin-entry.ts` (what the admin edit dropdown renders *and*
+  validates against).
+- **Slot hold is a deny-list**: `WHERE status NOT IN ('cancelled', 'declined',
+  'payment_expired')`. `pending_review`, `approved_awaiting_payment`,
+  `confirmed`, `completed` and `no_show` all hold. Deny-list deliberately, not
+  `status IN (...)`: a status added later and forgotten then *holds*, and a
+  slot that looks busy is a bug someone notices, where a silently released one
+  is two crews at one address.
+- **Minimum notice 4h → 24h for web.** This is the client's own 2026-08-12
+  decision (P7) finally being applied, not a new rule — it was assigned to
+  BK-23 and BK-23 never started. Admin/phone entries keep the 4h floor; they
+  are exempt from the whole gate.
+- **Payment deadline** = `min(approved_at + 12h, slot_start − 4h)`.
+- **Timers, all three** — auto-decline stops being slot−24h and becomes
+  submission- and escalation-relative:
+  | Trigger | Action |
+  | --- | --- |
+  | unreviewed 2h after submission | owner SMS (Twilio-gated; email until then) |
+  | still unreviewed at slot−12h | second escalation |
+  | still `pending_review` at slot−4h | auto-decline + apology email |
+  The last one is forced rather than arbitrary: past slot−4h the payment
+  deadline has expired, so a confirmation can no longer complete.
+- **ICS: customer AND office invites both move to payment-confirmed.** The
+  admin panel is the pending view; the calendar only ever shows money-confirmed
+  work. CANCEL goes out on decline/expire/cancel **for any invite already
+  issued** — see the Known trap below on why those branches are no-ops today.
+- **PAYMENT ALWAYS PRECEDES DISPATCH. NO EXCEPTIONS** (client, 2026-08-16,
+  answering what were open questions #5 and #9). Emergencies and office-created
+  phone bookings included; **phone customers pay by link** like web customers.
+  This closes the hold that an earlier draft of this section placed on
+  dispatch/payment ordering — that hold is withdrawn, and the status quo it
+  preserved is now wrong.
+
+  Consequences, none of them optional:
+
+  - **Admin entries stop landing at `confirmed`.** They land at
+    `approved_awaiting_payment` — the office creating the row *is* the
+    approval — and reach `confirmed` only through the same webhook a web
+    booking does. `payment_status` defaults to `pending`, not
+    `not_required`; that value survives only for rows predating BK-32.
+  - **No confirmation email and no ICS at admin-entry time.** Both move behind
+    payment, exactly as on the web path. `api/admin/appointments/create.ts`
+    currently fires both at `:103-115`.
+  - **Near-term bookings need a pay-now branch** — see the Known trap below.
+    The deferred-deadline formula cannot be applied to a 2am emergency.
+  - **Emergency flag: still not built, and now for a better reason.** It would
+    have keyed a payment exemption that no longer exists. What replaces it is a
+    *timing* branch keyed on proximity to the slot, not on a flag anyone ticks.
+- **Review SLA stays internal.** "Almost right away, max 1 hour" is not
+  published — it would turn an operational intent into a screenshot-able
+  commitment.
+- **GST** is charged as a separate Stripe line item, and the receipt must show
+  the registration number. Built against a `GST_REGISTRATION_NUMBER` env var;
+  the number itself is a client question.
+- **Service-area FSA list** ships with a proposed Edmonton-metro default behind
+  config. Client signs off later; not a blocker.
+
+**Settled in planning, without the client (assumptions, overturnable):**
+
+- **The pay-now branch is keyed on time-to-slot, not on a flag.** When
+  `slot_start − now < PAY_NOW_THRESHOLD_HOURS` at approval, the deferred
+  deadline is skipped: the link is sent immediately, no `payment_due_at` is
+  computed from the formula, and the expiry cron leaves the row alone. Propose
+  `PAY_NOW_THRESHOLD_HOURS = 8`. Keying on proximity rather than on an
+  `is_emergency` checkbox means nobody has to remember to tick anything, and a
+  near-term *web* booking gets the same correct treatment for free.
+- `PAYMENT_WINDOW_HOURS = 12` and `ESCALATION_LEAD_HOURS = 12` are
+  business-feel numbers the client may move; they are constants, not literals.
+- The FSA zone renders `unknown` when no postal code was given or the FSA is
+  not in the table — never `out-of-area`. A missing postal code must not read
+  as grounds to decline.
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 006**), server-side price table, `entry`-seam validation, both emails, admin display + edit | Reviewed | draft — prerequisite for BK-32 |
+| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 007**), 24h notice, request-received page/email, admin Approve/Decline, decline email, approve → payment link, escalation timers, service-area badge, **Resend idempotency-prefix fix**, ICS boundary rewrite | Reviewed | draft |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 008**), GST line item, expiry cron | Reviewed | draft |
+| BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook, policy values as placeholders | Reviewed | draft |
+| BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | **implemented** 2026-08-16 — gates green, 7 red rows, one live 500 found and fixed by smoke test; awaiting implementation review |
+| BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
+| BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | **implemented** 2026-08-16 — gates green, 3 red rows; awaiting implementation review |
+| BK-36 | Terms rewrite — constants restructured, five surfaces, `dist/`-reading pins for "deductible" and insurer-billing shapes | Reviewed (copy) | draft |
+
+**Build order — grouped by DEPLOY, not by commit.** Several tickets must land
+together or the site tells a lie between deploys.
+
+1. **Deploy 1 — unblocked prep, no flow change, no migration.** BK-35, then
+   BK-34a. Delivers the client's photo problem immediately, without Twilio and
+   without touching the booking flow.
+2. **Deploy 2 — the flip.** BK-23's idempotency-prefix fix **first** (it is a
+   blocker and it is invisible in dev), then BK-31 → BK-23 → BK-32 → BK-36.
+   Commit separately, one ticket per commit; deploy as one release. Migrations
+   006/007/008 apply to **production first**, in order, before the code ships —
+   `insertBooking` will name the new columns, so new code against the old
+   schema 500s every booking. Same rollout shape as BK-27's.
+3. **Deploy 3 — safety net and office UX.** BK-25 (timers, re-spaced per the
+   table above), BK-24 (one-click approve/decline), BK-33.
+4. **Twilio-gated.** BK-34b; BK-06 with the reminder query filtered to
+   `status = 'confirmed'`; escalation transport swaps email → owner SMS.
+5. **Independent, pull in anytime.** BK-26, BK-28.
+
+Dependency edges: `BK-32 → BK-31` (needs a tier to charge), `BK-32 → BK-23`
+(needs `approved_awaiting_payment` to transition out of), `BK-36 → BK-32` (the
+copy describes the link), `BK-33 → BK-32` (needs a payment intent),
+`BK-34b → BK-34a`, `BK-24 → BK-23`.
+
+**Locked lines P9 moves, and who moves them.** "Booking window: 4 hours minimum
+notice" is BK-23's to rewrite when it lands (the arrangement P7 already made).
+The data-model bullets on `status` and on the partial unique index are BK-23's
+too. `assessment_tier` is BK-31's to add; the payment columns are BK-32's.
+Nothing else in Locked moves — the grid, Fridays, phone-in cancellation and the
+PII rules all stand.
+
+**Amendments to earlier phases:**
+
+- **BK-24** — mechanism unchanged, but Approve now means "approve and send the
+  payment link". Its POST-not-GET rule matters more, not less.
+- **BK-25** — owns the re-spaced timers in the table above, not P7's
+  slot−24h auto-decline, which is withdrawn.
+- **BK-06** — acceptance criterion added while blocked: the reminder query
+  filters `status = 'confirmed'`, never `status <> 'cancelled'`. A
+  `pending_review` or `approved_awaiting_payment` row must never be reminded of
+  a visit that is not happening.
+- **BK-28** — unchanged, but its slot list must read the new hold predicate.
+- **BK-31** — the "non-binding by design; the form must say the choice can
+  change on the day" clause is **deleted**. The tier is what gets charged.
+
 ## Open questions for the client
 
 All three were answered on 2026-08-08. Kept here as decisions rather than
@@ -723,3 +965,36 @@ deleted, because BK-04/05/06 are written against them.
    Freeing the slot is an admin status edit (BK-08). Self-service is deferred
    until volume justifies it, so BK-04 ships no cancel token and BK-05 embeds
    no cancel URL.
+
+### Open — P9 prepay (raised 2026-08-16, unanswered)
+
+These are the client's to answer and **must not be resolved in planning or by a
+fresh agent.** Each names what it blocks, so nothing waits on an answer it does
+not actually need.
+
+4. **Refund values** — the customer-cancel cutoff (how many hours before the
+   slot, and full / partial / none after it) and whether a no-show forfeits.
+   Blocks BK-36's terms copy shipping without `[PLACEHOLDER]` markers. Does
+   **not** block BK-33's mechanism, which is policy-free by design.
+5. ~~**Office-created bookings: does the crew dispatch before payment?**~~
+   **ANSWERED 2026-08-16: payment always first, no exceptions — emergencies and
+   office-created phone bookings included.** Folded into the P9 decisions above.
+   The hold on dispatch/payment ordering is withdrawn. Two consequences went
+   straight into Known traps rather than being resolved in planning: the email
+   requirement this forces on phone bookings, and the pay-now branch a 2am
+   emergency needs.
+6. **Insurance credit settlement** — confirm "credited against your final
+   invoice" matches how an insurance job actually settles, i.e. that the credit
+   comes off the customer's share. Blocks nothing mechanical; it decides
+   whether BK-36's closing sentence is true.
+7. **GST registration number** for Stripe receipts. Built against
+   `GST_REGISTRATION_NUMBER`. **Note the number alone is not sufficient** — see
+   the Known trap on Stripe receipts.
+8. **FSA service-area list sign-off.** A proposed Edmonton-metro default ships
+   meanwhile; not a blocker.
+9. ~~**Phone customers: pay by link, or exempt?**~~ **ANSWERED 2026-08-16: pay
+   by link, same as web.**
+
+**Still open after 2026-08-16: #4 (refund values), #6 (insurance credit
+settlement), #7 (GST number), #8 (FSA list).** Only #4 blocks anything — BK-36's
+terms copy ships with `[PLACEHOLDER]` markers until it is answered.
