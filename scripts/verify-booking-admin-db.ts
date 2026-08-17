@@ -96,6 +96,7 @@ const { POST: blackoutDelete } = await import('../src/pages/api/admin/blackouts/
 const { GET: availability } = await import('../src/pages/api/booking/availability');
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
+const { UNTICKED_NOTE } = await import('../src/lib/booking-admin-entry');
 const { stampNotifications } = await import('../src/lib/booking-commit');
 const {
   inviteEventFromAppointment,
@@ -317,7 +318,29 @@ try {
     check(rowA.status === 'booked', 'and booked');
     check(rowA.pipeline_stage === 'assessment', 'at the default pipeline stage');
     check(rowA.duration_minutes === 30, 'with the locked 30-minute duration');
-    check(rowA.admin_notes === MARKER, 'the office note was stored with the entry');
+    // BK-35 pins BOTH halves here, and the equality is the point.
+    //
+    // `entryFields()` sends no `send_confirmation`, so the box is unticked and
+    // BK-35 appends its audit line — which made the original
+    // `admin_notes === MARKER` false the day BK-35 shipped, and left this
+    // script red ever since. Relaxing it to `.includes(MARKER)` would have
+    // fixed the colour and thrown away the assertion: it would then pass
+    // whether or not the audit line was written, whether it was written twice,
+    // and whether it overwrote the office's own words instead of appending to
+    // them.
+    //
+    // AND IT IS SPELLED OUT RATHER THAN CALLING `appendUntickedNote(MARKER)`.
+    // The first repair here did call it, and the red pass caught that
+    // immediately: the route produces the stored value by calling that same
+    // function, so breaking it moves BOTH sides of the comparison together and
+    // the check stays green through any change to the thing it is checking.
+    // `UNTICKED_NOTE` is data — the sentence itself — and the separator is
+    // written out, so only the joining logic is under test. Sixth instance of
+    // this family in the repo; see the ROADMAP.
+    check(
+      rowA.admin_notes === `${MARKER}\n\n${UNTICKED_NOTE}`,
+      `the office note survived and the unticked audit line was appended, got ${JSON.stringify(rowA.admin_notes)}`,
+    );
     check(
       rowA.slot_start.getTime() === zonedTimeToUtc(SLOT_DATE, SLOT_A).getTime(),
       `the slot instant is the Edmonton wall clock, got ${rowA.slot_start.toISOString()}`,
