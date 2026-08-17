@@ -74,6 +74,7 @@ const {
   BOOKING_DRAFT_ENDPOINT,
   BOOKING_UPLOAD_ENDPOINT,
 } = await import('../src/lib/booking-config');
+const { ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT } = await import('../src/lib/booking-admin');
 const { assembleBookingPayload, emptyFormValues } = await import('../src/lib/booking-form');
 const { buildUploadPathname } = await import('../src/lib/booking-uploads');
 const { upload } = await import('@vercel/blob/client');
@@ -133,13 +134,32 @@ console.log('Generated Vercel routes match the endpoint constants');
     BOOKING_CREATE_ENDPOINT,
     BOOKING_DRAFT_ENDPOINT,
     BOOKING_UPLOAD_ENDPOINT,
+    // BK-40's soft delete. A POST target that 308s is a form replayed after a
+    // redirect, which is the failure BK-07 already paid for once — and this is
+    // also the assertion that pins the endpoint OUT of `/api/admin/files/`,
+    // where `^/api/admin/files/([^/]+?)/$` would have matched
+    // `/api/admin/files/delete/` as if `delete` were a file id.
+    ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT,
   ]) {
     check(
       patterns.has(`^${endpoint}$`),
       `${endpoint} must match a generated Vercel route (^${endpoint}$)`,
     );
   }
-  console.log('  all four constants are routed as written');
+
+  // The collision that shaped where this route lives, asserted rather than
+  // asserted-in-a-comment: the file proxy's pattern is dynamic, so a sibling
+  // named `delete` would have been ambiguous with a file id.
+  check(
+    patterns.has('^/api/admin/files/([^/]+?)/$'),
+    'the file proxy is still a dynamic route — which is why the delete endpoint is not its sibling',
+  );
+  check(
+    !ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT.startsWith('/api/admin/files/'),
+    'and the delete endpoint stays out of that namespace',
+  );
+
+  console.log('  all five constants are routed as written, and the delete endpoint is unambiguous');
 }
 
 // ---------------------------------------------------------------------------
@@ -331,10 +351,24 @@ try {
   );
 
   const [fileRow] = (await sql`
-    SELECT id, appointment_id, upload_state FROM appointment_files WHERE pathname = ${pathname}
-  `) as { id: number; appointment_id: number | null; upload_state: string }[];
+    SELECT id, appointment_id, upload_state, source
+    FROM appointment_files WHERE pathname = ${pathname}
+  `) as {
+    id: number;
+    appointment_id: number | null;
+    upload_state: string;
+    source: string | null;
+  }[];
   check(fileRow !== undefined, 'the upload must have written an appointment_files row');
   check(fileRow?.appointment_id === null, 'the file must be unclaimed until the booking commits');
+  // BK-40. Checked HERE rather than in a pure script because `source` is
+  // written by a literal in the route's INSERT, and a literal is exactly what a
+  // pure test cannot observe — this is the only place the real
+  // `/api/booking/upload-token/` runs against a real database.
+  check(
+    fileRow?.source === 'web',
+    `a public-funnel upload records source 'web', got ${JSON.stringify(fileRow?.source)}`,
+  );
   console.log(
     `  uploaded, unauthenticated GET → ${anon.status}, row present (upload_state=${fileRow?.upload_state})`,
   );

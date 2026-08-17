@@ -104,6 +104,35 @@ export function appendUntickedNote(notes: string | null): string {
 }
 
 /**
+ * Why the office removed a file (BK-40). Optional, short, free text.
+ *
+ * A label, not a note field — "wrong appointment", "duplicate", "customer
+ * asked" — which is why the bound is `MAX_BLACKOUT_REASON`-sized rather than
+ * `MAX_ADMIN_NOTES`-sized.
+ */
+export const MAX_FILE_DELETE_NOTE = 200;
+
+/**
+ * Normalise the delete reason to what the column should hold.
+ *
+ * Empty and whitespace-only both become NULL rather than `''`. The two would
+ * render identically and mean different things — one is "no reason given", the
+ * other is "a reason was given and it was blank" — and only the first is true.
+ *
+ * TRUNCATED, NOT REJECTED. This is the audit trail on a delete that has
+ * *already been decided*; refusing the whole action because the reason ran long
+ * would lose the deletion over a footnote. Nothing downstream re-applies this
+ * bound the way `parseAppointmentUpdate` re-applies the notes cap, so the
+ * truncation cannot come back as a rejected edit later.
+ */
+export function parseFileDeleteNote(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  return trimmed.slice(0, MAX_FILE_DELETE_NOTE);
+}
+
+/**
  * The longest value `admin_notes` can legitimately HOLD, as opposed to the
  * longest a human may type.
  *

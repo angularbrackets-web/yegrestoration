@@ -886,9 +886,9 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 006**), server-side price table, `entry`-seam validation, both emails, admin display + edit | Reviewed | draft — prerequisite for BK-32 |
-| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 007**), 24h notice, request-received page/email, admin Approve/Decline, decline email, approve → payment link, escalation timers, service-area badge, **Resend idempotency-prefix fix**, ICS boundary rewrite | Reviewed | draft |
-| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 008**), GST line item, expiry cron | Reviewed | draft |
+| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), server-side price table, `entry`-seam validation, both emails, admin display + edit | Reviewed | draft — prerequisite for BK-32 |
+| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), 24h notice, request-received page/email, admin Approve/Decline, decline email, approve → payment link, escalation timers, service-area badge, **Resend idempotency-prefix fix**, ICS boundary rewrite | Reviewed | draft |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 009**), GST line item, expiry cron | Reviewed | draft |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook, policy values as placeholders | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | **implemented** 2026-08-16 — gates green, 7 red rows, one live 500 found and fixed by smoke test; awaiting implementation review |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -904,7 +904,7 @@ together or the site tells a lie between deploys.
 2. **Deploy 2 — the flip.** BK-23's idempotency-prefix fix **first** (it is a
    blocker and it is invisible in dev), then BK-31 → BK-23 → BK-32 → BK-36.
    Commit separately, one ticket per commit; deploy as one release. Migrations
-   006/007/008 apply to **production first**, in order, before the code ships —
+   007/008/009 apply to **production first**, in order, before the code ships —
    `insertBooking` will name the new columns, so new code against the old
    schema 500s every booking. Same rollout shape as BK-27's.
 3. **Deploy 3 — safety net and office UX.** BK-25 (timers, re-spaced per the
@@ -957,7 +957,7 @@ three were flagged to the user before implementation and re-decided
 | BK-37 | Upload link: copy button, `navigator.share` on mobile with a `wa.me` desktop fallback, and the link's absolute expiry stated on the page | Light | ✅ committed |
 | BK-38 | Day strip: `Closed` for closed weekdays and `Call us` for an elapsed day, both distinct from `Full`; month header above the strip, month on a boundary chip | Light | ✅ committed |
 | BK-39 | Homepage booking CTA relabelled, plus a live next-opening teaser above it | Light | ✅ committed |
-| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | draft |
+| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | **implemented** 2026-08-16 — gates green, 14 red rows, migration applied to dev; awaiting implementation review |
 | BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | report |
 
 **Migration numbering moved.** BK-40 takes **006**, so BK-31 → **007**,

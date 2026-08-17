@@ -165,6 +165,120 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+console.log('\nProvenance is inside the signature (BK-40)');
+// ---------------------------------------------------------------------------
+//
+// `appointment_files.source` is written from `claims.origin` and from nothing
+// else, so every one of these is the question "can a customer's upload be
+// recorded as the office's, or the reverse". Provenance the caller can choose
+// is worse than none, because the office would believe it.
+{
+  const office = await issueAppointmentUploadToken(APPOINTMENT_ID, NOW, 'office');
+
+  const linkClaims = await verifyAppointmentUploadToken(minted.token, NOW);
+  const officeClaims = await verifyAppointmentUploadToken(office.token, NOW);
+
+  check(linkClaims?.origin === 'link', 'the texted link token claims origin "link"');
+  check(officeClaims?.origin === 'office', "the office's own token claims origin \"office\"");
+  check(
+    officeClaims?.appointmentId === APPOINTMENT_ID,
+    'and it still names the appointment it was minted for',
+  );
+  check(office.origin === 'office', 'the mint reports the origin it signed');
+  check(
+    office.draftId !== minted.draftId,
+    'the two tokens carry different prefixes, so neither can overwrite the other',
+  );
+
+  // THE ATTACK THIS EXISTS FOR. The version tag is NOT part of the signed
+  // payload — the HMAC is taken before it is prepended — so if `a1` and `a2`
+  // shared a payload shape, rewriting one leading byte of a customer's link
+  // would relabel their photos as the office's and still verify.
+  const [, ...linkRest] = minted.token.split('.');
+  check(
+    (await verifyAppointmentUploadToken(['a2', ...linkRest].join('.'), NOW)) === null,
+    'a LINK token re-tagged a2 is rejected — the origin cannot be flipped by editing the tag',
+  );
+  const [, ...officeRest] = office.token.split('.');
+  check(
+    (await verifyAppointmentUploadToken(['a1', ...officeRest].join('.'), NOW)) === null,
+    'an OFFICE token re-tagged a1 is rejected',
+  );
+
+  // The same attack carried out properly: build a well-formed 6-part `a2`
+  // token out of the link token's parts by inserting the origin segment. Every
+  // shape check now passes, and only the signed payload differing
+  // (`<id>.<draft>.<issued>` vs `<id>.<draft>.<issued>.office`) stands between
+  // this and a forged claim of office provenance.
+  const [, lid, ldraft, lissued, lsig] = minted.token.split('.');
+  check(
+    (await verifyAppointmentUploadToken(`a2.${lid}.${ldraft}.${lissued}.office.${lsig}`, NOW)) ===
+      null,
+    "a link signature re-shaped as an office token does not verify — the origin is signed",
+  );
+  // And the reverse: strip the origin segment off an office token and re-tag it.
+  const [, oid, odraft, oissued, , osig] = office.token.split('.');
+  check(
+    (await verifyAppointmentUploadToken(`a1.${oid}.${odraft}.${oissued}.${osig}`, NOW)) === null,
+    'an office signature re-shaped as a link token does not verify either',
+  );
+
+  // The origin segment itself is not free text. An unrecognised value must be
+  // refused outright rather than defaulted to one of the two — a default is how
+  // a future third origin gets silently recorded as an existing one.
+  for (const bogus of ['link', 'admin', '', 'OFFICE', 'office ']) {
+    check(
+      (await verifyAppointmentUploadToken(
+        `a2.${oid}.${odraft}.${oissued}.${bogus}.${osig}`,
+        NOW,
+      )) === null,
+      `an office token carrying origin ${JSON.stringify(bogus)} is rejected`,
+    );
+  }
+
+  // Arity for the two-shape verifier, and THIS IS THE THIRD TIME THE OBVIOUS
+  // SPELLING OF THIS CHECK HAS BEEN WRONG IN THIS FILE. `${office.token}.extra`
+  // is seven parts, which is not six, so the arity/version agreement rejects it
+  // — and widening `length !== 5 && length !== 6` to `length < 5` left that
+  // assertion GREEN. It was testing the version tag while claiming to test
+  // arity.
+  //
+  // What isolates it: `sigHex` is read from the LAST part, so a token that
+  // keeps the real signature in final position and pads the MIDDLE has every
+  // downstream check pass. Seven parts keeps `isOffice` false, so the `a1` tag
+  // is correct; the first four parts destructure to the real values; the
+  // signature verifies against the untouched payload. Only the length test
+  // stands between the verifier and a token with arbitrary interior content.
+  check(
+    (await verifyAppointmentUploadToken(
+      `a1.${lid}.${ldraft}.${lissued}.junk.junk2.${lsig}`,
+      NOW,
+    )) === null,
+    'a token padded in the MIDDLE with its real signature last is rejected on arity',
+  );
+  // Kept as well, because it is a real string somebody might send — but labelled
+  // for what it actually exercises rather than for what it looks like.
+  check(
+    (await verifyAppointmentUploadToken(`${office.token}.extra`, NOW)) === null,
+    'and a valid office token with data appended is rejected (by arity/version agreement)',
+  );
+
+  // The office token is still an appointment token, so it must not be a draft.
+  check(
+    (await verifyDraftToken(office.token, NOW)) === null,
+    'an office token is rejected by the draft verifier',
+  );
+
+  // `origin` defaults to the customer's link, which is what keeps every BK-34a
+  // call site — and every link already sitting in a customer's messages —
+  // working unchanged.
+  check(
+    (await issueAppointmentUploadToken(APPOINTMENT_ID, NOW)).token.startsWith('a1.'),
+    'the default mint is still a link token',
+  );
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nTampering');
 
 const [ver, idPart, draftPart, issuedPart, sigPart] = minted.token.split('.');

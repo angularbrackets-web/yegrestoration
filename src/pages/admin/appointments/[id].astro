@@ -3,10 +3,12 @@ export const prerender = false;
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import {
   ADMIN_APPOINTMENTS_PATH,
+  ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT,
   ADMIN_APPOINTMENT_RESEND_ENDPOINT,
   ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
   adminFilePath,
   customerStampState,
+  FILE_SOURCE_LABELS,
   formatAdminTimestamp,
   formatFileSize,
   internalStampState,
@@ -16,6 +18,7 @@ import {
 } from '../../../lib/booking-admin';
 import {
   APPOINTMENT_STATUSES,
+  MAX_FILE_DELETE_NOTE,
   MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
 } from '../../../lib/booking-admin-entry';
@@ -51,6 +54,10 @@ try {
   appointment = rows[0] ?? null;
 
   if (appointment) {
+    // Deleted rows are fetched, not filtered out in SQL: this page is the one
+    // place that has to SHOW a removal happened (see the "Removed" block).
+    // Every other consumer — the file proxy, the upload caps, the list page's
+    // count — excludes them at the query.
     files = (await sql`
       SELECT * FROM appointment_files WHERE appointment_id = ${id} ORDER BY id
     `) as AppointmentFile[];
@@ -84,16 +91,32 @@ if (!appointment && !dbError) {
  *
  * Failure is non-fatal: this is a convenience on a page whose job is showing
  * the appointment. `BOOKING_DRAFT_SECRET` being unset must not 500 the record.
+ *
+ * BK-40 MAKES IT TWO TOKENS, NOT ONE. They authorize exactly the same writes
+ * and differ only in the signed `origin` they carry, which is what
+ * `appointment_files.source` records. The link token stays `'link'` —
+ * byte-identical to what BK-34a shipped, so links already sitting in customers'
+ * messages keep working — and the inline uploader gets its own `'office'` one.
+ * Minting the office token HERE, server-side behind the middleware, is what
+ * makes the claim trustworthy: the browser never chooses it, and it never
+ * appears in the URL the office pastes into a text message.
  */
 let uploadToken: string | null = null;
 let uploadDraftId: string | null = null;
 let uploadExpiresAt: Date | null = null;
+let officeToken: string | null = null;
+let officeDraftId: string | null = null;
 if (appointment) {
   try {
-    const minted = await issueAppointmentUploadToken(appointment.id);
-    uploadToken = minted.token;
-    uploadDraftId = minted.draftId;
-    uploadExpiresAt = minted.expiresAt;
+    const [linkMint, officeMint] = await Promise.all([
+      issueAppointmentUploadToken(appointment.id),
+      issueAppointmentUploadToken(appointment.id, new Date(), 'office'),
+    ]);
+    uploadToken = linkMint.token;
+    uploadDraftId = linkMint.draftId;
+    uploadExpiresAt = linkMint.expiresAt;
+    officeToken = officeMint.token;
+    officeDraftId = officeMint.draftId;
   } catch (e) {
     console.error(`Could not mint an upload token for appointment ${appointment.id}:`, e);
   }
@@ -105,6 +128,9 @@ const uploadLink = uploadToken
 // Four states per stamp, not two. `none` is BK-08's addition: an admin row with
 // an email may simply not have been sent one, which "Not applicable" would now
 // claim falsely.
+const liveFiles = files.filter(f => f.deleted_at == null);
+const deletedFiles = files.filter(f => f.deleted_at != null);
+
 const customerStamp = appointment ? customerStampState(appointment) : 'not-applicable';
 const internalStamp = appointment ? internalStampState(appointment) : 'not-applicable';
 
@@ -151,9 +177,28 @@ const SAVED_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
   error: { tone: 'warn', text: 'The database rejected that change. Nothing was saved.' },
 };
 
+// BK-40. `gone` and `db` can only be READ here, never reached — both redirect
+// to the list page, because which appointment the click came from is not
+// knowable without trusting the form. They are in the map so that a
+// hand-typed `?files=` renders a sentence rather than nothing, on the same
+// reasoning as the entry form's field-label map.
+const FILE_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  removed: {
+    tone: 'ok',
+    text: 'File removed. It stays listed under “Removed” below, so the record of it survives.',
+  },
+  gone: { tone: 'warn', text: 'That file was already removed, or is not attached to an appointment.' },
+  badid: { tone: 'warn', text: 'That file could not be identified. Nothing was removed.' },
+  form: { tone: 'warn', text: 'That request was not valid. Nothing was removed.' },
+  db: { tone: 'warn', text: 'The database rejected that change. Nothing was removed.' },
+};
+
+const filesFlash = Astro.url.searchParams.get('files');
+
 const flashes = [
   emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
   savedFlash ? SAVED_MESSAGES[savedFlash] : null,
+  filesFlash ? FILE_MESSAGES[filesFlash] : null,
 ].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
 function statusClasses(status: Appointment['status']) {
@@ -409,37 +454,99 @@ function statusClasses(status: Appointment['status']) {
       -->
       <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <h2 class="text-white font-semibold mb-1">
-          Files <span class="text-zinc-600 font-normal text-sm">({files.length})</span>
+          Files <span class="text-zinc-600 font-normal text-sm">({liveFiles.length})</span>
         </h2>
         <p class="text-zinc-600 text-xs mb-4">
           Links open in a new tab and expire after a few minutes. Click again for a fresh one.
         </p>
 
-        {files.length === 0 ? (
+        {liveFiles.length === 0 ? (
           <p class="text-zinc-600 text-sm">No files attached.</p>
         ) : (
           <ul class="divide-y divide-zinc-800/60 text-sm">
-            {files.map(file => (
-              <li class="py-2.5 flex items-center justify-between gap-4">
-                {file.upload_state === 'pending' ? (
-                  <span class="text-zinc-400 truncate">{file.original_name ?? 'Unnamed file'}</span>
-                ) : (
-                  <a
-                    href={adminFilePath(file.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="text-amber-400 hover:text-amber-300 truncate transition-colors"
-                  >
-                    {file.original_name ?? 'Unnamed file'}
-                  </a>
-                )}
-                <span class="text-zinc-500 text-xs shrink-0">
-                  {formatFileSize(file.size_bytes)}
-                  {file.upload_state === 'pending' && ' · upload not confirmed'}
+            {liveFiles.map(file => (
+              <li class="py-3 flex items-start justify-between gap-4">
+                <span class="min-w-0">
+                  {file.upload_state === 'pending' ? (
+                    <span class="block text-zinc-400 truncate">{file.original_name ?? 'Unnamed file'}</span>
+                  ) : (
+                    <a
+                      href={adminFilePath(file.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="block text-amber-400 hover:text-amber-300 truncate transition-colors"
+                    >
+                      {file.original_name ?? 'Unnamed file'}
+                    </a>
+                  )}
+                  <span class="block text-zinc-500 text-xs mt-0.5">
+                    {formatFileSize(file.size_bytes)}
+                    {' · '}{FILE_SOURCE_LABELS[file.source ?? 'unrecorded']}
+                    {' · '}{formatAdminTimestamp(file.created_at)}
+                    {file.upload_state === 'pending' && ' · upload not confirmed'}
+                  </span>
                 </span>
+
+                <!--
+                  A POST, never a link. A GET that deletes is a file removed by
+                  whatever prefetches the page — the same reasoning P7 wrote
+                  down for the approve/decline buttons, and it applies to any
+                  mutation reachable from a URL.
+
+                  No confirm() dialog: the action is soft and reversible in the
+                  database, and a blocking dialog on every removal costs the
+                  office more than the occasional mis-click does.
+                -->
+                <form
+                  method="POST"
+                  action={ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT}
+                  class="shrink-0 flex items-center gap-2"
+                >
+                  <input type="hidden" name="id" value={String(file.id)} />
+                  <input
+                    type="text"
+                    name="note"
+                    maxlength={MAX_FILE_DELETE_NOTE}
+                    placeholder="Why? (optional)"
+                    aria-label={`Reason for removing ${file.original_name ?? 'this file'}`}
+                    class="w-32 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-300 placeholder-zinc-700 focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    class="border border-zinc-700 text-zinc-400 hover:text-red-300 hover:border-red-800 text-xs rounded px-2 py-1 transition-colors"
+                  >
+                    Remove
+                  </button>
+                </form>
               </li>
             ))}
           </ul>
+        )}
+
+        <!--
+          Removed files stay visible, muted and unlinked. The office needs to
+          see THAT something was removed and why — "the customer says they sent
+          four photos" is answerable from this list and from nowhere else. The
+          row is not a link: `claimedFilePathname` refuses a deleted id, so a
+          link here would 404 by design.
+        -->
+        {deletedFiles.length > 0 && (
+          <div class="mt-5 pt-4 border-t border-zinc-800/60">
+            <p class="text-zinc-600 text-xs uppercase tracking-wide mb-2">
+              Removed ({deletedFiles.length})
+            </p>
+            <ul class="space-y-2 text-sm">
+              {deletedFiles.map(file => (
+                <li class="text-zinc-600">
+                  <span class="line-through">{file.original_name ?? 'Unnamed file'}</span>
+                  <span class="block text-xs mt-0.5">
+                    removed {formatAdminTimestamp(file.deleted_at!)}
+                    {file.deleted_note ? ` — ${file.deleted_note}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -497,7 +604,7 @@ function statusClasses(status: Appointment['status']) {
             <div
               id="upload-link-actions"
               class="flex flex-wrap items-center gap-2 mt-2"
-              data-url={uploadLink}
+              data-link={uploadLink}
               data-message={`Send us photos or video of the damage here: ${uploadLink}`}
             >
               <button
@@ -543,8 +650,8 @@ function statusClasses(status: Appointment['status']) {
             <p class="text-zinc-400 text-xs uppercase tracking-wide mb-2">Or add files here</p>
             <AppointmentUpload
               client:load
-              token={uploadToken!}
-              draftId={uploadDraftId!}
+              token={officeToken!}
+              draftId={officeDraftId!}
               variant="admin"
             />
           </>
@@ -660,7 +767,7 @@ function statusClasses(status: Appointment['status']) {
   const field = document.getElementById('upload-link') as HTMLInputElement | null;
 
   if (actions && field) {
-    const url = actions.dataset.url ?? '';
+    const url = actions.dataset.link ?? '';
     const message = actions.dataset.message ?? url;
     const status = actions.querySelector<HTMLElement>('[data-role="status"]');
 

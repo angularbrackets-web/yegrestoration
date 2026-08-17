@@ -112,10 +112,10 @@ export const POST: APIRoute = async ({ request }) => {
 
         await sql`
           INSERT INTO appointment_files
-            (draft_id, pathname, content_type, size_bytes, original_name)
+            (draft_id, pathname, content_type, size_bytes, original_name, source)
           VALUES
             (${draftId}::uuid, ${pathname}, ${parsed.contentType},
-             ${declaredSize}, ${payload.originalName ?? null})
+             ${declaredSize}, ${payload.originalName ?? null}, 'web')
           ON CONFLICT (pathname) DO UPDATE
             SET size_bytes    = EXCLUDED.size_bytes,
                 original_name = EXCLUDED.original_name

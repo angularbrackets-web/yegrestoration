@@ -164,6 +164,14 @@ export async function buildFileRedirect(
  * (ROADMAP) — and the CDN answers the truth about whether the bytes exist. The
  * detail page withholds the link for presentation reasons; the route does not
  * 404 on it.
+ *
+ * `deleted_at IS NULL` IS A DIFFERENT KIND OF CLAUSE FROM THE ONE ABOVE, and
+ * the difference is why it is here rather than in the page (BK-40). Soft delete
+ * leaves the bytes in the store on purpose, so the row is the ONLY thing
+ * standing between a deleted file and a signed URL for it. Enforcing it only in
+ * the template would mean a link the office had already opened — or one still
+ * in their history — kept working after they deleted the file, which is not
+ * what "deleted" means to the person who pressed the button.
  */
 export async function claimedFilePathname(sql: Sql, id: number): Promise<string | null> {
   const rows = (await sql`
@@ -171,6 +179,7 @@ export async function claimedFilePathname(sql: Sql, id: number): Promise<string 
     FROM appointment_files
     WHERE id = ${id}
       AND appointment_id IS NOT NULL
+      AND deleted_at IS NULL
   `) as { pathname: string }[];
   return rows[0]?.pathname ?? null;
 }

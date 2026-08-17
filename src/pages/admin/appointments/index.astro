@@ -37,6 +37,10 @@ try {
     SELECT appointment_id, COUNT(*)::int AS file_count
     FROM appointment_files
     WHERE appointment_id IS NOT NULL
+      -- BK-40: a removed file is not one of this appointment's photos. Counting
+      -- it here would tell the office "3 files" on a row whose detail page
+      -- lists two, and the list is the screen they triage from.
+      AND deleted_at IS NULL
     GROUP BY appointment_id
   `) as { appointment_id: number; file_count: number }[];
   fileCounts = new Map(counts.map((row) => [row.appointment_id, row.file_count]));

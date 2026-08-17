@@ -1416,6 +1416,65 @@ try {
     'and an id that matches nothing resolves to nothing',
   );
 
+  // BK-40's soft delete, against a real row and through the SAME function the
+  // route calls — for the reason above: a script-side copy of the query would
+  // stay green while the production statement lost the clause.
+  //
+  // THIS IS THE ASSERTION THAT MAKES "DELETED" MEAN SOMETHING. Soft delete
+  // leaves the bytes in the Blob store on purpose, so the row is the only thing
+  // standing between a removed file and a signed URL for it. If this clause
+  // were enforced only in the template, a link the office had already opened —
+  // or one still in their history — would keep working after they removed the
+  // file, which is not what the person pressing the button means by "remove".
+  const deletedPath = `${FILE_PREFIX}deleted.jpg`;
+  const [deletedRow] = (await sql`
+    INSERT INTO appointment_files
+      (appointment_id, draft_id, pathname, content_type, size_bytes, original_name,
+       upload_state, source, deleted_at, deleted_note)
+    VALUES
+      (${idA}, ${DRAFT_ID}::uuid, ${deletedPath}, 'image/jpeg', 1024, 'deleted.jpg',
+       'uploaded', 'link', now(), 'wrong appointment')
+    RETURNING id
+  `) as { id: number }[];
+  createdFileIds.push(deletedRow.id);
+
+  check(
+    (await claimedFilePathname(sql, deletedRow.id)) === null,
+    'a REMOVED file is invisible to the proxy, even though its bytes are still in the store',
+  );
+  check(
+    (await getFile(String(deletedRow.id))).status === 404,
+    'and the route 404s it rather than signing a URL',
+  );
+
+  // The CHECK constraint is the guard against a fourth spelling of provenance
+  // arriving through some future code path and rendering as nothing at all.
+  let constraintHeld = false;
+  try {
+    await sql`
+      INSERT INTO appointment_files
+        (appointment_id, draft_id, pathname, content_type, size_bytes, source)
+      VALUES
+        (${idA}, ${DRAFT_ID}::uuid, ${`${FILE_PREFIX}bogus.jpg`}, 'image/jpeg', 1, 'sms')
+    `;
+  } catch {
+    constraintHeld = true;
+  }
+  check(constraintHeld, 'migration 006 refuses a source outside web/link/office');
+
+  // NULL is explicitly allowed — it is what every row written before migration
+  // 006 holds, and the page renders it as "source not recorded" rather than
+  // guessing one of the three.
+  const [nullSourceRow] = (await sql`
+    INSERT INTO appointment_files
+      (appointment_id, draft_id, pathname, content_type, size_bytes, source)
+    VALUES
+      (${idA}, ${DRAFT_ID}::uuid, ${`${FILE_PREFIX}nosource.jpg`}, 'image/jpeg', 1, NULL)
+    RETURNING id, source
+  `) as { id: number; source: string | null }[];
+  createdFileIds.push(nullSourceRow.id);
+  check(nullSourceRow.source === null, 'and it permits NULL, which is what pre-006 rows hold');
+
   // BIGINT arrives from the driver as a string however db.ts types it. Pinned
   // here against a real row, because this ticket owns that correction and the
   // pure scripts hand-build their fixtures.

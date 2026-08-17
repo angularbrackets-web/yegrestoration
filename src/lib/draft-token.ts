@@ -48,6 +48,49 @@ const TOKEN_VERSION = 'v1';
  */
 const APPOINTMENT_TOKEN_VERSION = 'a1';
 
+/**
+ * The office's own upload token (BK-40).
+ *
+ * The admin page mints TWO tokens now: `a1` goes into the link the office
+ * texts, `a2` drives the uploader embedded on the page itself. They authorize
+ * exactly the same thing — writes under one appointment's prefix — and differ
+ * only in what they say about *who is uploading*, which is what
+ * `appointment_files.source` records.
+ *
+ * **THE ORIGIN IS INSIDE THE SIGNATURE, AND IT HAS TO BE.** The version tag is
+ * NOT part of the signed payload — look at `issueAppointmentUploadToken`: the
+ * HMAC covers `<id>.<draftId>.<issuedAt>` and the version is prepended
+ * afterwards. So if `a1` and `a2` shared a payload shape, rewriting the leading
+ * `a1.` of a customer's link token to `a2.` would produce a token that still
+ * verifies, and every photo a customer sent would be recorded as having come
+ * from the office. Provenance nobody can forge is the entire point of the
+ * column; provenance derived from an unsigned byte is worse than none, because
+ * the office would believe it.
+ *
+ * The same three barriers as above therefore apply between `a1` and `a2`:
+ *
+ *   1. **Different version tag** — `a1` vs `a2`.
+ *   2. **Different arity** — 5 parts vs 6, the origin being the extra segment.
+ *   3. **Different signed payload** — `<id>.<draftId>.<issuedAt>` vs
+ *      `<id>.<draftId>.<issuedAt>.<origin>`.
+ *
+ * `a1` is deliberately left byte-identical to what BK-34a shipped. Links minted
+ * before this change are live in customers' messages for up to 72 hours, and
+ * changing the shape of `a1` would kill every one of them.
+ */
+const OFFICE_TOKEN_VERSION = 'a2';
+
+/**
+ * Who put the file there.
+ *
+ * `link` is the customer, through the URL the office texted them. `office` is
+ * an agent using the uploader on the admin page, typically because the photos
+ * arrived by email. There is no third value and no "unknown" here — a row whose
+ * provenance is genuinely unknown stores NULL, which is every row written
+ * before migration 006.
+ */
+export type UploadOrigin = 'link' | 'office';
+
 function secret(): string {
   const value = readEnv('BOOKING_DRAFT_SECRET');
   if (!value) throw new Error('BOOKING_DRAFT_SECRET is not configured');
@@ -145,6 +188,7 @@ export async function verifyDraftToken(
 export type AppointmentUploadToken = {
   appointmentId: number;
   draftId: string;
+  origin: UploadOrigin;
   token: string;
   /**
    * The instant this token stops verifying (BK-37).
@@ -163,6 +207,8 @@ export type AppointmentUploadToken = {
 export type AppointmentUploadClaims = {
   appointmentId: number;
   draftId: string;
+  /** From inside the signature. See `OFFICE_TOKEN_VERSION`. */
+  origin: UploadOrigin;
 };
 
 /**
@@ -172,10 +218,17 @@ export type AppointmentUploadClaims = {
  * prefix. That is deliberate: it costs nothing (the caps count against
  * `appointment_id`, not the prefix — see the token route) and it means an old
  * link cannot overwrite a file uploaded through a newer one.
+ *
+ * `origin` defaults to `'link'`, which keeps the customer's token — the one
+ * that travels in a text message — byte-identical to what BK-34a shipped. The
+ * office's `'office'` token is a different version, arity and signed payload;
+ * see `OFFICE_TOKEN_VERSION` for why all three, and why the origin must be
+ * inside the signature rather than beside it.
  */
 export async function issueAppointmentUploadToken(
   appointmentId: number,
   now: Date = new Date(),
+  origin: UploadOrigin = 'link',
 ): Promise<AppointmentUploadToken> {
   if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
     throw new Error('appointmentId must be a positive integer');
@@ -183,12 +236,19 @@ export async function issueAppointmentUploadToken(
   const draftId = crypto.randomUUID();
   const issuedAt = now.getTime();
   const key = await hmacKey(['sign']);
-  const payload = `${appointmentId}.${draftId}.${issuedAt}`;
+
+  const isOffice = origin === 'office';
+  const payload = isOffice
+    ? `${appointmentId}.${draftId}.${issuedAt}.${origin}`
+    : `${appointmentId}.${draftId}.${issuedAt}`;
+  const version = isOffice ? OFFICE_TOKEN_VERSION : APPOINTMENT_TOKEN_VERSION;
+
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
   return {
     appointmentId,
     draftId,
-    token: `${APPOINTMENT_TOKEN_VERSION}.${payload}.${toHex(sig)}`,
+    origin,
+    token: `${version}.${payload}.${toHex(sig)}`,
     expiresAt: new Date(issuedAt + APPOINTMENT_UPLOAD_TTL_HOURS * 60 * 60 * 1000),
   };
 }
@@ -203,7 +263,14 @@ export async function issueAppointmentUploadToken(
  *
  * The appointment id comes out of the signed payload and nowhere else. A route
  * that took it from the URL alongside a token would be trusting the half of the
- * request that was not signed.
+ * request that was not signed. **The same is now true of the origin** (BK-40):
+ * it is a segment of the signed payload, not a byte beside it, so it cannot be
+ * flipped by editing the token.
+ *
+ * Two shapes are accepted, and the arity decides which BEFORE anything else is
+ * read — 5 parts is the customer's link token, 6 is the office's. Neither can
+ * be turned into the other by rewriting the version tag, because the version is
+ * not signed and the payloads differ.
  */
 export async function verifyAppointmentUploadToken(
   token: unknown,
@@ -211,10 +278,22 @@ export async function verifyAppointmentUploadToken(
 ): Promise<AppointmentUploadClaims | null> {
   if (typeof token !== 'string') return null;
   const parts = token.split('.');
-  if (parts.length !== 5) return null;
+  if (parts.length !== 5 && parts.length !== 6) return null;
 
-  const [version, appointmentIdRaw, draftId, issuedAtRaw, sigHex] = parts;
-  if (version !== APPOINTMENT_TOKEN_VERSION) return null;
+  const isOffice = parts.length === 6;
+  const [version, appointmentIdRaw, draftId, issuedAtRaw] = parts;
+  const sigHex = parts[parts.length - 1];
+
+  // Arity and version must agree. Without this, a 6-part token tagged `a1`
+  // would take the office branch on arity alone.
+  if (version !== (isOffice ? OFFICE_TOKEN_VERSION : APPOINTMENT_TOKEN_VERSION)) return null;
+
+  // The origin is read from the token only to be VERIFIED against the
+  // signature below — never trusted as read. An unrecognised value is rejected
+  // outright rather than defaulted, so a future third origin cannot be
+  // silently downgraded to one of these two.
+  const origin: UploadOrigin = isOffice ? 'office' : 'link';
+  if (isOffice && parts[4] !== 'office') return null;
 
   // LOAD-BEARING, NOT SHAPE-CHECKING. `Number` on '' is 0 and on ' 1' is 1, so
   // the shape is tested before the value — an id is digits, with no leading
@@ -238,12 +317,19 @@ export async function verifyAppointmentUploadToken(
   const sig = fromHex(sigHex);
   if (!sig) return null;
 
+  // Rebuilt from the CANONICAL values, exactly as minted. The office arm
+  // carries the origin, which is what makes an `a1` signature fail to verify as
+  // an `a2` token even if every other check were bypassed.
+  const signed = isOffice
+    ? `${appointmentId}.${draftId}.${issuedAt}.${origin}`
+    : `${appointmentId}.${draftId}.${issuedAt}`;
+
   const key = await hmacKey(['verify']);
   const ok = await crypto.subtle.verify(
     'HMAC',
     key,
     sig as unknown as BufferSource,
-    new TextEncoder().encode(`${appointmentId}.${draftId}.${issuedAt}`),
+    new TextEncoder().encode(signed),
   );
-  return ok ? { appointmentId, draftId } : null;
+  return ok ? { appointmentId, draftId, origin } : null;
 }

@@ -111,6 +111,29 @@ export type AppointmentFile = {
   size_bytes: string | number | null;
   original_name: string | null;
   upload_state: 'pending' | 'uploaded';
+  /**
+   * Who put this file here (BK-40, migration 006).
+   *
+   * `web` is the public booking funnel, `link` a customer using the texted
+   * upload link, `office` an agent using the uploader on the admin page. The
+   * last two are told apart by a signed claim inside the upload token, never by
+   * anything the caller sends.
+   *
+   * NULL is correct and permanent for every row written before migration 006,
+   * and renders as "source not recorded" — never as a guess. Nothing was
+   * backfilled, because a backfilled guess is indistinguishable from a fact the
+   * moment it lands.
+   */
+  source: 'web' | 'link' | 'office' | null;
+  /**
+   * Soft delete (BK-40). Non-null hides the row from the admin list, from the
+   * file proxy, and from the upload caps — the BYTES ARE LEFT IN THE STORE on
+   * purpose, so a mistaken click is recoverable. Every query that lists or
+   * serves files must carry `deleted_at IS NULL`.
+   */
+  deleted_at: Date | null;
+  /** The office's own words on why. The queryable half of the audit line. */
+  deleted_note: string | null;
   created_at: Date;
 };
 

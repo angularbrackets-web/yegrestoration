@@ -292,6 +292,13 @@ exception. Recommend against; documented here so the trade is on the record.
 Migration numbering: **005 is applied to production** (BK-27). ROADMAP currently
 assigns 006 to BK-23; that changes — see the table.
 
+**Superseded 2026-08-16: 006 went to BK-40 (P10, Deploy 1.5), so the numbers in
+this section are all one higher now — BK-31 takes 007, BK-23 008, BK-32 009.**
+The ROADMAP's P9 and P10 tables are authoritative. This is the second renumber
+(§6 item 12 was the first), and the lesson both times is that a migration
+number is worth nothing until it is applied: the only real one is the row in
+`schema_migrations`.
+
 ### BK-31 — Assessment tier selection at booking · **prerequisite, was "planned"**
 
 Prepay cannot ship without it: the payment link charges an amount, and the
@@ -608,7 +615,7 @@ site tells a lie between deploys.
    fallback file input. Independent. Delivers the client's photo problem
    *today* without Twilio.
 
-**Deploy 2 — the flip** (four tickets, one deploy, migrations 006–008 applied to
+**Deploy 2 — the flip** (four tickets, one deploy, migrations 007–009 applied to
 production first, in order, before the code goes out)
 
 3. **BK-31** — tier picker (006). Must precede BK-32, which charges the tier.
@@ -618,7 +625,7 @@ production first, in order, before the code goes out)
 6. **BK-36** — terms rewrite. Depends on all three being in the same deploy.
 
 Implement in the order 31 → 23 → 32 → 36; commit separately (one ticket per
-commit, per process); deploy as one release. Migrations 006/007/008 apply
+commit, per process); deploy as one release. Migrations 007/008/009 apply
 production-first, matching BK-27's rollout shape — `insertBooking` will name the
 new columns, so new code against the old schema 500s every booking.
 

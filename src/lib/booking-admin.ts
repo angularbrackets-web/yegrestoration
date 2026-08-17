@@ -44,6 +44,15 @@ export const ADMIN_FILE_ENDPOINT = '/api/admin/files/';
 export const ADMIN_APPOINTMENT_CREATE_ENDPOINT = '/api/admin/appointments/create/';
 export const ADMIN_APPOINTMENT_UPDATE_ENDPOINT = '/api/admin/appointments/update/';
 export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend/';
+
+/**
+ * BK-40's soft delete.
+ *
+ * Under `/appointments/`, not `/files/`, because `/api/admin/files/[id].ts` is
+ * a dynamic route and `/api/admin/files/delete/` would be the same URL shape as
+ * `/api/admin/files/7/`. See the route's own header.
+ */
+export const ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT = '/api/admin/appointments/file-delete/';
 export const ADMIN_BLACKOUT_ADD_ENDPOINT = '/api/admin/blackouts/add/';
 export const ADMIN_BLACKOUT_DELETE_ENDPOINT = '/api/admin/blackouts/delete/';
 
@@ -259,6 +268,22 @@ export const STATUS_LABELS: Record<Appointment['status'], string> = {
   completed: 'Completed',
   cancelled: 'Cancelled',
   no_show: 'No show',
+};
+
+/**
+ * Human label for `appointment_files.source` (BK-40).
+ *
+ * `unrecorded` is the key a NULL maps to, and its label says exactly that. The
+ * office reads this row to answer "did the customer send these, or did we?" —
+ * and for a row written before migration 006 the honest answer is that nobody
+ * wrote it down. Rendering NULL as any of the three real values would be a
+ * guess presented as a record.
+ */
+export const FILE_SOURCE_LABELS: Record<'web' | 'link' | 'office' | 'unrecorded', string> = {
+  web: 'from the booking form',
+  link: 'from the customer’s upload link',
+  office: 'added by the office',
+  unrecorded: 'source not recorded',
 };
 
 /** Human label for `pipeline_stage`. */

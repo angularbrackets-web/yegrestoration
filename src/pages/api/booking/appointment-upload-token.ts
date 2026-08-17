@@ -87,7 +87,10 @@ export const POST: APIRoute = async ({ request }) => {
 
         const claims = await verifyAppointmentUploadToken(payload.uploadToken);
         if (!claims) throw new Error('This upload link has expired — please call or text us');
-        const { appointmentId, draftId } = claims;
+        // `origin` comes out of the SIGNATURE (BK-40), never off the request —
+        // it is what `appointment_files.source` records, and provenance the
+        // caller could choose is provenance the office would wrongly believe.
+        const { appointmentId, draftId, origin } = claims;
 
         // The pathname is checked against the draft id INSIDE the signature,
         // never against anything the caller sent alongside it.
@@ -147,6 +150,7 @@ export const POST: APIRoute = async ({ request }) => {
           LEFT JOIN appointment_files f
             ON f.appointment_id = a.id
            AND f.pathname <> ${pathname}
+           AND f.deleted_at IS NULL
            AND (
                  f.upload_state = 'uploaded'
               OR f.created_at > ${new Date(Date.now() - TOKEN_TTL_MS)}
@@ -184,12 +188,15 @@ export const POST: APIRoute = async ({ request }) => {
         // of the two keeps a retry working — the honest case declares the same
         // size twice — while making the budget monotonic. The draft route's twin
         // is a ROADMAP Known trap.
+        // `source` is NOT in the DO UPDATE list, deliberately. A retry of the
+        // same pathname keeps the origin the row was born with; letting a later
+        // token rewrite it would make provenance depend on who retried last.
         await sql`
           INSERT INTO appointment_files
-            (appointment_id, draft_id, pathname, content_type, size_bytes, original_name)
+            (appointment_id, draft_id, pathname, content_type, size_bytes, original_name, source)
           VALUES
             (${appointmentId}, ${draftId}::uuid, ${pathname}, ${parsed.contentType},
-             ${declaredSize}, ${payload.originalName ?? null})
+             ${declaredSize}, ${payload.originalName ?? null}, ${origin})
           ON CONFLICT (pathname) DO UPDATE
             SET size_bytes    = GREATEST(appointment_files.size_bytes, EXCLUDED.size_bytes),
                 original_name = EXCLUDED.original_name
