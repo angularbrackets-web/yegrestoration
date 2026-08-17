@@ -77,6 +77,57 @@ export const MAX_ADMIN_NOTES = 4000;
 export const MAX_BLACKOUT_REASON = 200;
 
 /**
+ * BK-35's audit line, written when the office unticks send-confirmation.
+ *
+ * A sentence rather than a code, because a human reads it on the detail page.
+ * The `console.warn` beside it is for whoever is debugging; THIS is for whoever
+ * is answering a customer who says they were never told.
+ */
+export const UNTICKED_NOTE = 'Confirmation email not sent — send-confirmation was unticked.';
+
+/**
+ * Append the audit line to whatever the office typed.
+ *
+ * Appended, never overwriting: their note is the primary content of that column
+ * and this is a footnote on it.
+ *
+ * DELIBERATELY NOT CAPPED AT `MAX_ADMIN_NOTES`. That constant is a form-input
+ * sanity bound, not a schema one — `admin_notes` is a bare `TEXT` column, as
+ * documented above it — so pushing a near-cap note past the line cannot fail
+ * the insert. Truncating to stay under it could drop the office's own words to
+ * make room for ours, which is the wrong trade on a record they typed. It lives
+ * here rather than in the route so a verify script can reach it without
+ * importing an API endpoint.
+ */
+export function appendUntickedNote(notes: string | null): string {
+  return notes ? `${notes}\n\n${UNTICKED_NOTE}` : UNTICKED_NOTE;
+}
+
+/**
+ * The longest value `admin_notes` can legitimately HOLD, as opposed to the
+ * longest a human may type.
+ *
+ * These are two different bounds and conflating them was a real defect, caught
+ * in implementation review. `MAX_ADMIN_NOTES` bounds the textarea; the append
+ * above then adds a blank line and the audit line on top, so a note typed at the
+ * cap is stored at 4063. `parseAppointmentUpdate` re-applies its cap on the way
+ * back IN, and the detail page renders the stored value into the same form as
+ * `status` and `pipeline_stage` — so above 3937 typed characters, every later
+ * status change was rejected with "That edit was not valid. Nothing was saved.",
+ * naming no field, and the appointment could not be moved through the pipeline
+ * until somebody hand-deleted text the system itself had written. `maxlength`
+ * does not save it either: per WHATWG HTML, `suffering from being too long`
+ * requires the dirty value flag and a user edit, so a too-long INITIAL value is
+ * submitted without complaint.
+ *
+ * Widening the read-back bound rather than reserving headroom at entry, because
+ * the alternative makes the typing limit depend on a checkbox — the office would
+ * see "max 4000" while being cut off at 3937, which trades a rare dead end for a
+ * permanent lie.
+ */
+export const MAX_STORED_ADMIN_NOTES = MAX_ADMIN_NOTES + UNTICKED_NOTE.length + 2;
+
+/**
  * Field names the entry form reports back through the redirect.
  *
  * Error CODES travel, never typed values (plan-review should-fix 4): a booking
@@ -302,7 +353,12 @@ export function parseAppointmentUpdate(input: unknown): UpdateParseResult {
   // office clearing the notes, and must write NULL rather than being ignored.
   if (typeof raw.admin_notes === 'string') {
     const notes = str(raw.admin_notes);
-    if (notes && notes.length > MAX_ADMIN_NOTES) {
+    // `MAX_STORED_ADMIN_NOTES`, not `MAX_ADMIN_NOTES` — see that constant. This
+    // is the READ-BACK bound, and it has to tolerate what BK-35's audit line
+    // appended on the way in, or a row the system wrote becomes a row nobody can
+    // edit. The message still quotes the typing cap, which is the number the
+    // office is actually working against.
+    if (notes && notes.length > MAX_STORED_ADMIN_NOTES) {
       errors.push({ field: 'admin_notes', message: `Notes are too long (max ${MAX_ADMIN_NOTES}).` });
     } else {
       update.admin_notes = notes;

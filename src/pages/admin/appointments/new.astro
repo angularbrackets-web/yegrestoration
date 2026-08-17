@@ -135,9 +135,63 @@ function invalid(field: string) {
           <label class={labelClass} for="phone">Phone</label>
           <input type="tel" id="phone" name="phone" required placeholder="780-555-0142" class={fieldClass + invalid('phone')} />
         </div>
+        <!--
+          BK-35. Email stays OPTIONAL here — the client's P7 exemption is
+          explicit and `parseAdminEntry` hard-codes `entry: 'admin'` so no
+          caller can make the public requirement apply. This is a nudge, not a
+          gate; blocking would overturn a client decision.
+
+          What changed is the consequence, twice. Under BK-27 an absent email
+          meant no written terms. Under P9 it also means no payment link can be
+          sent — and since the client's 2026-08-16 ruling that payment ALWAYS
+          precedes dispatch, no link means no payment means no dispatch. An
+          email-less phone booking is not merely undocumented; it cannot be
+          completed.
+
+          The wording warns about a dead end ahead rather than rejecting the
+          entry, because today it still saves and the office may well be about
+          to phone them for an address.
+
+          IT IS PHRASED AS POLICY, IN THE PRESENT, AND AS A FUTURE MECHANISM.
+          That split is deliberate and was a review finding: Deploy 1 is "no
+          flow change" — there is no payment link to send yet and no dispatch
+          gate in the code until BK-32/BK-23 land — so "we cannot send them a
+          payment link" would have implied that with an address we can, and
+          "the visit cannot be dispatched until it is paid" would have described
+          an enforcement that does not exist. The office reading that as a
+          system guarantee is the error that runs the unsafe way: they stop
+          chasing payment and the crew goes out unpaid. The rule is real and
+          dated; the machinery is not here yet, and the sentence must not blur
+          the two.
+
+          The collision this creates with P7's admin email exemption is a
+          ROADMAP Known trap and is the client's to resolve — see BK-23. If
+          they make email mandatory here, this becomes a `required` attribute
+          and a server-side check, not a nudge.
+
+          CSS, not JS. This page has no client script at all (see the payment
+          route note below) and a warning is not the thing to break that for:
+          `:placeholder-shown` IS "this input is empty", so the warning shows on
+          first paint and hides on the first keystroke with nothing hydrating.
+          The `placeholder` attribute is load-bearing for that variant, not
+          decoration.
+        -->
         <div>
-          <label class={labelClass} for="email">Email <span class="text-zinc-600 normal-case">(optional)</span></label>
-          <input type="email" id="email" name="email" class={fieldClass + invalid('email')} />
+          <label class={labelClass} for="email">
+            Email <span class="text-zinc-600 normal-case">(strongly encouraged)</span>
+          </label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            placeholder="name@example.com"
+            class={'peer ' + fieldClass + invalid('email')}
+          />
+          <p class="hidden peer-placeholder-shown:block text-amber-400/90 text-xs mt-1.5">
+            Payment comes before dispatch — client policy, 2026-08-16 — and the payment link
+            is emailed. Without an address there is no way to send them one, and no written
+            terms either. Take an email if you can.
+          </p>
         </div>
         <div>
           <label class={labelClass} for="service">Service</label>

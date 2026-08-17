@@ -16,7 +16,7 @@ import {
 } from '../../../lib/booking-admin';
 import {
   APPOINTMENT_STATUSES,
-  MAX_ADMIN_NOTES,
+  MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
 } from '../../../lib/booking-admin-entry';
 import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
@@ -460,7 +460,7 @@ function statusClasses(status: Appointment['status']) {
             id="admin_notes"
             name="admin_notes"
             rows="4"
-            maxlength={MAX_ADMIN_NOTES}
+            maxlength={MAX_STORED_ADMIN_NOTES}
             class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-amber-500 focus:outline-none"
             placeholder="Internal only — never sent to the customer."
           >{appointment.admin_notes ?? ''}</textarea>

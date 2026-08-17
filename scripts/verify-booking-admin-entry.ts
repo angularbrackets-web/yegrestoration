@@ -19,7 +19,10 @@ import {
   ADMIN_ENTRY_FIELD_LABELS,
   APPOINTMENT_STATUSES,
   MAX_ADMIN_NOTES,
+  MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
+  UNTICKED_NOTE,
+  appendUntickedNote,
   parseAdminEntry,
   parseAppointmentId,
   parseAppointmentUpdate,
@@ -442,9 +445,17 @@ console.log('\nparseAppointmentUpdate — the whitelist (AC2)');
   check(cleared.ok && cleared.update.admin_notes === null, 'and it clears the notes');
   const absent = parseAppointmentUpdate({ id: '1' });
   check(absent.ok && !('admin_notes' in absent.update), 'an absent notes field leaves them alone');
+  // `MAX_STORED_ADMIN_NOTES`, not `MAX_ADMIN_NOTES`: this is the read-back path,
+  // and it has to accept what BK-35's audit line appended on the way in. A value
+  // between the two bounds is a row the system itself wrote, and rejecting it
+  // made the appointment uneditable. See the constant.
   check(
-    !parseAppointmentUpdate({ id: '1', admin_notes: 'x'.repeat(MAX_ADMIN_NOTES + 1) }).ok,
-    'notes past the cap are rejected',
+    parseAppointmentUpdate({ id: '1', admin_notes: 'x'.repeat(MAX_ADMIN_NOTES + 1) }).ok,
+    'a note between the typing cap and the stored cap is accepted back',
+  );
+  check(
+    !parseAppointmentUpdate({ id: '1', admin_notes: 'x'.repeat(MAX_STORED_ADMIN_NOTES + 1) }).ok,
+    'notes past the STORED cap are rejected',
   );
 
   // Ids.
@@ -814,6 +825,180 @@ console.log('\nThe parsers read no environment and no database');
   check(source.includes('isSlotOnGrid'), 'while still gating on isSlotOnGrid');
   check(source.includes('zonedTimeToUtc'), 'and building the instant with the zone-aware helper');
   check(TIMEZONE === 'America/Edmonton', 'the zone those helpers default to is Edmonton');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-35 — the send-confirmation audit line');
+// ---------------------------------------------------------------------------
+{
+  // Appended, not substituted. The office's own words are the primary content
+  // of the column; losing them to make room for ours would be the wrong trade
+  // on a record they typed.
+  const withNote = appendUntickedNote('Customer called about the basement.');
+  check(
+    withNote.startsWith('Customer called about the basement.'),
+    "the office's own note survives the append, at the front",
+  );
+  check(withNote.endsWith(UNTICKED_NOTE), 'and the audit line lands at the end');
+
+  check(
+    appendUntickedNote(null) === UNTICKED_NOTE,
+    'an empty note yields the audit line alone — no stray separator',
+  );
+  check(
+    !appendUntickedNote(null).startsWith('\n'),
+    'and does not open with the blank line that joins two notes',
+  );
+
+  // NOT capped at MAX_ADMIN_NOTES, and this is the assertion that says so
+  // deliberately rather than by omission. `admin_notes` is a bare TEXT column —
+  // the cap is a form-input bound — so a near-cap note pushed over the line
+  // cannot fail an insert that has already been decided on. A future "tidy"
+  // that truncates here would silently eat the office's last sentence on
+  // exactly the rows that carry the most typing.
+  const long = 'x'.repeat(MAX_ADMIN_NOTES);
+  const appended = appendUntickedNote(long);
+  check(
+    appended.length > MAX_ADMIN_NOTES,
+    'a note already at the cap is still appended to, not truncated',
+  );
+  check(appended.endsWith(UNTICKED_NOTE), 'and the audit line is what survives at the end');
+
+  // AC5, in the form the first version of it missed. The insert was never the
+  // risk — `admin_notes` is a bare TEXT column. The risk is the READ-BACK: the
+  // detail page renders the stored value into the same form as `status` and
+  // `pipeline_stage`, so a value the append pushed past the typing cap made
+  // every later status change fail validation with "That edit was not valid",
+  // naming no field. A row the system wrote must stay editable.
+  {
+    const stored = appendUntickedNote('x'.repeat(MAX_ADMIN_NOTES));
+    check(
+      stored.length > MAX_ADMIN_NOTES,
+      'a note typed at the cap is STORED longer than the cap — the premise of the next check',
+    );
+    const readBack = parseAppointmentUpdate({ id: '1', admin_notes: stored });
+    check(
+      readBack.ok,
+      'and it survives parseAppointmentUpdate, so the appointment stays editable afterwards',
+    );
+    check(
+      stored.length <= MAX_STORED_ADMIN_NOTES,
+      'the stored bound actually covers the worst case the append can produce',
+    );
+    // The bound is widened for OUR line, not into an unbounded column.
+    const overLong = parseAppointmentUpdate({
+      id: '1',
+      admin_notes: 'x'.repeat(MAX_STORED_ADMIN_NOTES + 1),
+    });
+    check(!overLong.ok, 'but a value past the stored bound is still rejected');
+  }
+
+  // The line is customer-consequence prose that somebody will read under
+  // pressure. It must say what did not happen, not merely that a box moved.
+  check(
+    /not sent/i.test(UNTICKED_NOTE),
+    'the audit line names the consequence (no email), not just the input',
+  );
+
+  // -------------------------------------------------------------------------
+  // THE ROUTE, NOT JUST THE HELPER.
+  //
+  // Everything above tests `appendUntickedNote` in isolation, and implementation
+  // review showed what that leaves open: inverting the ternary in `create.ts` —
+  // so that TICKED entries get stamped "not sent" and unticked ones get nothing,
+  // the exact inversion of ACs 2 and 3 — left this whole suite green, along with
+  // typecheck and build. The helper being correct says nothing about which
+  // branch calls it.
+  //
+  // Source-text assertions rather than a call, because `create.ts` is an API
+  // endpoint: importing it into a tsx script drags in the database client and
+  // the Blob SDK, which is the reason the helper was put in
+  // `booking-admin-entry.ts` in the first place. Comments stripped first, on the
+  // same reasoning as the parser block below — this route documents its own
+  // decisions in prose and would otherwise satisfy the check by describing it.
+  const { readFileSync: readRoute } = await import('fs');
+  const { resolve: resolveRoute, dirname: dirnameRoute } = await import('path');
+  const { fileURLToPath: fileURLToPathRoute } = await import('url');
+  const routeRoot = resolveRoute(dirnameRoute(fileURLToPathRoute(import.meta.url)), '..');
+
+  const routeSource = readRoute(
+    resolveRoute(routeRoot, 'src/pages/api/admin/appointments/create.ts'),
+    'utf8',
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+
+  check(
+    routeSource.includes('sendConfirmation ? adminNotes : appendUntickedNote(adminNotes)'),
+    'AC2/AC3: the route appends the audit line on the UNTICKED branch, and only there',
+  );
+  check(
+    !routeSource.includes('sendConfirmation ? appendUntickedNote(adminNotes) : adminNotes'),
+    'and not the inversion, which would stamp every confirmed booking',
+  );
+
+  // AC2's other half. The `console.warn` must name the id, which is the only
+  // reason it is emitted after the insert rather than beside the append.
+  const warnMatch = routeSource.match(/if \(!sendConfirmation\) \{\s*console\.warn\(([\s\S]*?)\);/);
+  check(warnMatch !== null, 'AC2: an `if (!sendConfirmation)` guards a console.warn');
+  check(
+    warnMatch !== null && warnMatch[1]!.includes('created.id'),
+    'and that warning names the appointment id — "an appointment" is not actionable',
+  );
+
+  // AC4, asserted rather than asserted-about. The audit line must not have
+  // become a behaviour change: the send decision is still the flag alone.
+  check(
+    routeSource.includes('sendConfirmation && payload.email'),
+    'AC4: the send itself is still gated on the flag AND an address, unchanged by this ticket',
+  );
+
+  // -------------------------------------------------------------------------
+  // AC1 — the CSS-only email warning.
+  //
+  // THE GATE THIS REPLACES COULD NOT GO RED. It grepped `dist/` for the
+  // compiled `.peer-placeholder-shown\:block…` rule, and that rule is generated
+  // from the WARNING's own class list — so deleting `peer` from the input, which
+  // disables the feature outright because `:where(.peer)` then matches nothing,
+  // left the check green. Same for dropping the `placeholder` attribute, which
+  // the `:placeholder-shown` state depends on entirely.
+  //
+  // The three things that actually have to be true are asserted here instead,
+  // against the page source: the input carries `peer`, it carries a NON-EMPTY
+  // placeholder (an empty one never satisfies `:placeholder-shown` in any
+  // browser), and the warning is a LATER SIBLING — Tailwind's `peer-*` variants
+  // compile to the `~` combinator, so a warning placed above the input, or
+  // nested inside a wrapper, silently never matches.
+  const pageSource = readRoute(
+    resolveRoute(routeRoot, 'src/pages/admin/appointments/new.astro'),
+    'utf8',
+  );
+
+  const emailInput = pageSource.match(/<input[^>]*id="email"[\s\S]*?\/>/);
+  check(emailInput !== null, 'AC1: the email input is still on the page');
+  if (emailInput) {
+    check(
+      /(^|['"\s+])peer(\s|['"])/.test(emailInput[0]),
+      'AC1: and carries the `peer` class the variant selects through',
+    );
+    const placeholder = emailInput[0].match(/placeholder="([^"]*)"/);
+    check(
+      placeholder !== null && placeholder[1]!.trim().length > 0,
+      'AC1: and a non-empty placeholder — `:placeholder-shown` is the whole mechanism',
+    );
+
+    const afterInput = pageSource.slice(pageSource.indexOf(emailInput[0]) + emailInput[0].length);
+    check(
+      /^[\s\S]{0,400}peer-placeholder-shown:block/.test(afterInput),
+      'AC1: and the warning is a LATER sibling — `peer-*` compiles to `~`, which never looks backwards',
+    );
+  }
+
+  // No client JS on this page: the reason the warning is CSS at all.
+  check(
+    !/<script/i.test(pageSource) && !/client:/.test(pageSource),
+    'AC1: and the page still has no script and no island — the warning shows with JS disabled',
+  );
 }
 
 // ---------------------------------------------------------------------------

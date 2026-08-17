@@ -6,7 +6,7 @@ import {
   ADMIN_APPOINTMENT_NEW_PATH,
   adminAppointmentPath,
 } from '../../../../lib/booking-admin';
-import { parseAdminEntry } from '../../../../lib/booking-admin-entry';
+import { appendUntickedNote, parseAdminEntry } from '../../../../lib/booking-admin-entry';
 import {
   inviteEventFromPayload,
   planCalendarInvite,
@@ -66,6 +66,19 @@ export const POST: APIRoute = async ({ request }) => {
   }
   const { payload, sendConfirmation, adminNotes } = parsed;
 
+  // BK-35. Unticking the confirmation box used to be silent, which made "the
+  // customer says they were never told" unanswerable. The line goes on the ROW,
+  // not only into the platform log, because the office reads appointments and
+  // does not read Vercel logs.
+  //
+  // Appended BEFORE the insert rather than as a post-commit UPDATE: past the
+  // insert nothing may fail the request, and a second statement there would be
+  // a way for a saved appointment to answer 500. It also means the note is
+  // never missing from a row that exists.
+  // The log line itself is emitted after the insert, where there is an id to
+  // name — a warning about "an appointment" is not something anyone can act on.
+  const notes = sendConfirmation ? adminNotes : appendUntickedNote(adminNotes);
+
   let sql: ReturnType<typeof getDb>;
   try {
     sql = getDb();
@@ -80,7 +93,7 @@ export const POST: APIRoute = async ({ request }) => {
     // file-claim half of the CTE to a no-op. `'admin'` is what keeps
     // `notificationFlags` from calling this row's missing office notification
     // a failure.
-    created = await insertBooking(sql, payload, null, now, 'admin', adminNotes);
+    created = await insertBooking(sql, payload, null, now, 'admin', notes);
   } catch (err) {
     console.error('Admin entry insert failed:', err);
     return back(ADMIN_APPOINTMENT_NEW_PATH, { err: 'db' });
@@ -89,6 +102,15 @@ export const POST: APIRoute = async ({ request }) => {
   // Zero rows means ON CONFLICT DO NOTHING fired — the slot is already held by
   // a non-cancelled appointment. The only real double-booking guard there is.
   if (created === null) return back(ADMIN_APPOINTMENT_NEW_PATH, { taken: '1' });
+
+  // BK-35. Now there is an id to name. Paired with the `admin_notes` line
+  // appended above — the log is for whoever is debugging, the note is for
+  // whoever is answering the customer.
+  if (!sendConfirmation) {
+    console.warn(
+      `Admin entry ${created.id}: send-confirmation was unticked — no customer email sent.`,
+    );
+  }
 
   // Past this point the appointment EXISTS. Nothing below may fail the request.
   // The fallback cannot fire — the parser was handed these very keys — and
