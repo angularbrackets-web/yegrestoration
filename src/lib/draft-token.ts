@@ -146,6 +146,17 @@ export type AppointmentUploadToken = {
   appointmentId: number;
   draftId: string;
   token: string;
+  /**
+   * The instant this token stops verifying (BK-37).
+   *
+   * Returned rather than recomputed by the caller, because
+   * `verifyAppointmentUploadToken` applies `APPOINTMENT_UPLOAD_TTL_HOURS` to
+   * `issuedAt` a few lines down and a second application of the same constant
+   * somewhere else is a place the two can drift. The admin page states this
+   * date to the office; if it ever disagreed with the verifier, the office
+   * would be telling a customer a deadline the system does not honour.
+   */
+  expiresAt: Date;
 };
 
 /** What a verified appointment token yields. Never contains anything from the request. */
@@ -178,6 +189,7 @@ export async function issueAppointmentUploadToken(
     appointmentId,
     draftId,
     token: `${APPOINTMENT_TOKEN_VERSION}.${payload}.${toHex(sig)}`,
+    expiresAt: new Date(issuedAt + APPOINTMENT_UPLOAD_TTL_HOURS * 60 * 60 * 1000),
   };
 }
 

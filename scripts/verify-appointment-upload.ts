@@ -242,6 +242,27 @@ check(
   'the appointment TTL is longer than the draft TTL — the premise of its rate limit',
 );
 
+// BK-37: `expiresAt` is a DEADLINE THE OFFICE READS OUT TO A CUSTOMER, so it
+// has to be the same instant the verifier enforces — not merely close to it.
+// Pinned against `verifyAppointmentUploadToken` itself rather than against a
+// recomputation of the constant, because a recomputation is the second copy
+// this assertion exists to forbid: it would agree with a drifted `expiresAt`
+// for exactly the same reason the drifted value was wrong.
+check(
+  (await verifyAppointmentUploadToken(
+    minted.token,
+    new Date(minted.expiresAt.getTime() - 1000),
+  )) !== null,
+  'the stated expiry has not yet passed one second before it',
+);
+check(
+  (await verifyAppointmentUploadToken(
+    minted.token,
+    new Date(minted.expiresAt.getTime() + 1000),
+  )) === null,
+  'the stated expiry has passed one second after it — the office is quoting the real deadline',
+);
+
 // ---------------------------------------------------------------------------
 console.log('\nMinting guards');
 

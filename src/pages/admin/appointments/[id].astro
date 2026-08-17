@@ -87,11 +87,13 @@ if (!appointment && !dbError) {
  */
 let uploadToken: string | null = null;
 let uploadDraftId: string | null = null;
+let uploadExpiresAt: Date | null = null;
 if (appointment) {
   try {
     const minted = await issueAppointmentUploadToken(appointment.id);
     uploadToken = minted.token;
     uploadDraftId = minted.draftId;
+    uploadExpiresAt = minted.expiresAt;
   } catch (e) {
     console.error(`Could not mint an upload token for appointment ${appointment.id}:`, e);
   }
@@ -461,7 +463,6 @@ function statusClasses(status: Appointment['status']) {
         <h2 class="text-white font-semibold mb-1">Get photos</h2>
         <p class="text-zinc-600 text-xs mb-5">
           Text the customer this link, or add files yourself if they emailed them.
-          Links stay live for {APPOINTMENT_UPLOAD_TTL_HOURS} hours.
         </p>
 
         {uploadLink ? (
@@ -475,8 +476,69 @@ function statusClasses(status: Appointment['status']) {
               readonly
               value={uploadLink}
               onfocus="this.select()"
-              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono mb-6 focus:border-amber-500 focus:outline-none"
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono focus:border-amber-500 focus:outline-none"
             />
+
+            <!--
+              BK-37. Until the Twilio number clears (BK-34b), the office agent's
+              own phone IS the SMS gateway, which makes this row the delivery
+              mechanism rather than a convenience.
+
+              THE BUTTONS ARE RENDERED BY SCRIPT, NOT BY THE SERVER, and that is
+              the point: `navigator.share` exists on the agent's phone and not
+              on the desk machine, and which one is in front of the link is not
+              knowable at build time. A server-rendered Share button that does
+              nothing on a desktop is worse than no button — the agent taps it,
+              nothing happens, and they stop trusting the row. The fallbacks are
+              in the markup and Share is added to them when the API is really
+              there; a browser with no JS at all keeps the readonly field, which
+              is what the office had before this ticket.
+            -->
+            <div
+              id="upload-link-actions"
+              class="flex flex-wrap items-center gap-2 mt-2"
+              data-url={uploadLink}
+              data-message={`Send us photos or video of the damage here: ${uploadLink}`}
+            >
+              <button
+                type="button"
+                data-action="copy"
+                class="border border-zinc-700 text-zinc-200 hover:bg-zinc-800 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+              >
+                Copy link
+              </button>
+              <a
+                data-action="whatsapp"
+                href={`https://wa.me/?text=${encodeURIComponent(`Send us photos or video of the damage here: ${uploadLink}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="border border-zinc-700 text-zinc-200 hover:bg-zinc-800 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+              >
+                WhatsApp
+              </a>
+              <span data-role="status" class="text-xs text-emerald-400" role="status" aria-live="polite"></span>
+            </div>
+
+            <!--
+              The expiry, stated absolutely rather than as "expires in 43h".
+              A countdown would be a lie on this page: the token is re-minted on
+              every view (see above), so the number would read 72h every single
+              time and tell the office nothing about the link they texted on
+              Tuesday.
+
+              The second sentence is there because the first invites the wrong
+              inference. Tokens are stateless HMACs with no revocation — opening
+              this page does NOT kill the link already in a customer's messages,
+              and an office that believes it does will re-send a link nobody
+              needed and leave a live one they think is dead.
+            -->
+            {uploadExpiresAt && (
+              <p class="text-zinc-500 text-xs mt-3 mb-6 leading-relaxed">
+                This link works until <span class="text-zinc-300">{formatAdminTimestamp(uploadExpiresAt)}</span>.
+                A fresh link is made each time you open this page; links you have already sent keep
+                working until their own {APPOINTMENT_UPLOAD_TTL_HOURS} hours are up.
+              </p>
+            )}
 
             <p class="text-zinc-400 text-xs uppercase tracking-wide mb-2">Or add files here</p>
             <AppointmentUpload
@@ -568,3 +630,83 @@ function statusClasses(status: Appointment['status']) {
     </div>
   )}
 </AdminLayout>
+
+<script>
+  /**
+   * BK-37 — getting the upload link out of this page and into a text message.
+   *
+   * Three behaviours, feature-detected in this order:
+   *
+   *   1. **Share**, added only when `navigator.share` is really present. On the
+   *      agent's phone this opens the OS share sheet, which is the one route to
+   *      Messages, WhatsApp and mail without the office retyping anything. It
+   *      is added by script rather than rendered by the server because the
+   *      server cannot know which device is asking, and a Share button that
+   *      does nothing on a desk machine trains the agent to distrust the row.
+   *   2. **Copy**, which needs `navigator.clipboard` — HTTPS or localhost only.
+   *      When that is missing (an office on plain HTTP over a LAN, say) the
+   *      button selects the field instead and says so, which still gets the
+   *      link into the clipboard with one keystroke rather than failing mute.
+   *   3. **WhatsApp**, a plain anchor in the markup. It is the desktop
+   *      fallback, it needs no JS at all, and `wa.me` with no number opens the
+   *      contact picker.
+   *
+   * `share()` rejects with an `AbortError` when the user dismisses the sheet.
+   * That is a normal outcome, not a failure, and must not be reported as one —
+   * a red "Could not share" on every dismissed sheet is how a working button
+   * gets reported as broken.
+   */
+  const actions = document.getElementById('upload-link-actions');
+  const field = document.getElementById('upload-link') as HTMLInputElement | null;
+
+  if (actions && field) {
+    const url = actions.dataset.url ?? '';
+    const message = actions.dataset.message ?? url;
+    const status = actions.querySelector<HTMLElement>('[data-role="status"]');
+
+    let clearAt: ReturnType<typeof setTimeout> | undefined;
+    const say = (text: string, ok = true) => {
+      if (!status) return;
+      status.textContent = text;
+      status.className = `text-xs ${ok ? 'text-emerald-400' : 'text-amber-400'}`;
+      clearTimeout(clearAt);
+      clearAt = setTimeout(() => (status.textContent = ''), 4000);
+    };
+
+    actions.querySelector('[data-action="copy"]')?.addEventListener('click', async () => {
+      try {
+        if (!navigator.clipboard) throw new Error('no clipboard api');
+        await navigator.clipboard.writeText(url);
+        say('Link copied.');
+      } catch {
+        // Not a dead end: the field is still right there, and selecting it
+        // leaves the agent one Ctrl-C away instead of nowhere.
+        field.focus();
+        field.select();
+        say('Selected the link — press Ctrl/Cmd + C to copy.', false);
+      }
+    });
+
+    if (typeof navigator.share === 'function') {
+      const share = document.createElement('button');
+      share.type = 'button';
+      share.textContent = 'Share';
+      share.className =
+        'border border-amber-700/60 text-amber-300 hover:bg-amber-900/30 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors';
+      share.addEventListener('click', async () => {
+        try {
+          // `text` and `url` both, not `url` alone: several share targets drop
+          // a bare URL into an empty message with no explanation of what the
+          // customer is being asked to do.
+          await navigator.share({ text: message, url });
+        } catch (err) {
+          // A dismissed share sheet is an AbortError and is not a failure.
+          if ((err as DOMException)?.name !== 'AbortError') {
+            say('Could not open the share sheet — copy the link instead.', false);
+          }
+        }
+      });
+      actions.prepend(share);
+    }
+  }
+</script>
