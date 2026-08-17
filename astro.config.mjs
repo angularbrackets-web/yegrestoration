@@ -26,7 +26,14 @@ export default defineConfig({
     // Exact match, not a substring: `includes('/book')` would silently also
     // exclude any future /bookings… path.
     sitemap({
-      filter: (page) => !page.includes('/admin') && !page.endsWith('/book/confirmed/'),
+      // `/upload/` is a signed-token capability page (BK-34a). It is an SSR
+      // dynamic route, so the sitemap would not find one today in any case —
+      // this is here so that a future `getStaticPaths` cannot quietly publish a
+      // list of live upload links. The page's own `noindex` is the real guard.
+      filter: (page) =>
+        !page.includes('/admin') &&
+        !page.includes('/upload/') &&
+        !page.endsWith('/book/confirmed/'),
     }),
     mdx(),
   ],

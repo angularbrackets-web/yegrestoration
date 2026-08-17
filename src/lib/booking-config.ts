@@ -145,6 +145,34 @@ export const DRAFT_RATE_LIMIT_PER_HOUR = 50;
  */
 export const BOOKING_RATE_LIMIT_PER_HOUR = 30;
 
+/**
+ * How long an SMS'd photo-upload link stays live (BK-34a).
+ *
+ * 72h, not the draft token's 6h: a customer texted at 4pm looks at it that
+ * evening or the next morning, and a link that has died by then sends them back
+ * to the office to ask for another one.
+ *
+ * That is twelve times the draft token's exposure, which is exactly why
+ * `/api/booking/appointment-upload-token/` carries a rate limit that
+ * `/api/booking/upload-token/` does not. The Known trap tolerated there — one
+ * draft token is worth 10 unthrottled calls — is tolerable because a draft
+ * token dies in 6h and is minted behind a throttle. Neither is true here.
+ */
+export const APPOINTMENT_UPLOAD_TTL_HOURS = 72;
+
+/**
+ * Token requests per hour, per APPOINTMENT — not per IP.
+ *
+ * The customer is on a phone behind CGNAT, so an IP bucket would either be
+ * shared with strangers or be meaningless. The thing worth bounding is the
+ * link.
+ *
+ * 30 covers the 10-file cap with room for retries on a bad connection, which is
+ * the case this whole feature exists for. The per-appointment file and byte
+ * caps are still what bound storage; this bounds the SQL.
+ */
+export const APPOINTMENT_UPLOAD_RATE_LIMIT_PER_HOUR = 30;
+
 // ---------------------------------------------------------------------------
 // Paths and endpoints
 //
@@ -163,6 +191,51 @@ export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
 export const BOOKING_DRAFT_ENDPOINT = '/api/booking/draft/';
 export const BOOKING_UPLOAD_ENDPOINT = '/api/booking/upload-token/';
+
+/**
+ * The customer-facing photo-upload page for a phone booking (BK-34a).
+ *
+ * Deliberately NOT under `/admin` — `src/middleware.ts` gates `/admin` and
+ * `/api/admin` by prefix, and this page's authorization is the signed token it
+ * carries. Putting it under the admin prefix would make it unreachable for the
+ * one person it is for.
+ */
+export const APPOINTMENT_UPLOAD_PATH = '/upload/';
+
+/**
+ * The query parameter the token travels in.
+ *
+ * THE TOKEN IS IN THE QUERY STRING, NOT THE PATH, AND THAT IS LOAD-BEARING.
+ * `astro.config.mjs` sets `trailingSlash: 'always'`, which makes the Vercel
+ * adapter emit a PRE-FILESYSTEM route that strips the trailing slash from any
+ * path whose last segment contains a dot:
+ *
+ *   { "src": "^/((?:[^/]+/)*[^/]+\\.\\w+)/$", "Location": "/$1", "status": 308 }
+ *
+ * A token is `a1.<id>.<uuid>.<ms>.<64 hex>` — its last segment always ends in
+ * `.` + word characters — so `/upload/<token>/` 308'd to the unslashed form,
+ * missed `^/upload/([^/]+?)/$` (which requires the slash), fell through the
+ * filesystem phase and landed on `/404.html`. Every link, unconditionally.
+ * Found in implementation review by simulating the generated route table; the
+ * dev server does not have one, so `astro dev` smoke tests were green
+ * throughout. See the Known trap in `/CLAUDE.md`.
+ *
+ * A query string is immune to the whole class rather than escaped around it:
+ * Vercel's `src` patterns match the PATH only, and `/upload/` has no dot in any
+ * segment. Escaping the dots instead (`.` → `~`, base64url) would have left the
+ * next person to add a token-bearing route to rediscover this.
+ *
+ * `scripts/verify-appointment-upload.ts` asserts it against the real generated
+ * route table, so this cannot regress silently.
+ */
+export const APPOINTMENT_UPLOAD_TOKEN_PARAM = 't';
+
+export const APPOINTMENT_UPLOAD_ENDPOINT = '/api/booking/appointment-upload-token/';
+
+/** `/upload/?t=<token>` — the whole capability is the token, so nothing else is in it. */
+export function appointmentUploadUrl(token: string): string {
+  return `${APPOINTMENT_UPLOAD_PATH}?${APPOINTMENT_UPLOAD_TOKEN_PARAM}=${encodeURIComponent(token)}`;
+}
 
 // ---------------------------------------------------------------------------
 // Contact points and outbound mail

@@ -34,3 +34,22 @@ Read the area's `ROADMAP.md` before starting anything.
   ticket's gate table — one entry per failure mode, not per assert line.
 - **Out-of-scope defects** — found mid-ticket but not this ticket's job: record
   in ROADMAP's Known traps with severity and owning ticket, never fix inline.
+
+## Known traps in the process itself
+
+- **`astro dev` does not exercise the Vercel route table, so a smoke test
+  against it proves nothing about URL resolution.** The dev server routes by
+  Astro's own matcher; the deployed site routes by the generated
+  `.vercel/output/config.json`, which contains rules the dev server has no
+  equivalent for — including, under `trailingSlash: 'always'`, a
+  **pre-filesystem** 308 that strips the trailing slash from any path whose last
+  segment contains a dot. BK-34a shipped to implementation review with every
+  upload link 404ing in production for that exact reason, with typecheck, build,
+  its own token suite and a live `curl` against `astro dev` all green.
+  **Therefore:** any feature whose URLs carry a token, a signature, a filename,
+  a version string, or any other unusual segment shape needs a
+  **preview-deploy check as a gate** — a real `vercel deploy` and a `curl` of a
+  real URL — or an assertion that simulates the generated route table
+  (`scripts/verify-appointment-upload.ts` does the latter and is the pattern to
+  copy). A green dev-server smoke test does not satisfy this gate and must not
+  be logged as though it did.

@@ -1,0 +1,152 @@
+---
+export const prerender = false;
+
+import Layout from '../../layouts/Layout.astro';
+import Footer from '../../components/Footer.astro';
+import AppointmentUpload from '../../components/AppointmentUpload.svelte';
+import { APPOINTMENT_UPLOAD_TOKEN_PARAM, SUPPORT_PHONE } from '../../lib/booking-config';
+import { formatSlot } from '../../lib/booking-time';
+import { verifyAppointmentUploadToken } from '../../lib/draft-token';
+import { getDb } from '../../lib/db';
+
+/**
+ * The customer's photo-upload page for a phone booking (BK-34a).
+ *
+ * NOT under `/admin`, on purpose: `src/middleware.ts` gates `/admin` and
+ * `/api/admin` by prefix, and this page's authorization is the signed token it
+ * carries. The token names the appointment; nothing else in the request is read
+ * at all, and nothing here trusts a path segment.
+ *
+ * THE TOKEN ARRIVES IN THE QUERY STRING, not in the path, and that is a
+ * deployment constraint rather than a preference — `trailingSlash: 'always'`
+ * makes the Vercel adapter 308 any path whose last segment contains a dot, and
+ * every token ends in `.<64 hex>`. The full account is on
+ * `APPOINTMENT_UPLOAD_TOKEN_PARAM` in `booking-config.ts`; the route table is
+ * asserted in `scripts/verify-appointment-upload.ts`.
+ *
+ * WHAT IT MAY RENDER IS A SHORT LIST, AND IT IS A SECURITY PROPERTY, NOT A
+ * DESIGN ONE. First name and appointment time — enough for the customer to know
+ * the link is theirs and not a phish. No address, no phone number of theirs, no
+ * service description, and under no circumstances `policy_number` or
+ * `claim_number`: the locked PII rule reads on this surface exactly as it reads
+ * on an SMS body. Anyone holding the link holds the link, so it must be worth
+ * nothing to a stranger who finds it in a forwarded message.
+ *
+ * It is also WRITE-ONLY. It never lists the files already attached — an upload
+ * capability must not become a read capability for somebody's damage photos.
+ *
+ * Every failure — malformed token, bad signature, unknown appointment, aged out
+ * — renders ONE page with no distinction between them, on the same reasoning
+ * the availability endpoint does not disclose *why* a slot is unavailable.
+ */
+
+/**
+ * INSIDE A TRY, because `verifyAppointmentUploadToken` THROWS when
+ * `BOOKING_DRAFT_SECRET` is unset — it does not return null.
+ *
+ * `create.ts` wraps its `verifyDraftToken` call for exactly this reason and
+ * says so; this page needs the same treatment for a worse outcome. Uncaught, a
+ * misconfigured deploy answers Astro's HTML 500 to a customer who was texted a
+ * link, which reads as "the company's site is broken" rather than as "this link
+ * is old, call us". Found by a smoke test against a dev environment whose
+ * `.env.local` carried a blank secret from `vercel env pull` — the exact shape
+ * `env.ts` documents, so it is a live production configuration, not a
+ * hypothetical.
+ */
+const rawToken = Astro.url.searchParams.get(APPOINTMENT_UPLOAD_TOKEN_PARAM);
+
+let claims: Awaited<ReturnType<typeof verifyAppointmentUploadToken>> = null;
+try {
+  claims = await verifyAppointmentUploadToken(rawToken);
+} catch (err) {
+  console.error('Upload page could not verify a token:', err);
+}
+
+type Row = { name: string; slot_start: Date };
+let row: Row | null = null;
+
+if (claims) {
+  try {
+    const sql = getDb();
+    // Two columns. Widening this SELECT is how the PII rule above gets broken
+    // by accident, so it names what it needs rather than taking the row.
+    const rows = (await sql`
+      SELECT name, slot_start
+      FROM appointments
+      WHERE id = ${claims.appointmentId}
+    `) as Row[];
+    row = rows[0] ?? null;
+  } catch (err) {
+    // A database failure must not read as an expired link — but it also must
+    // not tell the visitor anything they can act on differently, so it falls
+    // into the same neutral page and says so only in the log.
+    console.error(`Upload page could not load appointment ${claims.appointmentId}:`, err);
+    row = null;
+  }
+}
+
+const ok = claims !== null && row !== null;
+
+// First word only. "Sarah" confirms the link is theirs; a full name is more
+// than a stranger needs to have learned from a forwarded message.
+const firstName = row ? (row.name.trim().split(/\s+/)[0] ?? '') : '';
+const slotLabel = row ? formatSlot(new Date(row.slot_start)) : '';
+
+const title = 'Send us your photos | YEG Restoration';
+---
+
+<Layout title={title} description="Upload photos for your restoration appointment." noindex={true}>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <main class="pt-16 pb-20">
+    <div class="max-w-xl mx-auto px-6">
+      {ok ? (
+        <>
+          <h1 class="font-display font-bold text-3xl text-yeg-text mb-2">
+            {firstName ? `Thanks, ${firstName}` : 'Thanks'}
+          </h1>
+          <!--
+            NO SENTENCE-ENDING PERIOD AFTER `slotLabel`. `formatSlot` produces
+            "Sun, Aug 23 · 3:30 p.m." — it already ends in one, so any full stop
+            of ours prints "p.m..". Observed twice in the smoke test, once from
+            each end of the sentence, which is why the dash is load-bearing
+            rather than styling.
+          -->
+          <p class="text-zinc-400 mb-1">
+            Your visit is {slotLabel} — send us photos or a short video of the damage before then.
+          </p>
+          <p class="text-zinc-500 text-sm mb-8">
+            It helps us bring the right equipment. Each file uploads as soon as you pick it —
+            there is nothing to submit.
+          </p>
+
+          <!--
+            client:load, not client:visible: this island IS the page, and it sits
+            above the fold on every viewport.
+          -->
+          <AppointmentUpload
+            client:load
+            token={rawToken!}
+            draftId={claims!.draftId}
+          />
+        </>
+      ) : (
+        <>
+          <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">This link has expired</h1>
+          <p class="text-zinc-400 mb-6">
+            Upload links stay active for a few days. Call or text us and we'll send you a new one.
+          </p>
+          <a
+            href={`tel:+17804793285`}
+            class="inline-block bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-lg px-5 py-2.5 transition-colors"
+          >
+            Call {SUPPORT_PHONE}
+          </a>
+        </>
+      )}
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

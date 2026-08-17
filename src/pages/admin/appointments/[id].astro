@@ -20,7 +20,13 @@ import {
   PIPELINE_STAGES,
 } from '../../../lib/booking-admin-entry';
 import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import {
+  APPOINTMENT_UPLOAD_TTL_HOURS,
+  appointmentUploadUrl,
+} from '../../../lib/booking-config';
 import { formatSlot } from '../../../lib/booking-time';
+import { issueAppointmentUploadToken } from '../../../lib/draft-token';
+import AppointmentUpload from '../../../components/AppointmentUpload.svelte';
 import { getDb, SERVICE_LABELS, type Appointment, type AppointmentFile } from '../../../lib/db';
 
 // Validate before querying. The driver parameterizes, so this is defense in
@@ -59,6 +65,40 @@ try {
 if (!appointment && !dbError) {
   return new Response('Not found', { status: 404 });
 }
+
+/**
+ * BK-34a. The photo-upload capability for this appointment, in two forms: a
+ * link the office texts, and the same uploader inline for an agent who already
+ * has the files in their inbox.
+ *
+ * Minted here, in the page, because the page is already behind the middleware —
+ * `/admin` is gated by prefix, so reaching this frontmatter *is* the
+ * authorization, and a separate mint endpoint would only be a second thing to
+ * protect.
+ *
+ * A FRESH TOKEN ON EVERY PAGE VIEW, which is deliberate rather than wasteful.
+ * The caps count against `appointment_id` and not against the prefix, so a new
+ * `draftId` grants no new budget; what it does mean is that links rotate, and
+ * that a link pasted into a text message three weeks ago is not the same
+ * capability as the one on screen now.
+ *
+ * Failure is non-fatal: this is a convenience on a page whose job is showing
+ * the appointment. `BOOKING_DRAFT_SECRET` being unset must not 500 the record.
+ */
+let uploadToken: string | null = null;
+let uploadDraftId: string | null = null;
+if (appointment) {
+  try {
+    const minted = await issueAppointmentUploadToken(appointment.id);
+    uploadToken = minted.token;
+    uploadDraftId = minted.draftId;
+  } catch (e) {
+    console.error(`Could not mint an upload token for appointment ${appointment.id}:`, e);
+  }
+}
+const uploadLink = uploadToken
+  ? new URL(appointmentUploadUrl(uploadToken), Astro.site ?? Astro.url.origin).toString()
+  : null;
 
 // Four states per stamp, not two. `none` is BK-08's addition: an admin row with
 // an email may simply not have been sent one, which "Not applicable" would now
@@ -398,6 +438,58 @@ function statusClasses(status: Appointment['status']) {
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      <!--
+        BK-34a. Getting photos onto a PHONE booking, which until now was
+        impossible — they arrived in somebody's inbox and stayed there.
+
+        Two arms, one capability:
+
+          - the link, which the office texts (BK-34b sends it automatically once
+            the Twilio number is live; until then this is copy-paste);
+          - the same uploader inline, for an agent who already has the files.
+
+        The inline arm is why there is no multipart proxy in this feature. A
+        100 MB video posted through a serverless function is the shape
+        `booking-files.ts` rejects on the read side, and it would be a second
+        upload path to keep correct. This one is the customer's path, running
+        under a token the page just minted.
+      -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h2 class="text-white font-semibold mb-1">Get photos</h2>
+        <p class="text-zinc-600 text-xs mb-5">
+          Text the customer this link, or add files yourself if they emailed them.
+          Links stay live for {APPOINTMENT_UPLOAD_TTL_HOURS} hours.
+        </p>
+
+        {uploadLink ? (
+          <>
+            <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="upload-link">
+              Upload link
+            </label>
+            <input
+              id="upload-link"
+              type="text"
+              readonly
+              value={uploadLink}
+              onfocus="this.select()"
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono mb-6 focus:border-amber-500 focus:outline-none"
+            />
+
+            <p class="text-zinc-400 text-xs uppercase tracking-wide mb-2">Or add files here</p>
+            <AppointmentUpload
+              client:load
+              token={uploadToken!}
+              draftId={uploadDraftId!}
+              variant="admin"
+            />
+          </>
+        ) : (
+          <p class="text-zinc-500 text-sm">
+            Upload links are unavailable — BOOKING_DRAFT_SECRET is not configured.
+          </p>
         )}
       </div>
 
