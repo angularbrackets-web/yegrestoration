@@ -51,6 +51,50 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **The "assertion that cannot fail" family has a sixth instance, and this one
+  was written BY the process rather than caught by it.** Found repairing
+  `verify-booking-admin-db.ts` during BK-40. The repair compared the stored
+  `admin_notes` against `appendUntickedNote(MARKER)` — the very function the
+  route calls to produce that value. Breaking the function moves **both sides of
+  the comparison together**, so the check stayed green through two deliberate
+  breaks (the line not appended at all, and the line overwriting the office's
+  own note). It now spells the expectation out: `UNTICKED_NOTE` is data, the
+  separator is a literal, and only the joining logic is under test.
+  **The general rule, which the earlier five instances only implied: an
+  assertion must never call the function it is asserting about.** A helper
+  shared between the production path and the test is a helper that cannot go
+  red. Severity: **medium** — it silently converts a gate into decoration;
+  owner: none, this is the fix.
+- **`verify:booking:admin:db` was red from the day BK-35 shipped until BK-40
+  found it.** BK-35 made an admin entry append an audit line to `admin_notes`
+  when send-confirmation is unticked, and `entryFields()` in that script sends
+  no `send_confirmation` — so `admin_notes === MARKER` became false immediately.
+  BK-35's ticket records "gates green"; this script was not among the gates it
+  ran. **The lesson is not "run more scripts" — it is that a ticket which
+  changes what a column STORES has to grep for assertions on that column**, and
+  neither typecheck nor build nor the ticket's own verification can find them.
+  Severity: **medium**, because a permanently red gate stops being read and the
+  next real regression hides behind it. Fixed in BK-40's sibling commit.
+- **A new admin POST endpoint must not be a sibling of a dynamic route.**
+  `src/pages/api/admin/files/[id].ts` generates `^/api/admin/files/([^/]+?)/$`,
+  so `/api/admin/files/delete/` is the same URL shape as
+  `/api/admin/files/7/` — and the generated Vercel config emits **no route at
+  all** for the delete path, meaning the form would POST at a proxy that only
+  exports `GET`. BK-40 put its endpoint at
+  `/api/admin/appointments/file-delete/` instead and asserts the generated
+  pattern in `verify-booking-smoke.ts`. Same family as the CLAUDE.md trailing-
+  slash trap: the dev server resolves it, the route table decides it.
+  Severity: **medium** (silent 405/404 on a mutation); owner: none, this is the
+  fix.
+- **`appointment_files` soft deletes never reclaim Blob storage.** BK-40's
+  `deleted_at` hides a row from the admin list, the file proxy and the upload
+  caps, but the object stays in the store — deliberately, so a mis-click is
+  recoverable. A store that accumulates deletions therefore grows without
+  bound. **Severity: low** — deletions are exceptional and the per-appointment
+  caps still bound live files. **Owner: none**; the natural home is the existing
+  `cleanup-uploads` cron sweeping blobs for rows deleted more than N days ago,
+  and it must not be a default.
+
 - **`/api/booking/upload-token/`'s byte cap can be bypassed by re-declaring a
   smaller size, and `size_bytes` is never corrected to the truth.** Found in
   BK-34a's implementation review, on the appointment route, and fixed there;
@@ -890,9 +934,9 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), 24h notice, request-received page/email, admin Approve/Decline, decline email, approve → payment link, escalation timers, service-area badge, **Resend idempotency-prefix fix**, ICS boundary rewrite | Reviewed | draft |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 009**), GST line item, expiry cron | Reviewed | draft |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook, policy values as placeholders | Reviewed | draft |
-| BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | **implemented** 2026-08-16 — gates green, 7 red rows, one live 500 found and fixed by smoke test; awaiting implementation review |
+| BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
-| BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | **implemented** 2026-08-16 — gates green, 3 red rows; awaiting implementation review |
+| BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | ✅ **DEPLOYED 2026-08-16** (`5a2fe4a`) — reviewed, all findings resolved. Left `verify:booking:admin:db` red (see Known traps); repaired 2026-08-16 |
 | BK-36 | Terms rewrite — constants restructured, five surfaces, `dist/`-reading pins for "deductible" and insurer-billing shapes | Reviewed (copy) | draft |
 
 **Build order — grouped by DEPLOY, not by commit.** Several tickets must land
@@ -958,7 +1002,7 @@ three were flagged to the user before implementation and re-decided
 | BK-38 | Day strip: `Closed` for closed weekdays and `Call us` for an elapsed day, both distinct from `Full`; month header above the strip, month on a boundary chip | Light | ✅ committed |
 | BK-39 | Homepage booking CTA relabelled, plus a live next-opening teaser above it | Light | ✅ committed |
 | BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | **implemented** 2026-08-16 — gates green, 14 red rows, migration applied to dev; awaiting implementation review |
-| BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | report |
+| BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | ✅ report delivered 2026-08-16 — awaiting the client's choice; the recommended first step is a 2-minute test on a real iPhone |
 
 **Migration numbering moved.** BK-40 takes **006**, so BK-31 → **007**,
 BK-23 → **008**, BK-32 → **009**. Mechanical, but the numbers are load-bearing
