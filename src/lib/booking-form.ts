@@ -22,6 +22,7 @@
  */
 
 import {
+  CLOSED_WEEKDAYS,
   MAX_FILES_PER_BOOKING,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -33,6 +34,7 @@ import {
   isPlausiblePhone,
   type FieldError,
 } from './booking-payload';
+import { earliestBookableInstant, slotStartsForDate } from './booking-time';
 import { EXTENSION_TO_TYPE, formatBytes, isAllowedContentType } from './booking-uploads';
 
 export type Step = 1 | 2 | 3;
@@ -424,6 +426,120 @@ export function readAvailabilityResponse(status: number, body: unknown): Availab
     ok: false,
     message: 'We could not load available times. Please call us and we will book you in.',
   };
+}
+
+// ---------------------------------------------------------------------------
+// The day strip (BK-38)
+//
+// Presentation only. The availability endpoint deliberately never says WHY a
+// day has no slots — `booking-availability.ts` calls that out by name, because
+// distinguishing "blacked out" from "already booked" leaks the schedule — and
+// nothing here asks it to. The one distinction drawn below is derived from
+// `CLOSED_WEEKDAYS`, which is public policy the page already states in prose
+// underneath the strip, not from anything the server disclosed.
+// ---------------------------------------------------------------------------
+
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
+const MONTH_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const;
+
+/**
+ * Why a chip is unselectable, when it is.
+ *
+ * All three of `closed`, `elapsed` and `full` are zero-slot days, and all three
+ * were rendering as "Full" — stating demand where two of them are policy and
+ * the clock. "Full" on every Friday for two weeks, plus "Full" on today from
+ * lunchtime onward, reads as a company booked solid; the caption underneath the
+ * strip says the opposite about Fridays, and the visitor believes the chips.
+ *
+ * `full` is now the residual, and it is the only one of the three that is a
+ * claim about bookings. The endpoint still never says *why* a day is empty
+ * (`booking-availability.ts` refuses to, deliberately) — `closed` and `elapsed`
+ * are both derived from public constants and the visitor's own clock, so
+ * nothing here asks it to.
+ */
+export type DayChipKind = 'open' | 'closed' | 'elapsed' | 'full';
+
+/**
+ * ORDER MATTERS, TWICE.
+ *
+ * `open` is tested first: an open day is open whatever its weekday. Testing the
+ * weekday first would render a Friday with slots on it as "Closed" and disable
+ * it — turning a `CLOSED_WEEKDAYS` change into a calendar that silently refuses
+ * the days it is offering. The server is the authority on what is bookable;
+ * this only labels what the server sent.
+ *
+ * `closed` is tested before `elapsed` because a Friday that is also in the past
+ * is a Friday: the policy is the durable reason and the clock is incidental.
+ *
+ * `elapsed` is a PROOF, not a guess. Every one of the day's five grid instants
+ * is earlier than the earliest instant the notice rule permits, so no booking
+ * is involved in the day being empty and no disclosure is made by saying so.
+ * A day with even one slot still inside the window that is nonetheless empty is
+ * genuinely taken, and falls through to `full` correctly.
+ */
+export function dayChipKind(
+  date: string,
+  weekday: number,
+  slotCount: number,
+  now: Date,
+): DayChipKind {
+  if (slotCount > 0) return 'open';
+  if (CLOSED_WEEKDAYS.includes(weekday)) return 'closed';
+  const cutoff = earliestBookableInstant(now).getTime();
+  if (slotStartsForDate(date).every((start) => start.getTime() < cutoff)) return 'elapsed';
+  return 'full';
+}
+
+/**
+ * The small line under the chip's date.
+ *
+ * `elapsed` reads "Call us" rather than naming the rule. The notice cutoff is
+ * ours, not the visitor's problem, and the phone is the actual next step for
+ * someone whose damage is happening now — the same hand-off the availability
+ * error state and the fully-booked state both make.
+ */
+export function dayChipCaption(kind: DayChipKind, slotCount: number): string {
+  if (kind === 'open') return `${slotCount} open`;
+  if (kind === 'closed') return 'Closed';
+  return kind === 'elapsed' ? 'Call us' : 'Full';
+}
+
+/**
+ * The chip's own label, from its `YYYY-MM-DD` — never `new Date(key)`, which
+ * parses as UTC midnight and renders the previous day west of Greenwich.
+ *
+ * `showMonth` is for the first chip of a new month: the strip spans 15 days and
+ * can therefore cross exactly one boundary, where a bare "1" beside a "31" is
+ * the one genuinely ambiguous chip in the row. No year — the window is two
+ * weeks, so the year is never the question being asked.
+ */
+export function dayChipLabel(date: string, weekday: number, showMonth = false): string {
+  const day = Number(date.slice(8, 10));
+  if (showMonth) return `${MONTH_SHORT[Number(date.slice(5, 7)) - 1]} ${day}`;
+  return `${WEEKDAY_NAMES[weekday]} ${day}`;
+}
+
+/** `2026-08-16` → `August 2026`, for the header above the strip. */
+export function monthHeading(date: string): string {
+  return `${MONTH_NAMES[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+}
+
+/**
+ * True when this date opens a month that the previous one did not — i.e. the
+ * chip that should carry its month. Index 0 is deliberately false: the header
+ * above the strip already names that month, and repeating it on the first chip
+ * makes the boundary chip look less special than it is.
+ */
+export function startsNewMonth(date: string, previous: string | undefined): boolean {
+  if (!previous) return false;
+  return date.slice(0, 7) !== previous.slice(0, 7);
 }
 
 // ---------------------------------------------------------------------------

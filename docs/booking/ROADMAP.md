@@ -939,6 +939,38 @@ PII rules all stand.
 - **BK-31** — the "non-binding by design; the form must say the choice can
   change on the day" clause is **deleted**. The tier is what gets charged.
 
+### P10 — Office and widget UX (production testing of Deploy 1, 2026-08-16)
+
+**Deploy 1 shipped and the client used it. This is what using it surfaced.**
+Seven items, none of which changes the booking flow: they are the admin
+panel's photo workflow, the day strip's vocabulary, and one homepage CTA.
+Deliberately **not** P9 Deploy 2 — nothing here touches statuses, terms
+wording, wizard steps, or anything BK-23/31/32/36 owns, and two items that
+border that territory were folded into those tickets' specs instead of built.
+
+Three of the seven items, as first stated, contradicted shipped code. All
+three were flagged to the user before implementation and re-decided
+(2026-08-16); the decisions are recorded in each ticket's Assumptions log.
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-37 | Upload link: copy button, `navigator.share` on mobile with a `wa.me` desktop fallback, and the link's absolute expiry stated on the page | Light | draft |
+| BK-38 | Day strip: `Closed` for closed weekdays and `Call us` for an elapsed day, both distinct from `Full`; month header above the strip, month on a boundary chip | Light | draft |
+| BK-39 | Homepage booking CTA relabelled, plus a live next-opening teaser above it | Light | draft |
+| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | draft |
+| BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | report |
+
+**Migration numbering moved.** BK-40 takes **006**, so BK-31 → **007**,
+BK-23 → **008**, BK-32 → **009**. Mechanical, but the numbers are load-bearing
+for the next implementer and are quoted in three ticket files as well as here.
+This is the second time P9's numbering has shifted (the spec's §6 item 12 was
+the first); the lesson is that a migration number is worth nothing until it is
+applied, and the ROADMAP row is the only place it is real.
+
+**Deployed as "Deploy 1.5"** — after Deploy 1, before the Deploy 2 flip, with
+no coupling to either. BK-40's migration applies to production first, matching
+BK-27's and Deploy 2's rollout shape.
+
 ## Open questions for the client
 
 All three were answered on 2026-08-08. Kept here as decisions rather than

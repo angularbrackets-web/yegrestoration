@@ -5,9 +5,12 @@
 //
 // Exits non-zero on the first failed assertion.
 import {
+  CLOSED_WEEKDAYS,
   MAX_FILES_PER_BOOKING,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
+  MIN_NOTICE_HOURS,
+  SLOT_START_TIMES,
 } from '../src/lib/booking-config';
 import {
   applyPrefill,
@@ -15,10 +18,15 @@ import {
   checkFileAcceptance,
   createDraftSession,
   createSubmitGuard,
+  dayChipCaption,
+  dayChipKind,
+  dayChipLabel,
   emptyFormValues,
   mapCommitResponse,
+  monthHeading,
   readAvailabilityResponse,
   resolveContentType,
+  startsNewMonth,
   stepForErrors,
   validateStep,
   type FormValues,
@@ -624,6 +632,102 @@ console.log('\nQuery-param prefill trusts nothing (BK-10 AC4)');
   );
 
   console.log('  ?service= and ?route= select only what already exists');
+}
+
+// ---------------------------------------------------------------------------
+// BK-38 — the day strip's labels
+// ---------------------------------------------------------------------------
+{
+  // Read off the config rather than hard-coded: the whole point of these
+  // assertions is that the chip follows CLOSED_WEEKDAYS, so writing `5` here
+  // would keep them green through the exact change they exist to catch.
+  const closedWeekday = CLOSED_WEEKDAYS[0];
+  const openWeekday = [0, 1, 2, 3, 4, 5, 6].find((d) => !CLOSED_WEEKDAYS.includes(d))!;
+
+  // Three dates and one clock, all derived rather than written down. `future`
+  // is far enough out that no notice rule touches it, `today` is the date the
+  // clock sits on, and the clock is pinned AFTER that day's last slot so the
+  // whole day is provably elapsed.
+  const today = localDateKey(new Date());
+  const future = addDays(today, 10);
+  const gridToday = slotStartsForDate(today);
+  const afterHours = new Date(gridToday[SLOT_START_TIMES.length - 1].getTime() + 60 * 60 * 1000);
+  const morning = new Date(gridToday[0].getTime() - 12 * 60 * 60 * 1000);
+  // A clock whose cutoff lands EXACTLY on the second slot, derived rather than
+  // written: the first slot is then past the cutoff and the rest are not, which
+  // is the only shape that separates `every` from `some`. Without this case an
+  // `every` → `some` edit stays green, and `some` would claim "Call us" on a
+  // day that still has bookable time on it and is empty because it is booked.
+  const midday = new Date(gridToday[1].getTime() - MIN_NOTICE_HOURS * 60 * 60 * 1000);
+
+  check(
+    dayChipKind(future, closedWeekday, 0, afterHours) === 'closed',
+    'a zero-slot closed weekday is Closed, not Full',
+  );
+  check(
+    dayChipKind(future, openWeekday, 0, afterHours) === 'full',
+    'a zero-slot open weekday still in the window is Full',
+  );
+  check(
+    dayChipKind(future, openWeekday, 3, afterHours) === 'open',
+    'a weekday with slots is open',
+  );
+
+  // The ordering guard. If CLOSED_WEEKDAYS ever changes, the server starts
+  // offering slots on that weekday before this module hears about it — and a
+  // weekday-first test would label the offered day "Closed" and disable it.
+  check(
+    dayChipKind(future, closedWeekday, 2, afterHours) === 'open',
+    'a closed weekday that the server offered slots on is still selectable',
+  );
+
+  // The elapsed state: today, after the last slot's notice cutoff has passed.
+  // This is the case that was rendering as "Full" on production — a lie about
+  // demand told by the clock.
+  check(
+    dayChipKind(today, openWeekday, 0, afterHours) === 'elapsed',
+    'a day whose every slot is past the notice cutoff is not Full',
+  );
+  // ...and the boundary in the other direction: the same day, early enough that
+  // slots remain inside the window, is genuinely taken.
+  check(
+    dayChipKind(today, openWeekday, 0, morning) === 'full',
+    'an empty day with slots still inside the notice window is Full',
+  );
+  check(
+    dayChipKind(today, openWeekday, 0, midday) === 'full',
+    'a PARTLY elapsed day that is empty is Full — some of it was still bookable',
+  );
+  // Policy outranks the clock: an elapsed Friday is still a closed Friday.
+  check(
+    dayChipKind(today, closedWeekday, 0, afterHours) === 'closed',
+    'a closed weekday that has also elapsed reads Closed',
+  );
+
+  check(dayChipCaption('closed', 0) === 'Closed', 'the closed caption reads Closed');
+  check(dayChipCaption('full', 0) === 'Full', 'the full caption reads Full');
+  check(dayChipCaption('elapsed', 0) === 'Call us', 'the elapsed caption hands over to the phone');
+  check(dayChipCaption('open', 1) === '1 open', 'the open caption counts slots');
+
+  // Labels are derived from the key's own characters. `new Date('2026-09-01')`
+  // parses as UTC midnight, which is August 31st in Edmonton — the bug this
+  // spelling exists to avoid.
+  check(dayChipLabel('2026-09-01', 2) === 'Tue 1', 'a normal chip is weekday + day');
+  check(dayChipLabel('2026-09-01', 2, true) === 'Sep 1', 'a boundary chip carries the month');
+  check(!dayChipLabel('2026-09-01', 2, true).includes('2026'), 'no year on a chip');
+
+  check(monthHeading('2026-08-16') === 'August 2026', 'the header names month and year');
+  check(monthHeading('2026-12-31') === 'December 2026', 'December is not off by one');
+
+  check(startsNewMonth('2026-09-01', '2026-08-31'), 'the 1st after the 31st is a boundary');
+  check(!startsNewMonth('2026-08-17', '2026-08-16'), 'a same-month date is not a boundary');
+  check(!startsNewMonth('2026-08-16', undefined), 'the first chip in the strip is not a boundary');
+  check(
+    startsNewMonth('2027-01-01', '2026-12-31'),
+    'a year boundary is a month boundary too',
+  );
+
+  console.log('  day strip: Closed is policy, Full is demand, months are labelled');
 }
 
 if (failures > 0) {

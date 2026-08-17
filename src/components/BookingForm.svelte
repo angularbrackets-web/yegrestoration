@@ -50,9 +50,14 @@
     checkFileAcceptance,
     createDraftSession,
     createSubmitGuard,
+    dayChipCaption,
+    dayChipKind,
+    dayChipLabel,
     emptyFormValues,
     mapCommitResponse,
+    monthHeading,
     readAvailabilityResponse,
+    startsNewMonth,
     validateStep,
     SUPPORT_PHONE,
     type Step,
@@ -201,6 +206,7 @@
         return;
       }
       dates = outcome.dates as AvailableDate[];
+      availabilityAt = new Date();
       if (dates.length > 0 && dates.every((d) => d.slots.length === 0)) {
         reportBookingFunnelEvent('booking_availability_empty');
       }
@@ -521,12 +527,59 @@
     }
   }
 
-  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  // -------------------------------------------------------------------------
+  // Day strip (BK-38)
+  //
+  // The labelling rules are pure and live in `booking-form.ts`; what is here is
+  // the one thing that genuinely needs the DOM — which month the strip is
+  // showing right now, as it scrolls.
+  // -------------------------------------------------------------------------
 
-  /** Label a date from its own `YYYY-MM-DD` — never `new Date()`, which would shift zone. */
-  function dayLabel(date: string, weekday: number): string {
-    const day = Number(date.slice(8, 10));
-    return `${WEEKDAYS[weekday]} ${day}`;
+  let stripEl = $state<HTMLDivElement | null>(null);
+
+  /**
+   * The month named above the strip.
+   *
+   * Seeded from the first date rather than left blank, so the header is correct
+   * before any scroll happens and never renders as an empty line that pushes
+   * the chips down when it fills (the strip sits above the fold on mobile).
+   */
+  let visibleMonth = $state('');
+
+  /**
+   * The clock the chips are labelled against, stamped when availability lands
+   * rather than read per-chip.
+   *
+   * One instant for the whole strip, so a row rendered across a cutoff boundary
+   * cannot label two days by two different "now"s. It is refreshed on every
+   * `loadAvailability`, which is the only moment the strip's contents change.
+   */
+  let availabilityAt = $state(new Date());
+
+  $effect(() => {
+    if (dates.length > 0 && !visibleMonth) visibleMonth = monthHeading(dates[0].date);
+  });
+
+  /**
+   * Read the month off the leftmost chip still in view.
+   *
+   * Geometry rather than arithmetic on `scrollLeft`: chips are not a fixed
+   * width (a "Closed" caption is narrower than "5 open", and a boundary chip
+   * carries a month), so any width-per-chip calculation would drift by the end
+   * of the row.
+   */
+  function onStripScroll() {
+    if (!stripEl) return;
+    const left = stripEl.getBoundingClientRect().left;
+    for (const chip of Array.from(stripEl.children) as HTMLElement[]) {
+      // A chip counts as "the one in view" once its right edge clears the
+      // container's left edge — i.e. any part of it is still visible.
+      if (chip.getBoundingClientRect().right > left + 1) {
+        const month = chip.dataset.month;
+        if (month) visibleMonth = month;
+        return;
+      }
+    }
   }
 
   const FIELD_CLASS =
@@ -617,22 +670,40 @@
               <a class="cta-secondary underline ml-4" href="/contact/">Send a message</a>
             </div>
           {:else}
-            <div class="flex gap-2 overflow-x-auto pb-2 mb-5">
-              {#each dates as d (d.date)}
+            <p
+              class="text-xs uppercase tracking-wider text-yeg-text-secondary mb-2"
+              aria-hidden="true"
+            >
+              {visibleMonth}
+            </p>
+
+            <div
+              bind:this={stripEl}
+              onscroll={onStripScroll}
+              class="flex gap-2 overflow-x-auto pb-2 mb-5"
+            >
+              {#each dates as d, i (d.date)}
+                {@const kind = dayChipKind(d.date, d.weekday, d.slots.length, availabilityAt)}
+                {@const boundary = startsNewMonth(d.date, dates[i - 1]?.date)}
                 <button
                   type="button"
-                  class="shrink-0 px-3 py-2 rounded-lg border text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-month={monthHeading(d.date)}
+                  class="shrink-0 px-3 py-2 rounded-lg border text-sm transition-colors disabled:cursor-not-allowed"
                   class:border-yeg-amber={selectedDate === d.date}
                   class:bg-yeg-amber={selectedDate === d.date}
                   class:border-black-10={selectedDate !== d.date}
+                  class:opacity-40={kind === 'full'}
+                  class:opacity-50={kind === 'closed' || kind === 'elapsed'}
+                  class:border-dashed={kind === 'closed' || kind === 'elapsed'}
                   style={selectedDate === d.date ? '' : 'border-color:rgba(0,0,0,0.1)'}
-                  disabled={d.slots.length === 0}
+                  disabled={kind !== 'open'}
                   aria-pressed={selectedDate === d.date}
+                  aria-label={`${dayChipLabel(d.date, d.weekday, boundary)}, ${dayChipCaption(kind, d.slots.length)}`}
                   onclick={() => (selectedDate = d.date)}
                 >
-                  <span class="block font-semibold">{dayLabel(d.date, d.weekday)}</span>
+                  <span class="block font-semibold">{dayChipLabel(d.date, d.weekday, boundary)}</span>
                   <span class="block text-[11px] text-yeg-text-secondary">
-                    {d.slots.length === 0 ? 'Full' : `${d.slots.length} open`}
+                    {dayChipCaption(kind, d.slots.length)}
                   </span>
                 </button>
               {/each}
