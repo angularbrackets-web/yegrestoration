@@ -1001,7 +1001,7 @@ three were flagged to the user before implementation and re-decided
 | BK-37 | Upload link: copy button, `navigator.share` on mobile with a `wa.me` desktop fallback, and the link's absolute expiry stated on the page | Light | ✅ committed |
 | BK-38 | Day strip: `Closed` for closed weekdays and `Call us` for an elapsed day, both distinct from `Full`; month header above the strip, month on a boundary chip | Light | ✅ committed |
 | BK-39 | Homepage booking CTA relabelled, plus a live next-opening teaser above it | Light | ✅ committed |
-| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | **implemented** 2026-08-16 — gates green, 14 red rows, migration applied to dev; awaiting implementation review |
+| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | ✅ **reviewed** 2026-08-16 — no blockers; 4 should-fix + 3 nits folded in. Gates green, 21 red rows, migration 006 applied to dev. **Production migration pending — 006 applies before the deploy** |
 | BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | ✅ report delivered 2026-08-16 — awaiting the client's choice; the recommended first step is a 2-minute test on a real iPhone |
 
 **Migration numbering moved.** BK-40 takes **006**, so BK-31 → **007**,

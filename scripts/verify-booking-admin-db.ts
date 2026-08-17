@@ -1442,6 +1442,7 @@ try {
     (await claimedFilePathname(sql, deletedRow.id)) === null,
     'a REMOVED file is invisible to the proxy, even though its bytes are still in the store',
   );
+
   check(
     (await getFile(String(deletedRow.id))).status === 404,
     'and the route 404s it rather than signing a URL',
@@ -1462,18 +1463,28 @@ try {
   }
   check(constraintHeld, 'migration 006 refuses a source outside web/link/office');
 
-  // NULL is explicitly allowed — it is what every row written before migration
-  // 006 holds, and the page renders it as "source not recorded" rather than
-  // guessing one of the three.
+  // NULL is what every row written before migration 006 holds, and the page
+  // renders it as "source not recorded" rather than guessing one of the three.
+  //
+  // THE COLUMN IS OMITTED, NOT SET TO NULL, and that is the whole assertion.
+  // The first version passed `source` explicitly as NULL — which beats any
+  // column default, so migration 006 gaining `DEFAULT 'web'` (i.e. Assumption 1
+  // being violated, and every pre-006 row silently acquiring a provenance
+  // nobody recorded) would have left it green. Only `NOT NULL` could have
+  // reddened it. Omitting the column is what actually tests the default.
+  // Found in implementation review.
   const [nullSourceRow] = (await sql`
     INSERT INTO appointment_files
-      (appointment_id, draft_id, pathname, content_type, size_bytes, source)
+      (appointment_id, draft_id, pathname, content_type, size_bytes)
     VALUES
-      (${idA}, ${DRAFT_ID}::uuid, ${`${FILE_PREFIX}nosource.jpg`}, 'image/jpeg', 1, NULL)
+      (${idA}, ${DRAFT_ID}::uuid, ${`${FILE_PREFIX}nosource.jpg`}, 'image/jpeg', 1)
     RETURNING id, source
   `) as { id: number; source: string | null }[];
   createdFileIds.push(nullSourceRow.id);
-  check(nullSourceRow.source === null, 'and it permits NULL, which is what pre-006 rows hold');
+  check(
+    nullSourceRow.source === null,
+    'a row that names no source defaults to NULL — migration 006 must not invent one',
+  );
 
   // BIGINT arrives from the driver as a string however db.ts types it. Pinned
   // here against a real row, because this ticket owns that correction and the

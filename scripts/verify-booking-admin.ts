@@ -16,7 +16,7 @@
 // missing its `timeZone` would otherwise produce the right answer by accident.
 process.env.TZ = 'UTC';
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -700,6 +700,101 @@ console.log('\nNo admin page leaks a Blob location (BK-09)');
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nEvery read of appointment_files excludes removed rows (BK-40)');
+// ---------------------------------------------------------------------------
+//
+// A SCAN, NOT A LIST OF THE SITES WE HAPPEN TO REMEMBER. BK-40's implementation
+// review found one consumer the ticket had missed (`resend.ts`'s notification
+// file count) precisely because the ticket enumerated the consumers by hand,
+// and a hand-taken inventory is wrong the moment somebody adds the next query.
+// This walks the source instead, so the NEXT one is caught by the gate rather
+// than by a reviewer.
+//
+// The rule: any SELECT/COUNT over `appointment_files` must carry
+// `deleted_at IS NULL`, unless it is on the deliberate exemption list below and
+// says why.
+{
+  const EXEMPT = new Map<string, string>([
+    // Fetches deleted rows on purpose: it is the one screen that must SHOW a
+    // removal happened, and it splits the list in JS.
+    ['src/pages/admin/appointments/[id].astro', 'renders the "Removed" section'],
+    // Draft-scoped, and a draft's rows are unclaimed by definition — a deleted
+    // row can only reach these totals through a draft token reused after its
+    // booking committed. Documented at the call site.
+    ['src/pages/api/booking/upload-token.ts', 'draft-scoped; documented asymmetry'],
+    // Claims rows INTO an appointment at commit time; they cannot be deleted
+    // yet, because deletion is an admin action on an already-claimed file.
+    ['src/lib/booking-commit.ts', 'claims unclaimed rows at commit'],
+    // Reads a row it has just failed to delete, deliberately WITHOUT the
+    // clause, to recover the appointment id for the redirect — so a double
+    // click lands the office back on the page they were working on instead of
+    // on the list with no message.
+    ['src/pages/api/admin/appointments/file-delete.ts', 'recovers the id of an already-removed row'],
+    // The orphan cron addresses `appointment_id IS NULL` only, and the delete
+    // endpoint refuses unclaimed rows — so a soft-deleted row is unreachable
+    // from here by construction.
+    ['src/pages/api/cron/cleanup-uploads.ts', 'sweeps unclaimed drafts only'],
+  ]);
+
+  const walkSrc = (dir: string, out: string[] = []): string[] => {
+    for (const entry of readdirSync(dir)) {
+      const full = resolve(dir, entry);
+      if (statSync(full).isDirectory()) walkSrc(full, out);
+      else out.push(full);
+    }
+    return out;
+  };
+  const files = walkSrc(resolve(root, 'src')).filter((f) => /\.(ts|astro|svelte)$/.test(f));
+  let reads = 0;
+  let scanned = 0;
+
+  for (const file of files) {
+    const rel = file.slice(resolve(root).length + 1);
+    const source = readFileSync(file, 'utf8');
+
+    // THE STATEMENT IS DELIMITED BY ITS OWN TEMPLATE LITERAL, not by a
+    // fixed-size window. The first version of this scan matched
+    // `SELECT … FROM appointment_files …` inside 400 characters, and the red
+    // pass caught it immediately: `resend.ts`'s query is longer than that, so
+    // breaking it produced NO match, no check ran, and the scan stayed green on
+    // the exact regression it was written for. A scan that silently skips what
+    // it cannot parse is worse than no scan.
+    let from = source.indexOf('FROM appointment_files');
+    while (from !== -1) {
+      const open = source.lastIndexOf('`', from);
+      const close = source.indexOf('`', from);
+      // A mention outside a template literal is prose, not a query.
+      if (open !== -1 && close !== -1) {
+        const statement = source.slice(open, close);
+        // Reads only. An INSERT, or the UPDATE that sets `deleted_at`, is not a
+        // read path; `onUploadCompleted`'s UPDATE addresses one pathname.
+        if (/\bSELECT\b/i.test(statement) && !/\bINSERT\s+INTO\b/i.test(statement)) {
+          reads++;
+          const why = EXEMPT.get(rel);
+          if (why) {
+            check(true, `${rel} is exempt (${why})`);
+          } else {
+            check(
+              statement.includes('deleted_at IS NULL'),
+              `${rel}: a read of appointment_files must carry \`deleted_at IS NULL\` — removed files are not this appointment's photos`,
+            );
+          }
+        }
+      }
+      from = source.indexOf('FROM appointment_files', from + 1);
+    }
+    if (source.includes('FROM appointment_files')) scanned++;
+  }
+
+  // The scan must be able to find things, or it passes by finding nothing —
+  // the shape `verify-cutover.ts` was bitten by in BK-27, and the shape this
+  // scan's own first version had. Pinned on the READ count, not the file
+  // count, because that is what stops a statement dropping out of range.
+  check(reads >= 6, `the scan must reach the query sites, found ${reads} reads`);
+  console.log(`  ${reads} reads across ${scanned} files; each filters or is exempt with a reason`);
 }
 
 // ---------------------------------------------------------------------------

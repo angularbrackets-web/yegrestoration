@@ -110,6 +110,15 @@ export const POST: APIRoute = async ({ request }) => {
           throw new Error(`Attachments must total under ${formatBytes(MAX_TOTAL_BYTES)}`);
         }
 
+        // BK-40 NOTE: unlike its appointment-scoped twin, the totals query above
+        // does NOT filter out soft-deleted rows — deliberately. Soft delete is
+        // an ADMIN action on a CLAIMED file, and a draft's rows are unclaimed by
+        // definition, so a deleted row can reach a draft's totals in exactly one
+        // shape: a still-valid draft token reused after its booking committed
+        // and the office then removed one of that draft's files. The cost in
+        // that case is a slightly conservative cap for the remaining hours of a
+        // 6-hour token, which is the safe direction to be wrong in. Raised as an
+        // asymmetry in BK-40's review; recorded rather than changed.
         await sql`
           INSERT INTO appointment_files
             (draft_id, pathname, content_type, size_bytes, original_name, source)

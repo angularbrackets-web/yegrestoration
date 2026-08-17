@@ -3,7 +3,7 @@ import type { APIRoute } from 'astro';
 export const prerender = false;
 
 import { adminAppointmentPath, ADMIN_APPOINTMENTS_PATH } from '../../../../lib/booking-admin';
-import { parseFileDeleteNote } from '../../../../lib/booking-admin-entry';
+import { parseAppointmentId, parseFileDeleteNote } from '../../../../lib/booking-admin-entry';
 import { getDb } from '../../../../lib/db';
 
 /**
@@ -46,14 +46,15 @@ export const POST: APIRoute = async ({ request }) => {
     return redirect(`${ADMIN_APPOINTMENTS_PATH}?files=form`);
   }
 
-  const raw = form.get('id');
-  // The same shape `[id].astro` requires of a URL segment: digits, no leading
-  // zero, inside int4. A looser parse on the delete path than on the read path
-  // is how a delete removes something nobody named.
-  const id =
-    typeof raw === 'string' && /^[1-9][0-9]{0,9}$/.test(raw) && Number(raw) <= 2147483647
-      ? Number(raw)
-      : null;
+  // `parseAppointmentId` is the id grammar, imported rather than rewritten. It
+  // is named for an appointment id but it is the SHAPE that matters — digits,
+  // no leading zero, inside int4 — and `appointment_files.id` is the same
+  // SERIAL shape. The first cut of this route hand-copied the regex and the
+  // copies had already drifted (the shared one trims, the copy did not), which
+  // is the drift `booking-commit.ts` writes a paragraph about. A looser parse
+  // on the delete path than on the read path is how a delete removes something
+  // nobody named.
+  const id = parseAppointmentId(form.get('id'));
   if (id === null) return redirect(`${ADMIN_APPOINTMENTS_PATH}?files=badid`);
 
   const note = parseFileDeleteNote(form.get('note'));
@@ -81,11 +82,31 @@ export const POST: APIRoute = async ({ request }) => {
 
     const row = rows[0];
     if (!row) {
-      // Already deleted, never existed, or unclaimed. All three are the same
-      // answer to the office — that file is not on this appointment — and
-      // which appointment they came from is not knowable without trusting the
-      // form, so this lands on the list.
-      return redirect(`${ADMIN_APPOINTMENTS_PATH}?files=gone`);
+      // Nothing was updated: already removed, never existed, or unclaimed.
+      //
+      // THE LIKELY CAUSE IS A DOUBLE-CLICK ON REMOVE, not a hand-typed URL, and
+      // the first version of this branch sent the office to the appointments
+      // list — off the page they were working on, with no message, for pressing
+      // a button twice. Found in implementation review.
+      //
+      // So the appointment id is recovered with a SECOND, deliberately
+      // narrower read: same row, without the `deleted_at IS NULL` clause. It
+      // still comes off the row rather than the form, so the redirect target is
+      // not something the caller chose — it is just the row's own appointment,
+      // whether or not the file is already gone. Only a genuinely unknown id
+      // (or an unclaimed draft row) falls through to the list.
+      const [known] = (await sql`
+        SELECT appointment_id
+        FROM appointment_files
+        WHERE id = ${id}
+          AND appointment_id IS NOT NULL
+      `) as { appointment_id: number }[];
+
+      return redirect(
+        known
+          ? `${adminAppointmentPath(known.appointment_id)}?files=gone`
+          : `${ADMIN_APPOINTMENTS_PATH}?files=gone`,
+      );
     }
 
     // For whoever is debugging, exactly as BK-35 pairs a warn with its note.

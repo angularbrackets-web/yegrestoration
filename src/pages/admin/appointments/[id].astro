@@ -102,7 +102,6 @@ if (!appointment && !dbError) {
  * appears in the URL the office pastes into a text message.
  */
 let uploadToken: string | null = null;
-let uploadDraftId: string | null = null;
 let uploadExpiresAt: Date | null = null;
 let officeToken: string | null = null;
 let officeDraftId: string | null = null;
@@ -113,7 +112,6 @@ if (appointment) {
       issueAppointmentUploadToken(appointment.id, new Date(), 'office'),
     ]);
     uploadToken = linkMint.token;
-    uploadDraftId = linkMint.draftId;
     uploadExpiresAt = linkMint.expiresAt;
     officeToken = officeMint.token;
     officeDraftId = officeMint.draftId;

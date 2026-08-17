@@ -59,7 +59,14 @@ export const POST: APIRoute = async ({ request }) => {
     // something else from it would inherit that.
     const rows = (await sql`
       SELECT a.*,
-             (SELECT COUNT(*)::int FROM appointment_files f WHERE f.appointment_id = a.id)
+             (SELECT COUNT(*)::int FROM appointment_files f
+               WHERE f.appointment_id = a.id
+                 -- BK-40. A removed file is not one of this appointment's
+                 -- photos. The comment above is why this matters even though
+                 -- the count reaches only a message this route never sends:
+                 -- the next person to send something else from this plan
+                 -- inherits whatever it says.
+                 AND f.deleted_at IS NULL)
                AS file_count
       FROM appointments a
       WHERE a.id = ${id}

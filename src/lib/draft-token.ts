@@ -45,6 +45,17 @@ const TOKEN_VERSION = 'v1';
  * only thing standing between numeric normalisation and a token that is valid
  * under a spelling the rest of the system rejects. Named here because it was
  * caught by attack in implementation review, having read as decoration.
+ *
+ * **`issuedAt` DELIBERATELY DOES NOT GET THE SAME TREATMENT, and the asymmetry
+ * is not an oversight.** It is re-canonicalised through `Number()` the same
+ * way, so `1755400000000e0`, `+1755400000000`, `01755400000000` and a leading
+ * space all rebuild the same signed string and verify. That grants nothing: the
+ * canonical value is what both the TTL check and the returned claims use, so
+ * every spelling names the same instant and the same capability, where a
+ * re-spelled *id* would name a row the rest of the system addresses by a
+ * different URL. Raised as a consistency question in BK-40's review; recorded
+ * rather than "fixed", because tightening it would change the shipped `a1`
+ * verifier for no gain.
  */
 const APPOINTMENT_TOKEN_VERSION = 'a1';
 

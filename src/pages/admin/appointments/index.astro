@@ -73,12 +73,26 @@ function pastStatusLabel(appointment: Appointment) {
 // that did nothing says so. Both routes redirect with `saved=`, because that
 // is the parameter this page reads; `email=` is the detail page's flash.
 const saved = Astro.url.searchParams.get('saved');
+// BK-40's delete route lands here only when it cannot name an appointment to
+// return to — an unknown id, or a row that belongs to no booking. Read here for
+// the reason the block above exists: a click that did nothing has to say so,
+// and implementation review found these four arms redirecting to a page that
+// rendered nothing at all for them.
+const filesFlash = Astro.url.searchParams.get('files');
 const savedMessage =
   saved === 'missing'
     ? 'That appointment no longer exists. Nothing was changed and nothing was sent.'
     : saved === 'invalid'
       ? 'That request was not valid. Nothing was changed and nothing was sent.'
-      : null;
+      : filesFlash === 'gone'
+        ? 'That file was already removed, or is not attached to an appointment.'
+        : filesFlash === 'badid'
+          ? 'That file could not be identified. Nothing was removed.'
+          : filesFlash === 'form'
+            ? 'That request was not valid. Nothing was removed.'
+            : filesFlash === 'db'
+              ? 'The database rejected that change. Nothing was removed.'
+              : null;
 ---
 
 <AdminLayout title="Appointments" refresh={30}>

@@ -75,6 +75,8 @@ const {
   BOOKING_UPLOAD_ENDPOINT,
 } = await import('../src/lib/booking-config');
 const { ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT } = await import('../src/lib/booking-admin');
+const { APPOINTMENT_UPLOAD_ENDPOINT } = await import('../src/lib/booking-config');
+const { issueAppointmentUploadToken } = await import('../src/lib/draft-token');
 const { assembleBookingPayload, emptyFormValues } = await import('../src/lib/booking-form');
 const { buildUploadPathname } = await import('../src/lib/booking-uploads');
 const { upload } = await import('@vercel/blob/client');
@@ -249,6 +251,8 @@ async function getAvailability(): Promise<{ status: number; body: Availability }
 let blackoutDay: string | null = null;
 let createdId: number | null = null;
 let uploadedPathname: string | null = null;
+/** BK-40's two appointment-scoped uploads. Cleaned up by pathname like the one above. */
+const appointmentPathnames: string[] = [];
 /**
  * Set as soon as a draft exists, not after a successful upload.
  * `upload-token.ts` writes the `appointment_files` row when it MINTS the token,
@@ -508,6 +512,59 @@ try {
   console.log(`  booking ${createdId} created for ${created.slotLabel}, one file claimed`);
 
   // -------------------------------------------------------------------------
+  console.log('\nProvenance reaches the database (BK-40)');
+  // -------------------------------------------------------------------------
+  //
+  // THE LAST LINK IN THE CHAIN, AND UNTIL NOW THE UNASSERTED ONE. Implementation
+  // review found that `source` on the appointment path was written by
+  // `${origin}` in a route that no script drove against a database:
+  // `verify-appointment-upload.ts` exercises only the mint/verify functions, and
+  // `verify-booking-admin-db.ts` hand-inserts its `source` fixtures. Changing
+  // that interpolation to a literal `'link'` — or, worse, to a caller-supplied
+  // `payload.origin`, which is exactly what the ticket calls worse than no
+  // provenance — left typecheck, build and all thirteen verify scripts green
+  // while the office silently believed every photo came from the customer.
+  //
+  // So this drives the REAL route, over HTTP, with REAL tokens, and reads the
+  // column back. One upload per origin, because a single one cannot show that
+  // the two are distinguished rather than both hard-coded.
+  for (const [origin, expected] of [
+    ['link', 'link'],
+    ['office', 'office'],
+  ] as const) {
+    const minted = await issueAppointmentUploadToken(createdId, new Date(), origin);
+    const apptPath = buildUploadPathname(minted.draftId, 'image/jpeg');
+    appointmentPathnames.push(apptPath);
+
+    const apptFile = new File([new Uint8Array(bytes)], `${origin}.jpg`, { type: 'image/jpeg' });
+    await upload(apptPath, apptFile, {
+      access: 'private',
+      handleUploadUrl: url(APPOINTMENT_UPLOAD_ENDPOINT),
+      contentType: 'image/jpeg',
+      clientPayload: JSON.stringify({
+        uploadToken: minted.token,
+        size: apptFile.size,
+        originalName: `${origin}.jpg`,
+      }),
+    });
+
+    const [row] = (await sql`
+      SELECT appointment_id, source FROM appointment_files WHERE pathname = ${apptPath}
+    `) as { appointment_id: number | null; source: string | null }[];
+
+    check(row !== undefined, `the ${origin} upload wrote a row`);
+    check(
+      row?.appointment_id === createdId,
+      `the ${origin} upload is claimed by the appointment from the signature, not the request`,
+    );
+    check(
+      row?.source === expected,
+      `a token signed with origin '${origin}' records source '${expected}', got ${JSON.stringify(row?.source)}`,
+    );
+  }
+  console.log('  a link token records "link" and an office token records "office"');
+
+  // -------------------------------------------------------------------------
   console.log('\nRejections still reject over HTTP');
   // -------------------------------------------------------------------------
   {
@@ -584,6 +641,14 @@ try {
   }
   if (repeatDraftId) {
     await sql`DELETE FROM appointment_files WHERE draft_id = ${repeatDraftId}::uuid`;
+  }
+  for (const p of appointmentPathnames) {
+    await sql`DELETE FROM appointment_files WHERE pathname = ${p}`;
+    try {
+      await del(p);
+    } catch (err) {
+      console.error(`  ⚠ could not delete the test blob ${p}:`, err);
+    }
   }
   if (uploadedPathname) {
     await sql`DELETE FROM appointment_files WHERE pathname = ${uploadedPathname}`;
