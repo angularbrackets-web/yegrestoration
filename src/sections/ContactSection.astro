@@ -1,5 +1,6 @@
 ---
 import ContactForm from '../components/ContactForm.svelte';
+import NextOpening from '../components/NextOpening.svelte';
 import {
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
@@ -324,8 +325,28 @@ const { showForm = false } = Astro.props;
                 ))}
               </div>
 
+              {/*
+                BK-39. The teaser is read-only and links nowhere — it prints
+                one line from the public availability endpoint and renders
+                NOTHING on any failure. `client:visible` because this section
+                is the last on the homepage: hydrating it at load would put a
+                fetch in front of the hero's LCP for a line nobody has scrolled
+                to yet.
+
+                The booking WIZARD stays off the homepage. One door per intent
+                is the BK-10 cutover's whole point, and a second copy of the
+                picker here would be the second door.
+              */}
+              <NextOpening client:visible />
+
+              {/*
+                "See available times" rather than "Book Your Assessment": the
+                button leads to a page whose first screen is a calendar, and
+                naming that is both more honest and a lower-commitment ask —
+                the visitor is one click from looking, not from booking.
+              */}
               <a href="/book/" class="cta-primary w-full justify-center">
-                <span>Book Your Assessment</span>
+                <span>See available times</span>
                 <span aria-hidden="true">&rarr;</span>
               </a>
               <p class="text-xs text-yeg-text-secondary text-center mt-4">
