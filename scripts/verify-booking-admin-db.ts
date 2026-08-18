@@ -1634,6 +1634,176 @@ try {
   // control API for real, and this script's contract is the dev database.
   // `verify:booking:files` covers the signing arguments; the post-deploy check
   // in the ticket covers the round trip.
+  // ---------------------------------------------------------------------------
+  console.log('\nBK-23 — approve and decline, against the real route');
+  // ---------------------------------------------------------------------------
+  //
+  // THE GUARDED UPDATE IS WHAT THIS EXISTS FOR. Every transition is
+  // `WHERE id = $1 AND status = 'pending_review'`, and zero rows returned means
+  // the decision was not this caller's to make. A double-click, a second tab, and
+  // a decline racing an approve all land there. Getting that wrong does not
+  // corrupt a row — it sends the customer a second email, or an approval for a
+  // booking somebody already declined.
+  {
+    const REVIEW_DATE = '2029-06-12';
+
+    const makeRequest = async (time: string, over: Record<string, string> = {}) => {
+      const location = await call(
+        createRoute,
+        entryFields({
+          slot_date: REVIEW_DATE,
+          slot_time: time,
+          name: `BK-23 review ${time}`,
+          email: 'bk23-verify@example.com',
+          assessment_tier: 'standard',
+          ...over,
+        }),
+      );
+      const id = idFromLocation(location);
+      if (id !== null) createdIds.push(id);
+      return id;
+    };
+
+    // --- APPROVE -------------------------------------------------------------
+    const approveId = await makeRequest('11:30');
+    check(approveId !== null, 'a request to approve was created');
+    if (approveId !== null) {
+      const before = await read(approveId);
+      check(before?.status === 'pending_review', 'and it starts in pending_review');
+
+      const location = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+      check(
+        location.includes('review=approved'),
+        `approving reports success, got "${location}"`,
+      );
+
+      const row = (await sql`
+        SELECT status, payment_status, approved_at, assessment_amount_cents,
+               travel_fee_cents, gst_cents, total_amount_cents, payment_due_at
+        FROM appointments WHERE id = ${approveId}
+      `) as Record<string, unknown>[];
+
+      check(row[0]?.status === 'approved_awaiting_payment', 'the row moves to approved_awaiting_payment');
+      check(row[0]?.payment_status === 'pending', 'and payment_status becomes pending');
+      check(row[0]?.approved_at !== null, 'approved_at is stamped');
+
+      // THE AMOUNTS ARE SNAPSHOTTED, not left to be recomputed later. A price
+      // change under a live row must not move a quote the customer accepted.
+      check(row[0]?.assessment_amount_cents === 39900, 'the base amount is snapshotted from the table');
+      check(row[0]?.travel_fee_cents === 0, 'travel defaults to zero — never applied automatically');
+      check(row[0]?.gst_cents === 1995, 'GST is computed, not typed');
+      check(row[0]?.total_amount_cents === 41895, 'and the total is base + travel + GST');
+      check(row[0]?.payment_due_at !== null, 'a distant slot carries a real deadline');
+
+      // THE SLOT IS STILL HELD. `approved_awaiting_payment` is not in
+      // SLOT_RELEASING_STATUSES — the whole point of a deadline is that the time
+      // is reserved until it lapses.
+      const held = await call(
+        createRoute,
+        entryFields({ slot_date: REVIEW_DATE, slot_time: '11:30', name: 'BK-23 collide' }),
+      );
+      check(held.includes('taken=1'), 'and the slot stays held against a second booking');
+
+      // IDEMPOTENCE. A second approve is a no-op, not a second email.
+      const again = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+      check(again.includes('review=stale'), `a second approve is a no-op, got "${again}"`);
+      const after = (await sql`
+        SELECT approved_at FROM appointments WHERE id = ${approveId}
+      `) as { approved_at: Date }[];
+      check(
+        after[0].approved_at.getTime() === (row[0].approved_at as Date).getTime(),
+        'and it does not restamp approved_at',
+      );
+
+      // A DECLINE CANNOT OVERTAKE AN APPROVAL. Same guard, other action.
+      const raced = await call(reviewRoute, { id: String(approveId), action: 'decline' });
+      check(raced.includes('review=stale'), 'declining an already-approved row is a no-op');
+      const stillApproved = await read(approveId);
+      check(
+        stillApproved?.status === 'approved_awaiting_payment',
+        'and the row is untouched by it',
+      );
+    }
+
+    // --- APPROVE WITH AN OVERRIDE AND A TRAVEL FEE ---------------------------
+    const overrideId = await makeRequest('12:30', { assessment_tier: 'report' });
+    if (overrideId !== null) {
+      await call(reviewRoute, {
+        id: String(overrideId),
+        action: 'approve',
+        assessment_amount: '750.00',
+        travel_fee: '46.50',
+      });
+      const row = (await sql`
+        SELECT assessment_amount_cents, travel_fee_cents, gst_cents, total_amount_cents
+        FROM appointments WHERE id = ${overrideId}
+      `) as Record<string, number>[];
+      check(row[0]?.assessment_amount_cents === 75000, 'an admin override replaces the suggested base');
+      check(row[0]?.travel_fee_cents === 4650, 'and the typed travel fee is stored');
+      // GST on base + travel, one rounding. 79650 * 5% = 3982.5 → 3983.
+      check(row[0]?.gst_cents === 3983, 'GST is recomputed on the overridden subtotal');
+      check(row[0]?.total_amount_cents === 83633, 'and the total adds up');
+    }
+
+    // --- A BAD AMOUNT CHANGES NOTHING ----------------------------------------
+    const badId = await makeRequest('13:30');
+    if (badId !== null) {
+      const refused = await call(reviewRoute, {
+        id: String(badId),
+        action: 'approve',
+        assessment_amount: '399abc',
+      });
+      check(refused.includes('review=amount'), `a malformed amount is refused, got "${refused}"`);
+      const row = await read(badId);
+      check(
+        row?.status === 'pending_review',
+        'and the row is left in pending_review — a refusal must not half-approve',
+      );
+    }
+
+    // --- NO TIER, NO APPROVAL ------------------------------------------------
+    const noTierId = await makeRequest('14:30', { assessment_tier: '' });
+    if (noTierId !== null) {
+      const refused = await call(reviewRoute, { id: String(noTierId), action: 'approve' });
+      check(refused.includes('review=notier'), `no tier means no amount, so no approval, got "${refused}"`);
+      check((await read(noTierId))?.status === 'pending_review', 'and nothing changed');
+
+      // ...but it can still be declined. A request the office cannot price is
+      // one they may well want to turn down.
+      const declined = await call(reviewRoute, { id: String(noTierId), action: 'decline' });
+      check(declined.includes('review=declined'), `an unpriced request can still be declined, got "${declined}"`);
+      check((await read(noTierId))?.status === 'declined', 'and it lands in declined');
+    }
+
+    // --- DECLINE RELEASES THE SLOT -------------------------------------------
+    const declineId = await makeRequest('15:30');
+    if (declineId !== null) {
+      await call(reviewRoute, { id: String(declineId), action: 'decline' });
+      const row = (await sql`
+        SELECT status, declined_at FROM appointments WHERE id = ${declineId}
+      `) as { status: string; declined_at: Date | null }[];
+      check(row[0]?.status === 'declined', 'declining moves the row to declined');
+      check(row[0]?.declined_at !== null, 'and stamps declined_at');
+
+      // THE SLOT IS BACK ON THE MARKET, through the real index rather than a
+      // separate release step: `declined` is in SLOT_RELEASING_STATUSES, so the
+      // row falls out of the partial unique index the moment it commits.
+      const rebooked = await call(
+        createRoute,
+        entryFields({ slot_date: REVIEW_DATE, slot_time: '15:30', name: 'BK-23 rebook' }),
+      );
+      const rebookedId = idFromLocation(rebooked);
+      check(rebookedId !== null, `the declined slot can be booked again, got "${rebooked}"`);
+      if (rebookedId !== null) createdIds.push(rebookedId);
+    }
+
+    // --- A BAD ACTION IS NOT A DECISION --------------------------------------
+    const bogus = await call(reviewRoute, { id: String(approveId ?? 1), action: 'confirm' });
+    check(bogus.includes('review=invalid'), `an unrecognised action is refused, got "${bogus}"`);
+
+    console.log('  approve, decline, override, refusals, and both idempotence guards');
+  }
+
 } finally {
   const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1, leads: -1 }));
   seeded = false;
@@ -1680,176 +1850,6 @@ async function dayIsOffered(day: string): Promise<boolean> {
     dates: { date: string; slots: unknown[] }[];
   };
   return (body.dates.find((d) => d.date === day)?.slots.length ?? 0) > 0;
-}
-
-// ---------------------------------------------------------------------------
-console.log('\nBK-23 — approve and decline, against the real route');
-// ---------------------------------------------------------------------------
-//
-// THE GUARDED UPDATE IS WHAT THIS EXISTS FOR. Every transition is
-// `WHERE id = $1 AND status = 'pending_review'`, and zero rows returned means
-// the decision was not this caller's to make. A double-click, a second tab, and
-// a decline racing an approve all land there. Getting that wrong does not
-// corrupt a row — it sends the customer a second email, or an approval for a
-// booking somebody already declined.
-{
-  const REVIEW_DATE = '2029-06-12';
-
-  const makeRequest = async (time: string, over: Record<string, string> = {}) => {
-    const location = await call(
-      createRoute,
-      entryFields({
-        slot_date: REVIEW_DATE,
-        slot_time: time,
-        name: `BK-23 review ${time}`,
-        email: 'bk23-verify@example.com',
-        assessment_tier: 'standard',
-        ...over,
-      }),
-    );
-    const id = idFromLocation(location);
-    if (id !== null) createdIds.push(id);
-    return id;
-  };
-
-  // --- APPROVE -------------------------------------------------------------
-  const approveId = await makeRequest('11:30');
-  check(approveId !== null, 'a request to approve was created');
-  if (approveId !== null) {
-    const before = await read(approveId);
-    check(before?.status === 'pending_review', 'and it starts in pending_review');
-
-    const location = await call(reviewRoute, { id: String(approveId), action: 'approve' });
-    check(
-      location.includes('review=approved'),
-      `approving reports success, got "${location}"`,
-    );
-
-    const row = (await sql`
-      SELECT status, payment_status, approved_at, assessment_amount_cents,
-             travel_fee_cents, gst_cents, total_amount_cents, payment_due_at
-      FROM appointments WHERE id = ${approveId}
-    `) as Record<string, unknown>[];
-
-    check(row[0]?.status === 'approved_awaiting_payment', 'the row moves to approved_awaiting_payment');
-    check(row[0]?.payment_status === 'pending', 'and payment_status becomes pending');
-    check(row[0]?.approved_at !== null, 'approved_at is stamped');
-
-    // THE AMOUNTS ARE SNAPSHOTTED, not left to be recomputed later. A price
-    // change under a live row must not move a quote the customer accepted.
-    check(row[0]?.assessment_amount_cents === 39900, 'the base amount is snapshotted from the table');
-    check(row[0]?.travel_fee_cents === 0, 'travel defaults to zero — never applied automatically');
-    check(row[0]?.gst_cents === 1995, 'GST is computed, not typed');
-    check(row[0]?.total_amount_cents === 41895, 'and the total is base + travel + GST');
-    check(row[0]?.payment_due_at !== null, 'a distant slot carries a real deadline');
-
-    // THE SLOT IS STILL HELD. `approved_awaiting_payment` is not in
-    // SLOT_RELEASING_STATUSES — the whole point of a deadline is that the time
-    // is reserved until it lapses.
-    const held = await call(
-      createRoute,
-      entryFields({ slot_date: REVIEW_DATE, slot_time: '11:30', name: 'BK-23 collide' }),
-    );
-    check(held.includes('taken=1'), 'and the slot stays held against a second booking');
-
-    // IDEMPOTENCE. A second approve is a no-op, not a second email.
-    const again = await call(reviewRoute, { id: String(approveId), action: 'approve' });
-    check(again.includes('review=stale'), `a second approve is a no-op, got "${again}"`);
-    const after = (await sql`
-      SELECT approved_at FROM appointments WHERE id = ${approveId}
-    `) as { approved_at: Date }[];
-    check(
-      after[0].approved_at.getTime() === (row[0].approved_at as Date).getTime(),
-      'and it does not restamp approved_at',
-    );
-
-    // A DECLINE CANNOT OVERTAKE AN APPROVAL. Same guard, other action.
-    const raced = await call(reviewRoute, { id: String(approveId), action: 'decline' });
-    check(raced.includes('review=stale'), 'declining an already-approved row is a no-op');
-    const stillApproved = await read(approveId);
-    check(
-      stillApproved?.status === 'approved_awaiting_payment',
-      'and the row is untouched by it',
-    );
-  }
-
-  // --- APPROVE WITH AN OVERRIDE AND A TRAVEL FEE ---------------------------
-  const overrideId = await makeRequest('12:30', { assessment_tier: 'report' });
-  if (overrideId !== null) {
-    await call(reviewRoute, {
-      id: String(overrideId),
-      action: 'approve',
-      assessment_amount: '750.00',
-      travel_fee: '46.50',
-    });
-    const row = (await sql`
-      SELECT assessment_amount_cents, travel_fee_cents, gst_cents, total_amount_cents
-      FROM appointments WHERE id = ${overrideId}
-    `) as Record<string, number>[];
-    check(row[0]?.assessment_amount_cents === 75000, 'an admin override replaces the suggested base');
-    check(row[0]?.travel_fee_cents === 4650, 'and the typed travel fee is stored');
-    // GST on base + travel, one rounding. 79650 * 5% = 3982.5 → 3983.
-    check(row[0]?.gst_cents === 3983, 'GST is recomputed on the overridden subtotal');
-    check(row[0]?.total_amount_cents === 83633, 'and the total adds up');
-  }
-
-  // --- A BAD AMOUNT CHANGES NOTHING ----------------------------------------
-  const badId = await makeRequest('13:30');
-  if (badId !== null) {
-    const refused = await call(reviewRoute, {
-      id: String(badId),
-      action: 'approve',
-      assessment_amount: '399abc',
-    });
-    check(refused.includes('review=amount'), `a malformed amount is refused, got "${refused}"`);
-    const row = await read(badId);
-    check(
-      row?.status === 'pending_review',
-      'and the row is left in pending_review — a refusal must not half-approve',
-    );
-  }
-
-  // --- NO TIER, NO APPROVAL ------------------------------------------------
-  const noTierId = await makeRequest('14:30', { assessment_tier: '' });
-  if (noTierId !== null) {
-    const refused = await call(reviewRoute, { id: String(noTierId), action: 'approve' });
-    check(refused.includes('review=notier'), `no tier means no amount, so no approval, got "${refused}"`);
-    check((await read(noTierId))?.status === 'pending_review', 'and nothing changed');
-
-    // ...but it can still be declined. A request the office cannot price is
-    // one they may well want to turn down.
-    const declined = await call(reviewRoute, { id: String(noTierId), action: 'decline' });
-    check(declined.includes('review=declined'), `an unpriced request can still be declined, got "${declined}"`);
-    check((await read(noTierId))?.status === 'declined', 'and it lands in declined');
-  }
-
-  // --- DECLINE RELEASES THE SLOT -------------------------------------------
-  const declineId = await makeRequest('15:30');
-  if (declineId !== null) {
-    await call(reviewRoute, { id: String(declineId), action: 'decline' });
-    const row = (await sql`
-      SELECT status, declined_at FROM appointments WHERE id = ${declineId}
-    `) as { status: string; declined_at: Date | null }[];
-    check(row[0]?.status === 'declined', 'declining moves the row to declined');
-    check(row[0]?.declined_at !== null, 'and stamps declined_at');
-
-    // THE SLOT IS BACK ON THE MARKET, through the real index rather than a
-    // separate release step: `declined` is in SLOT_RELEASING_STATUSES, so the
-    // row falls out of the partial unique index the moment it commits.
-    const rebooked = await call(
-      createRoute,
-      entryFields({ slot_date: REVIEW_DATE, slot_time: '15:30', name: 'BK-23 rebook' }),
-    );
-    const rebookedId = idFromLocation(rebooked);
-    check(rebookedId !== null, `the declined slot can be booked again, got "${rebooked}"`);
-    if (rebookedId !== null) createdIds.push(rebookedId);
-  }
-
-  // --- A BAD ACTION IS NOT A DECISION --------------------------------------
-  const bogus = await call(reviewRoute, { id: String(approveId ?? 1), action: 'confirm' });
-  check(bogus.includes('review=invalid'), `an unrecognised action is refused, got "${bogus}"`);
-
-  console.log('  approve, decline, override, refusals, and both idempotence guards');
 }
 
 if (failures > 0) {
