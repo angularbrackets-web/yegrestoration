@@ -680,6 +680,9 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
 
   const withEmail = planBookingNotifications({
     id: 4813,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: 'standard',
     slotLabel: 'Mon, Aug 24 · 1:30 p.m.',
     slotStart: new Date('2026-08-24T19:30:00.000Z'),
     now: NOW,
@@ -700,6 +703,9 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   });
   const noEmail = planBookingNotifications({
     id: 4814,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: null,
     slotLabel: 'Mon, Aug 24 · 2:30 p.m.',
     slotStart: new Date('2026-08-24T20:30:00.000Z'),
     now: NOW,

@@ -45,6 +45,7 @@ import {
   type FieldError,
   type ParseOptions,
 } from './booking-payload';
+import { isAssessmentTier, type AssessmentTier } from './booking-pricing';
 import type { AppointmentStatus, PipelineStage } from './db';
 
 export type { FieldError, ParseOptions };
@@ -182,6 +183,7 @@ export const ADMIN_ENTRY_FIELD_LABELS: Record<string, string> = {
   slot_time: 'Time',
   slot_start: 'Time',
   admin_notes: 'Office notes',
+  assessment_tier: 'Assessment',
 };
 
 export type AdminEntryResult =
@@ -328,6 +330,15 @@ export type AppointmentUpdate = {
   pipeline_stage?: PipelineStage;
   /** Present when the notes field was submitted at all; null clears them. */
   admin_notes?: string | null;
+  /**
+   * Present when the tier select was submitted at all; null is the "Not chosen"
+   * option and clears it (BK-31).
+   *
+   * Editable because a customer who upgrades on site has to be recordable. It
+   * does NOT re-charge anything — the control says so beside itself, because
+   * under P9 this row may already have been paid against.
+   */
+  assessment_tier?: AssessmentTier | null;
 };
 
 export type UpdateParseResult =
@@ -375,6 +386,21 @@ export function parseAppointmentUpdate(input: unknown): UpdateParseResult {
       update.pipeline_stage = stage as PipelineStage;
     } else {
       errors.push({ field: 'pipeline_stage', message: 'Choose one of the listed stages.' });
+    }
+  }
+
+  // Same absent-vs-empty distinction as the notes below: the select always
+  // posts, and its empty option means "not chosen" rather than "leave alone".
+  // A tier is never invented here — an unrecognised value is an error, not a
+  // fallback, on the same reasoning as the public door's.
+  if (typeof raw.assessment_tier === 'string') {
+    const tier = str(raw.assessment_tier);
+    if (tier === null) {
+      update.assessment_tier = null;
+    } else if (isAssessmentTier(tier)) {
+      update.assessment_tier = tier;
+    } else {
+      errors.push({ field: 'assessment_tier', message: 'Choose one of the listed assessments.' });
     }
   }
 

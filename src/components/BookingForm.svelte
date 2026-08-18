@@ -35,6 +35,12 @@
     FEE_TERMS_INTRO,
     FEE_TERMS_ITEMS,
     FEE_TERMS_OUTRO,
+    AFTER_HOURS_NOTE,
+    ASSESSMENT_TIER_DESCRIPTIONS,
+    ASSESSMENT_TIER_LEGEND,
+    ASSESSMENT_TIER_NAMES,
+    QUOTE_HEADING,
+    QUOTE_TIMING_NOTE,
   } from '../lib/booking-copy';
   import {
     reportBookingConversion,
@@ -42,6 +48,12 @@
     storeConfirmation,
   } from '../lib/booking-handoff';
   import type { AvailableDate, AvailableSlot } from '../lib/booking-availability';
+  import {
+    ASSESSMENT_TIERS,
+    assessmentQuote,
+    formatCents,
+    type AssessmentTier,
+  } from '../lib/booking-pricing';
   import { MAX_FIELD_LENGTHS } from '../lib/booking-payload';
   import { buildUploadPathname, formatBytes } from '../lib/booking-uploads';
   import {
@@ -145,6 +157,54 @@
     dates.flatMap((d) => d.slots).find((s) => s.start === values.slotStart) ?? null,
   );
   const selectedDay = $derived(dates.find((d) => d.date === selectedDate) ?? null);
+
+  /**
+   * What the customer will be asked to pay, shown BEFORE they send the request.
+   *
+   * Three inputs, all of which the visitor can still change on this page: the
+   * tier, the service (step 1) and the slot (step 1). Weekend slots carry the
+   * 1.5x after-hours rate and mould carries its own lower prices, so a static
+   * figure lifted from the terms box would be wrong for a good share of real
+   * bookings.
+   *
+   * **This is display, not trust.** The server recomputes with the same
+   * function from the tier key, service and slot it stored — see
+   * `booking-pricing.ts`. Nothing here is sent.
+   *
+   * Null until all three are known, which is why the price block renders
+   * conditionally rather than showing a placeholder number.
+   */
+  const quote = $derived(
+    values.assessmentTier && values.service && values.slotStart
+      ? assessmentQuote({
+          tier: values.assessmentTier,
+          service: values.service,
+          slotStart: new Date(values.slotStart),
+        })
+      : null,
+  );
+
+  /**
+   * The per-tier prices for the radio labels, for the service and slot chosen.
+   *
+   * Computed for every tier rather than only the selected one: the point of the
+   * list is comparing them, and a visitor on a Saturday mould job should see
+   * three real numbers, not three standard ones and a surprise at the bottom.
+   */
+  const tierQuotes = $derived(
+    values.service && values.slotStart
+      ? Object.fromEntries(
+          ASSESSMENT_TIERS.map((tier) => [
+            tier,
+            assessmentQuote({
+              tier,
+              service: values.service,
+              slotStart: new Date(values.slotStart as string),
+            }),
+          ]),
+        )
+      : null,
+  );
   const busy = $derived(submitting || leaving || uploadsInFlight > 0);
 
   /**
@@ -971,6 +1031,87 @@
             {#each FEE_TERMS_OUTRO as line}
               <p class="text-yeg-text-secondary mt-2">{line}</p>
             {/each}
+
+            <!--
+              BK-31. The radios live INSIDE the terms box and at the bottom of
+              it, which keeps `FEE_TERMS_ACK_LABEL`'s "the terms above" true:
+              everything the visitor is acknowledging, the choice included, is
+              above the checkbox that follows.
+
+              No `checked` on any option. A pre-selected tier charges someone
+              for a choice they never made, and the server rejects a missing
+              tier rather than defaulting one.
+            -->
+            <fieldset class="mt-4">
+              <legend class="font-semibold text-yeg-text mb-2">{ASSESSMENT_TIER_LEGEND}</legend>
+              <div class="space-y-2">
+                {#each ASSESSMENT_TIERS as tier}
+                  <label
+                    class="flex items-start gap-3 cursor-pointer rounded-lg p-3"
+                    style="background-color:{values.assessmentTier === tier
+                      ? 'rgba(0,0,0,0.05)'
+                      : 'transparent'}"
+                  >
+                    <input
+                      type="radio"
+                      class="mt-1 shrink-0"
+                      name="assessment_tier"
+                      value={tier}
+                      bind:group={values.assessmentTier}
+                    />
+                    <span class="min-w-0">
+                      <span class="flex flex-wrap items-baseline gap-x-2">
+                        <span class="font-semibold text-yeg-text">{ASSESSMENT_TIER_NAMES[tier]}</span>
+                        {#if tierQuotes}
+                          <span class="text-yeg-text font-semibold whitespace-nowrap">
+                            {formatCents(tierQuotes[tier].baseCents)} + GST
+                          </span>
+                        {/if}
+                      </span>
+                      <span class="block text-yeg-text-secondary mt-1">
+                        {ASSESSMENT_TIER_DESCRIPTIONS[tier]}
+                      </span>
+                    </span>
+                  </label>
+                {/each}
+              </div>
+              {#if errors.assessment_tier}
+                <p class="text-red-500 text-xs mt-1" role="alert">{errors.assessment_tier}</p>
+              {/if}
+            </fieldset>
+
+            <!--
+              The total, once all three inputs exist. Rendered from the same
+              `assessmentQuote` the server will call, so the customer and the
+              charge cannot come from two different calculations.
+
+              The weekend note is not decoration: a 1.5x figure a visitor
+              discovers by comparing it against the terms box reads as an error
+              or as sharp practice. It is stated where the higher number is.
+            -->
+            {#if quote}
+              <div class="mt-4 pt-3" style="border-top:1px solid rgba(0,0,0,0.08)">
+                <p class="font-semibold text-yeg-text">{QUOTE_HEADING}</p>
+                {#if quote.afterHours}
+                  <p class="text-yeg-text-secondary mt-1">{AFTER_HOURS_NOTE}</p>
+                {/if}
+                <dl class="mt-2 space-y-1">
+                  <div class="flex justify-between gap-4">
+                    <dt class="text-yeg-text-secondary">Assessment</dt>
+                    <dd class="text-yeg-text">{formatCents(quote.baseCents)}</dd>
+                  </div>
+                  <div class="flex justify-between gap-4">
+                    <dt class="text-yeg-text-secondary">GST</dt>
+                    <dd class="text-yeg-text">{formatCents(quote.gstCents)}</dd>
+                  </div>
+                  <div class="flex justify-between gap-4 font-semibold">
+                    <dt class="text-yeg-text">Total</dt>
+                    <dd class="text-yeg-text">{formatCents(quote.totalCents)}</dd>
+                  </div>
+                </dl>
+                <p class="text-yeg-text-secondary mt-2 text-xs">{QUOTE_TIMING_NOTE}</p>
+              </div>
+            {/if}
           </div>
 
           <div class="mb-5">

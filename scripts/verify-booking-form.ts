@@ -65,6 +65,10 @@ function values(overrides: Partial<FormValues> = {}): FormValues {
     // turn each of them green-for-the-wrong-reason. The arms below that test
     // the acknowledgment override it.
     termsAck: true,
+    // BK-31, for exactly the reason above: `emptyFormValues()` supplies `null`,
+    // which is the right production default and would make every step-3 case
+    // here fail on a field it is not testing.
+    assessmentTier: 'standard' as const,
     ...overrides,
   };
 }
@@ -173,6 +177,43 @@ console.log('Step validation');
   }
   // The acknowledgment is a step-3 rule and only a step-3 rule. If it leaked
   // into step 2, a visitor could never leave the page that collects it.
+  // BK-31 — the tier, on the same terms as the acknowledgment above.
+  check(
+    fieldsFor(3, values({ assessmentTier: null }), 1).includes('assessment_tier'),
+    'an unchosen assessment blocks step 3',
+  );
+  check(
+    fieldsFor(3, values({ assessmentTier: 'sketch' as const }), 1).length === 0,
+    'and a chosen one clears it',
+  );
+  check(
+    !fieldsFor(2, values({ assessmentTier: null })).includes('assessment_tier'),
+    'but it is never step 2\'s complaint',
+  );
+  {
+    // Order matters on the page: the radios sit above the checkbox, so a
+    // visitor who has done neither must read the complaints in that order.
+    const neither = fieldsFor(3, values({ assessmentTier: null, termsAck: false }), 1);
+    check(
+      neither.indexOf('assessment_tier') < neither.indexOf('terms_ack'),
+      'the tier is reported before the acknowledgment, matching the page order',
+    );
+  }
+  check(
+    assembleBookingPayload(values({ assessmentTier: 'report' as const }), null).assessment_tier ===
+      'report',
+    'the assembled payload carries the tier KEY',
+  );
+  {
+    // THE RULE THIS PINS: no amount is ever assembled client-side. The server
+    // computes the price from the tier key plus the stored service and slot.
+    const body = assembleBookingPayload(values(), null);
+    check(
+      !Object.keys(body).some((k) => /amount|price|cents|total/i.test(k)),
+      'and no amount-shaped field is assembled anywhere in the request body',
+    );
+  }
+
   check(
     !fieldsFor(2, values({ termsAck: false })).includes('terms_ack'),
     'and it must never block step 2, which is where the box does not exist yet',

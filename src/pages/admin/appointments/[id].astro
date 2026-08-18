@@ -22,7 +22,12 @@ import {
   MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
 } from '../../../lib/booking-admin-entry';
-import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { ASSESSMENT_TIER_NAMES, TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import {
+  ASSESSMENT_TIERS,
+  assessmentQuote,
+  formatCents,
+} from '../../../lib/booking-pricing';
 import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
   appointmentUploadUrl,
@@ -66,6 +71,24 @@ try {
   dbError = 'Could not load appointment.';
   console.error(e);
 }
+
+/**
+ * What this assessment comes to, if a tier was chosen.
+ *
+ * Recomputed from `(tier, service, slot_start)` rather than read off a column,
+ * because there is no amount column yet — BK-32 adds one, snapshotted at
+ * approval, and at that point this display should read the snapshot instead so
+ * the office sees what the customer was actually quoted rather than what the
+ * table says today.
+ */
+const quote =
+  appointment && appointment.assessment_tier
+    ? assessmentQuote({
+        tier: appointment.assessment_tier,
+        service: appointment.service,
+        slotStart: appointment.slot_start,
+      })
+    : null;
 
 // A row that does not exist is a 404, the same answer a bad id gets. A database
 // that is down is not — that renders the error card below.
@@ -250,6 +273,23 @@ function statusClasses(status: Appointment['status']) {
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Service</dt>
             <dd class="text-white">{SERVICE_LABELS[appointment.service] ?? appointment.service}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Assessment</dt>
+            <dd class="text-white">
+              {appointment.assessment_tier ? (
+                <>
+                  {ASSESSMENT_TIER_NAMES[appointment.assessment_tier]}
+                  <span class="text-zinc-400"> · {formatCents(quote!.baseCents)} + GST</span>
+                  <span class="block text-zinc-500 text-xs mt-0.5">
+                    {formatCents(quote!.totalCents)} total incl. GST
+                    {quote!.afterHours ? ' · weekend rate, 1.5×' : ''}
+                  </span>
+                </>
+              ) : (
+                <span class="text-zinc-500">Not chosen — phone booking, settle with the customer</span>
+              )}
+            </dd>
           </div>
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Pipeline stage</dt>
@@ -709,6 +749,34 @@ function statusClasses(status: Appointment['status']) {
               ))}
             </select>
           </div>
+        </div>
+
+        <div class="mb-5">
+          <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="assessment_tier">
+            Assessment
+          </label>
+          <select
+            id="assessment_tier"
+            name="assessment_tier"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+          >
+            <option value="" selected={appointment.assessment_tier === null}>Not chosen</option>
+            {ASSESSMENT_TIERS.map(value => (
+              <option value={value} selected={value === appointment.assessment_tier}>
+                {ASSESSMENT_TIER_NAMES[value]}
+              </option>
+            ))}
+          </select>
+          {/*
+            BK-31. The office must be able to change this when a customer
+            upgrades on site — and must be told what changing it does NOT do.
+            Under P9 this row may already have been paid against, and an edit
+            that silently looked like it triggered a charge is how somebody gets
+            billed twice.
+          */}
+          <p class="text-zinc-500 text-xs mt-1.5">
+            Changing this does not charge anything. Collect any difference on site or add it to the invoice.
+          </p>
         </div>
 
         <div class="mb-5">

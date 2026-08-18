@@ -68,6 +68,7 @@ import {
   headerSafe,
   planBookingNotifications,
   type Message,
+  type BookingMessageType,
   type NotificationPlan,
 } from './booking-email';
 import {
@@ -97,9 +98,16 @@ export function planForPayload(
   serviceLabel: string,
   now: Date,
   filesAttached = 0,
+  /**
+   * Which transition this send is (BK-43). Defaults to the one message this
+   * builder has ever produced; BK-23 passes 'payment-link' here when the admin
+   * create path stops confirming on save.
+   */
+  messageType: BookingMessageType = 'confirmed',
 ): NotificationPlan {
   return planBookingNotifications({
     id,
+    messageType,
     // Server-formatted in Edmonton time, exactly as the public path does it.
     // The message must never re-derive a zone from a raw instant.
     slotLabel: formatSlot(payload.slotStart),
@@ -109,6 +117,8 @@ export function planForPayload(
     phone: payload.phone,
     email: payload.email,
     serviceLabel,
+    service: payload.service,
+    assessmentTier: payload.assessmentTier,
     description: payload.description,
     address: payload.address,
     city: payload.city,
@@ -137,9 +147,12 @@ export function planForAppointment(
   serviceLabel: string,
   now: Date,
   filesAttached = 0,
+  /** See `planForPayload`. The resend button re-sends the confirmation. */
+  messageType: BookingMessageType = 'confirmed',
 ): NotificationPlan {
   return planBookingNotifications({
     id: row.id,
+    messageType,
     slotLabel: formatSlot(row.slot_start),
     slotStart: row.slot_start,
     now,
@@ -147,6 +160,8 @@ export function planForAppointment(
     phone: row.phone,
     email: row.email,
     serviceLabel,
+    service: row.service,
+    assessmentTier: row.assessment_tier,
     description: row.description,
     address: row.address,
     city: row.city,

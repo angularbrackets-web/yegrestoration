@@ -129,6 +129,9 @@ console.log('\nBooking notifications without RESEND_API_KEY');
 
   const plan = planBookingNotifications({
     id: 1,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: 'standard',
     slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
     slotStart: new Date('2026-08-12T19:30:00.000Z'),
     now: new Date('2026-08-12T17:00:00.000Z'),

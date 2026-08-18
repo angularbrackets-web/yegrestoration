@@ -7,7 +7,8 @@ import {
 } from '../../../lib/booking-admin';
 import { ADMIN_ENTRY_FIELD_LABELS } from '../../../lib/booking-admin-entry';
 import { SLOT_START_TIMES, TIMEZONE } from '../../../lib/booking-config';
-import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { ASSESSMENT_TIER_NAMES, TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { ASSESSMENT_TIERS } from '../../../lib/booking-pricing';
 import { localDateKey, zonedTimeToUtc } from '../../../lib/booking-time';
 import { SERVICE_LABELS } from '../../../lib/db';
 
@@ -197,6 +198,28 @@ function invalid(field: string) {
           <label class={labelClass} for="service">Service</label>
           <select id="service" name="service" required class={fieldClass + invalid('service')}>
             {services.map(([key, label]) => <option value={key}>{label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label class={labelClass} for="assessment_tier">
+            Assessment <span class="text-zinc-600 normal-case">(optional)</span>
+          </label>
+          <select id="assessment_tier" name="assessment_tier" class={fieldClass + invalid('assessment_tier')}>
+            {/*
+              BK-31. Optional here and required on the public form, on the same
+              `entry` discriminator as email, photos and the terms
+              acknowledgment — the office settles the tier on the phone and may
+              not know it while typing the row.
+
+              Empty is the DEFAULT rather than the standard tier: a pre-selected
+              $399 on a form the office tabs through is a tier nobody chose,
+              which is the same objection that keeps the public radios
+              unselected.
+            */}
+            <option value="">Not chosen — settle on the phone</option>
+            {ASSESSMENT_TIERS.map(value => (
+              <option value={value}>{ASSESSMENT_TIER_NAMES[value]}</option>
+            ))}
           </select>
         </div>
         <div class="sm:col-span-2">

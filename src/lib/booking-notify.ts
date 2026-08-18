@@ -24,7 +24,7 @@
 
 import { Resend } from 'resend';
 
-import type { Message, NotificationPlan } from './booking-email';
+import type { BookingMessageType, Message, NotificationPlan } from './booking-email';
 import { inviteIdempotencyPrefix, type IcsAudienceName, type IcsKind } from './booking-ics';
 import { readEnv } from './env';
 
@@ -46,8 +46,18 @@ export type NotifyDeps = {
    * reachable through the real client without a network and a live key. Without
    * this the mapping in `deliver()` below would be verified by nothing, which
    * is unacceptable for the one behaviour the module header calls a trap.
+   *
+   * **The second parameter is the idempotency prefix the real sender would have
+   * used** (BK-43). The real path bakes the prefix into `createResendSender`'s
+   * closure and ignores this argument; it exists so a verify script can read
+   * the key rather than infer it from the source. Without it, "two message
+   * types to one recipient both deliver" is checkable only by reading code —
+   * which is how the fixed-prefix defect survived review in the first place.
+   *
+   * Injected fakes taking only `(message)` still typecheck: a function of fewer
+   * parameters is assignable to one of more.
    */
-  send?: (message: Message) => Promise<SendResult>;
+  send?: (message: Message, keyPrefix: string | null) => Promise<SendResult>;
 };
 
 /**
@@ -88,8 +98,14 @@ export function mailDisabled(): boolean {
  *
  * `idempotencyKey` is the SDK's documented `Idempotency-Key` header, and it is
  * a *prefix* the caller supplies rather than something derived here, because
- * only the caller knows what "the same message" means. A booking passes
- * `booking-<id>`, so a retry collapses instead of mailing the customer twice.
+ * only the caller knows what "the same message" means. A booking notification
+ * passes `notifyIdempotencyPrefix(id, type)` and an invite passes
+ * `inviteIdempotencyPrefix(id, kind, now)` — both carry the transition, so a
+ * retry of one message collapses while a *different* message to the same
+ * address still goes out. A fixed `booking-<id>` was the original spelling and
+ * it is the BK-43 defect: it made every later message in a booking's lifecycle
+ * a duplicate of the first, silently and successfully.
+ *
  * `null` passes no header at all, which is what the contact form and the lead
  * reply need: their recipient is a fixed office address, so any fixed key
  * would make Resend collapse every subsequent message into the first one.
@@ -124,15 +140,41 @@ export function createResendSender(apiKey: string, keyPrefix: string | null) {
 }
 
 
+/**
+ * The idempotency-key prefix for one notification send (BK-43).
+ *
+ * `createResendSender` appends `:<to>`, so the key is
+ * `booking-<id>-<type>:<recipient>`. The type is what makes the request,
+ * the payment link, the reminder, the confirmation and the decline five
+ * distinct keys to one address instead of one key sent five times — which
+ * Resend answers by delivering the first and silently returning success for
+ * the rest.
+ *
+ * **This is the only place a notification prefix is spelled.** A template
+ * literal at a call site is the defect returning, and
+ * `verify-booking-email.ts` pins its absence at the source level.
+ *
+ * The audience is deliberately not in the prefix, matching
+ * `inviteIdempotencyPrefix`: the customer and office copies of one transition
+ * go to different addresses, and the `:<to>` suffix already separates them.
+ * (The one case where it does not — a customer whose address *is*
+ * `BOOKING_INTERNAL_TO` — is recorded as a known nit on BK-43 and applies
+ * identically to the calendar path.)
+ */
+export function notifyIdempotencyPrefix(id: number, type: BookingMessageType): string {
+  return `booking-${id}-${type}`;
+}
+
 /** Wraps one send so a throw from an injected fake cannot escape either. */
 async function deliver(
-  send: (message: Message) => Promise<SendResult>,
+  send: (message: Message, keyPrefix: string | null) => Promise<SendResult>,
   message: Message,
   label: string,
   bookingId: number,
+  keyPrefix: string | null,
 ): Promise<SendOutcome> {
   try {
-    const result = await send(message);
+    const result = await send(message, keyPrefix);
     if (result.ok) return 'sent';
     // The booking id is the whole point of this line. Until BK-07 surfaces the
     // two stamp columns, this log is the ONLY signal that a customer was not
@@ -175,6 +217,10 @@ export async function sendBookingNotifications(
     return { customer: 'skipped', internal: 'skipped' };
   }
 
+  // Computed before the sender so an injected fake sees the same prefix the
+  // real one would have baked in — that is what makes BK-43 assertable.
+  const keyPrefix = notifyIdempotencyPrefix(plan.bookingId, plan.messageType);
+
   let send = deps.send;
   if (!send) {
     const apiKey = readEnv('RESEND_API_KEY');
@@ -183,14 +229,14 @@ export async function sendBookingNotifications(
       console.error('RESEND_API_KEY is not configured — booking notifications were not sent.');
       return { customer: 'failed', internal: 'failed' };
     }
-    send = createResendSender(apiKey, `booking-${plan.bookingId}`);
+    send = createResendSender(apiKey, keyPrefix);
   }
 
   const [customer, internal] = await Promise.all([
     plan.customer
-      ? deliver(send, plan.customer, 'confirmation', plan.bookingId)
+      ? deliver(send, plan.customer, 'confirmation', plan.bookingId, keyPrefix)
       : Promise.resolve<SendOutcome>('skipped'),
-    deliver(send, plan.internal, 'internal', plan.bookingId),
+    deliver(send, plan.internal, 'internal', plan.bookingId, keyPrefix),
   ]);
 
   return { customer, internal };
@@ -234,6 +280,8 @@ export async function sendCustomerConfirmation(
     return 'skipped';
   }
 
+  const keyPrefix = notifyIdempotencyPrefix(plan.bookingId, plan.messageType);
+
   let send = deps.send;
   if (!send) {
     const apiKey = readEnv('RESEND_API_KEY');
@@ -241,10 +289,10 @@ export async function sendCustomerConfirmation(
       console.error('RESEND_API_KEY is not configured — the confirmation was not sent.');
       return 'failed';
     }
-    send = createResendSender(apiKey, `booking-${plan.bookingId}`);
+    send = createResendSender(apiKey, keyPrefix);
   }
 
-  return deliver(send, plan.customer, 'confirmation', plan.bookingId);
+  return deliver(send, plan.customer, 'confirmation', plan.bookingId, keyPrefix);
 }
 
 /**
@@ -293,6 +341,11 @@ export async function sendCalendarInvite(
     return 'skipped';
   }
 
+  // No audience in the prefix: `createResendSender` appends `:<to>`, and the
+  // office and customer copies of one transition go to different addresses.
+  // See `inviteIdempotencyPrefix`.
+  const keyPrefix = inviteIdempotencyPrefix(keyParts.id, keyParts.kind, keyParts.now);
+
   let send = deps.send;
   if (!send) {
     const apiKey = readEnv('RESEND_API_KEY');
@@ -301,16 +354,10 @@ export async function sendCalendarInvite(
       console.error(`RESEND_API_KEY is not configured — the ${label} was not sent.`);
       return 'failed';
     }
-    // No audience in the prefix: `createResendSender` appends `:<to>`, and the
-    // office and customer copies of one transition go to different addresses.
-    // See `inviteIdempotencyPrefix`.
-    send = createResendSender(
-      apiKey,
-      inviteIdempotencyPrefix(keyParts.id, keyParts.kind, keyParts.now),
-    );
+    send = createResendSender(apiKey, keyPrefix);
   }
 
-  return deliver(send, message, label, keyParts.id);
+  return deliver(send, message, label, keyParts.id, keyPrefix);
 }
 
 /**

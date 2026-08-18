@@ -5,8 +5,9 @@ import { migration as m003 } from './003-notification-stamps';
 import { migration as m004 } from './004-lead-service-optional';
 import { migration as m005 } from './005-assessment-terms';
 import { migration as m006 } from './006-file-provenance';
+import { migration as m007 } from './007-assessment-tier';
 
 /** Applied in order. Append only — never reorder or rename an applied entry. */
-export const migrations: Migration[] = [m001, m002, m003, m004, m005, m006];
+export const migrations: Migration[] = [m001, m002, m003, m004, m005, m006, m007];
 
 export type { Migration, Sql } from './types';

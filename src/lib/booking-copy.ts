@@ -18,6 +18,7 @@
  */
 
 import { SUPPORT_PHONE } from './booking-config';
+import type { AssessmentTier } from './booking-pricing';
 
 /**
  * What to have ready for the visit.
@@ -207,3 +208,61 @@ export const FEE_TERMS_OUTRO: readonly string[] = [
  * makes about the page.
  */
 export const FEE_TERMS_ACK_LABEL = 'I understand the assessment terms above.';
+
+// ---------------------------------------------------------------------------
+// The tier picker (BK-31)
+//
+// `FEE_TERMS_ITEMS` above is the prose the terms box states, and it stays the
+// client's own wording. These are the RADIO LABELS, which need to be short
+// enough to scan and must NOT carry a figure: the price beside each radio is
+// computed live from `booking-pricing.ts`, because it moves with the service
+// (mould is cheaper) and the slot (weekends are 1.5x). A hard-coded "$399" on a
+// radio would be wrong for a Saturday mould job and right nowhere the computed
+// one is not.
+//
+// That is also the standing risk in this block, and it is BK-36's to close in
+// copy: the terms box states the standard figures while the radios show the
+// price that actually applies. A mould customer sees $399 in one place and
+// $385 in the other with nothing to say which is real.
+// ---------------------------------------------------------------------------
+
+/** Short names, scannable in a radio list. Declaration order is render order. */
+export const ASSESSMENT_TIER_NAMES: Record<AssessmentTier, string> = {
+  standard: 'On-site assessment',
+  report: 'Assessment + written report',
+  sketch: 'Assessment + report + measured sketch',
+};
+
+/**
+ * One line each, saying what the customer receives.
+ *
+ * The `sketch` line states the LAB TURNAROUND, and that is a client
+ * requirement (2026-08-18), not drafting. Someone choosing the top tier is
+ * usually choosing it because they need documentation for a claim, and
+ * documentation they expected on the day is a complaint rather than a
+ * deliverable. It is stated on the control they choose with, not in a footnote.
+ */
+export const ASSESSMENT_TIER_DESCRIPTIONS: Record<AssessmentTier, string> = {
+  standard: 'A technician walks the affected areas and writes up the scope of the damage.',
+  report:
+    'Everything above, plus a written cause-of-loss report and a repair estimate — the documentation your adjuster works from if you are filing a claim.',
+  sketch:
+    'Everything above, plus a measured sketch and diagram of the affected areas. Where lab samples are taken, results take 3–5 business days.',
+};
+
+/** Sits above the radios, so the group has a name a screen reader can announce. */
+export const ASSESSMENT_TIER_LEGEND = 'Choose your assessment';
+
+/**
+ * Why a weekend price is higher, said where the higher number appears.
+ *
+ * A surcharge a customer discovers only by comparing two figures is the kind of
+ * thing that reads as a mistake or as sharp practice. Naming it costs one line.
+ */
+export const AFTER_HOURS_NOTE = 'Weekend rate — Saturday and Sunday appointments are 1.5× the weekday price.';
+
+/** The heading over the computed total, so the figure is not a bare number. */
+export const QUOTE_HEADING = 'Your assessment';
+
+/** Says when the money moves. Under prepay BK-36 replaces this wholesale. */
+export const QUOTE_TIMING_NOTE = 'Nothing is charged now.';

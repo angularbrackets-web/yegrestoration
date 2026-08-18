@@ -17,6 +17,7 @@
     "verify:availability": "tsx scripts/verify-availability.ts",
     "verify:availability:db": "tsx scripts/verify-availability-db.ts",
     "verify:booking:payload": "tsx scripts/verify-booking-payload.ts",
+    "verify:booking:pricing": "tsx scripts/verify-booking-pricing.ts",
     "verify:booking:commit": "tsx scripts/verify-booking-commit.ts",
     "verify:booking:form": "tsx scripts/verify-booking-form.ts",
     "verify:booking:preview": "tsx scripts/verify-booking-preview.ts",

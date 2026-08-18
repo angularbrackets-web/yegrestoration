@@ -31,10 +31,13 @@ import {
 } from '../src/lib/booking-email';
 import {
   notifyAndStamp,
+  notifyIdempotencyPrefix,
   sendBookingNotifications,
   withDeadline,
   type SendResult,
 } from '../src/lib/booking-notify';
+import { readFileSync } from 'node:fs';
+import type { BookingMessageType } from '../src/lib/booking-email';
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -61,6 +64,9 @@ const NOW = new Date('2026-08-10T15:00:00.000Z');
 
 const INSURANCE: BookingNotificationInput = {
   id: 481,
+  messageType: 'confirmed',
+  service: 'water',
+  assessmentTier: 'standard',
   slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
   slotStart: SLOT,
   now: NOW,
@@ -679,6 +685,111 @@ console.log('\nThe deadline');
   await new Promise((r) => setTimeout(r, 60));
   process.off('unhandledRejection', onUnhandled);
   check(unhandled === null, 'and the late rejection is swallowed rather than crashing the function');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-43 — the idempotency prefix carries the message type');
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THIS PINS. The prefix used to be a fixed `booking-<id>`, and
+// `createResendSender` sends `Idempotency-Key: <prefix>:<recipient>`. Under
+// the prepay flow one booking mails the same address up to five times, so a
+// fixed prefix made four of those five byte-identical keys — Resend delivers
+// the first and returns SUCCESS for the rest. The customer never sees the
+// payment link and nothing logs a thing.
+//
+// It is invisible in both places anyone would look: BOOKING_NOTIFY_DISABLED
+// mutes the sender in dev, and a collapsed send is a 200 in production.
+{
+  const ALL_TYPES: BookingMessageType[] = [
+    'request',
+    'payment-link',
+    'payment-reminder',
+    'confirmed',
+    'declined',
+    'expired',
+  ];
+
+  // AC1 — every transition gets its own prefix, and the same one twice.
+  const prefixes = ALL_TYPES.map((t) => notifyIdempotencyPrefix(7, t));
+  check(
+    new Set(prefixes).size === ALL_TYPES.length,
+    `all ${ALL_TYPES.length} message types produce distinct prefixes`,
+  );
+  check(
+    notifyIdempotencyPrefix(7, 'payment-link') === notifyIdempotencyPrefix(7, 'payment-link'),
+    'the same (id, type) is stable — a retry still collapses',
+  );
+  check(
+    notifyIdempotencyPrefix(7, 'confirmed') !== notifyIdempotencyPrefix(8, 'confirmed'),
+    'two bookings never share a prefix',
+  );
+
+  // AC2 — THE ONE THE USER ASKED FOR, driven end to end through the real seam
+  // rather than inferred from the prefix function: two different message types
+  // to the SAME recipient must both deliver.
+  //
+  // `deps.send` receives the key prefix the real sender would have baked in,
+  // which is the only reason this is observable without a network.
+  const seen: string[] = [];
+  const recordingSend = async (message: Message, keyPrefix: string | null) => {
+    seen.push(`${keyPrefix}:${message.to}`);
+    return { ok: true } as SendResult;
+  };
+
+  const oneAddress = { ...INSURANCE, id: 991, email: 'same@example.com' };
+  await sendBookingNotifications(
+    planBookingNotifications({ ...oneAddress, messageType: 'request' }),
+    { send: recordingSend },
+  );
+  await sendBookingNotifications(
+    planBookingNotifications({ ...oneAddress, messageType: 'payment-link' }),
+    { send: recordingSend },
+  );
+
+  const customerKeys = seen.filter((k) => k.endsWith(':same@example.com'));
+  check(
+    customerKeys.length === 2,
+    'two sends reached the same customer address',
+  );
+  check(
+    new Set(customerKeys).size === 2,
+    'and their idempotency keys differ, so Resend delivers both rather than collapsing the second',
+  );
+
+  // AC3 — the dedupe the key exists for still works inside one transition.
+  seen.length = 0;
+  const retried = planBookingNotifications({ ...oneAddress, messageType: 'payment-link' });
+  await sendBookingNotifications(retried, { send: recordingSend });
+  await sendBookingNotifications(retried, { send: recordingSend });
+  const retryKeys = seen.filter((k) => k.endsWith(':same@example.com'));
+  check(
+    retryKeys.length === 2 && new Set(retryKeys).size === 1,
+    'a retry of the SAME transition reuses one key — Resend still collapses it',
+  );
+
+  // AC4 — source pin. The defect is a template literal at a call site, and it
+  // would pass every behavioural check above if someone reintroduced it for
+  // one of the three senders. Same pattern verify-booking-ics.ts uses for the
+  // attachment whitelist, and for the same reason: the fake sender cannot see
+  // what the real one would have done.
+  const notifySrc = readFileSync('src/lib/booking-notify.ts', 'utf8');
+  check(
+    !/createResendSender\([^)]*`booking-\$\{/.test(notifySrc),
+    'no send site builds a prefix from a template literal — notifyIdempotencyPrefix is the only source',
+  );
+  check(
+    (notifySrc.match(/notifyIdempotencyPrefix\(/g) ?? []).length >= 3,
+    'both notification senders and the declaration all go through notifyIdempotencyPrefix',
+  );
+
+  // AC5 — the contact form and lead reply pass null and must keep sending no
+  // header at all. A fixed key on a fixed office address would collapse every
+  // message after the first.
+  check(
+    /keyPrefix \? \{ idempotencyKey: `\$\{keyPrefix\}:\$\{message\.to\}` \} : \{\}/.test(notifySrc),
+    'a null prefix still passes no Idempotency-Key header',
+  );
 }
 
 // ---------------------------------------------------------------------------

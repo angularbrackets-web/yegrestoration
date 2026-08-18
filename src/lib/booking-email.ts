@@ -44,7 +44,9 @@ import {
   HAVE_READY_ITEMS,
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
+  ASSESSMENT_TIER_NAMES,
 } from './booking-copy';
+import { assessmentQuote, formatCents, type AssessmentTier } from './booking-pricing';
 
 /**
  * A file riding along with a message. Structurally Resend's `Attachment`
@@ -75,9 +77,47 @@ export type Message = {
   attachments?: EmailAttachment[];
 };
 
+/**
+ * WHICH LIFECYCLE TRANSITION A PLAN'S MESSAGES BELONG TO, and it is the whole
+ * of BK-43.
+ *
+ * The Resend idempotency key is `<prefix>:<recipient>`, and until BK-43 the
+ * prefix was a fixed `booking-<id>`. Under the auto-confirm flow that was
+ * correct: one booking sent the customer exactly one message, so a retry
+ * collapsing into the first send is precisely what the key is for.
+ *
+ * Under P9 one booking sends the same address up to five messages. With a fixed
+ * prefix every one of them carries a byte-identical key, Resend collapses all
+ * four later ones into duplicates of the first **and returns success**, and the
+ * customer never sees the payment link. Nothing logs it: the send reports ok,
+ * the stamp records sent, the admin panel shows a notified booking.
+ *
+ * Naming the transition keeps dedupe *within* a transition — a retried approval
+ * must not mail twice — and makes it impossible *across* transitions. Same
+ * treatment, and the same reasoning, as `inviteIdempotencyPrefix` on the
+ * calendar side, which exists because a fixed prefix once collapsed CANCEL into
+ * REQUEST.
+ *
+ * The full set is declared here, including the four nothing sends yet, so BK-23
+ * and BK-32 add a send rather than also having to widen a type.
+ */
+export type BookingMessageType =
+  | 'request'
+  | 'payment-link'
+  | 'payment-reminder'
+  | 'confirmed'
+  | 'declined'
+  | 'expired';
+
 export type NotificationPlan = {
   /** The appointment id, carried so the sender can key idempotency on it. */
   bookingId: number;
+  /**
+   * The transition these messages belong to. Required, never defaulted: the
+   * defect this exists to prevent is precisely a thing someone forgets, so the
+   * type system has to ask.
+   */
+  messageType: BookingMessageType;
   /** Null when the customer gave no email address — booking email is optional. */
   customer: Message | null;
   internal: Message;
@@ -92,6 +132,12 @@ export type NotificationPlan = {
  */
 export type BookingNotificationInput = {
   id: number;
+  /**
+   * Which lifecycle transition this send is. See `BookingMessageType` — it
+   * decides the idempotency key, so getting it wrong silently drops a message
+   * rather than mislabelling one.
+   */
+  messageType: BookingMessageType;
   /** Server-formatted, America/Edmonton. Never re-derived here. */
   slotLabel: string;
   /**
@@ -107,6 +153,18 @@ export type BookingNotificationInput = {
   email: string | null;
   /** Display label, not the key — `SERVICE_LABELS[service]`. */
   serviceLabel: string;
+  /**
+   * The service KEY (`water`, `mold`, …), not the label. Needed because the
+   * price depends on it — mould carries its own figures — and a label cannot be
+   * looked up in the pricing table.
+   */
+  service: string;
+  /**
+   * Which assessment the customer chose (BK-31). Null on an admin entry and on
+   * every booking predating migration 007, and both messages must render that
+   * absence honestly rather than defaulting to the cheapest tier.
+   */
+  assessmentTier: AssessmentTier | null;
   description: string | null;
   address: string;
   city: string;
@@ -262,6 +320,13 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     ...FEE_TERMS_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
     ...FEE_TERMS_OUTRO.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    // BK-31. The tier list above is the menu; this is what THIS customer chose
+    // and what it comes to. Written back to them in the message they keep,
+    // because the figure on the form is the one thing they cannot re-check
+    // later — the form is gone and the terms box states standard prices.
+    ...(input.assessmentTier
+      ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(`You chose: ${assessmentSummary(input)}`)}</strong></p>`]
+      : []),
     `<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`,
     `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
@@ -287,6 +352,7 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     FEE_TERMS_INTRO,
     ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
     ...FEE_TERMS_OUTRO.flatMap((line) => ['', line]),
+    ...(input.assessmentTier ? ['', `You chose: ${assessmentSummary(input)}`] : []),
     '',
     CALENDAR_ATTACHED_LINE,
     '',
@@ -349,6 +415,26 @@ const NO_EMAIL_NOTICE_TEXT =
  * calendar artifact, for any audience, even the office that reads them three
  * rows above. See `booking-ics.ts`.
  */
+/**
+ * The tier and what it costs, as one line.
+ *
+ * Built from `assessmentQuote` rather than from a figure anybody typed, so the
+ * office email, the customer email and the eventual Stripe line items all come
+ * from one computation. Weekend slots and mould jobs are exactly the cases a
+ * hand-written "$399 + GST" would get wrong.
+ */
+function assessmentSummary(input: BookingNotificationInput): string {
+  if (!input.assessmentTier) return 'Not chosen (phone booking — settle with the customer)';
+  const quote = assessmentQuote({
+    tier: input.assessmentTier,
+    service: input.service,
+    slotStart: input.slotStart,
+  });
+  const name = ASSESSMENT_TIER_NAMES[input.assessmentTier];
+  const weekend = quote.afterHours ? ' — weekend rate, 1.5x' : '';
+  return `${name} — ${formatCents(quote.baseCents)} + GST (${formatCents(quote.totalCents)} total)${weekend}`;
+}
+
 function internalNotification(input: BookingNotificationInput): Message {
   const insurance = input.paymentRoute === 'insurance';
   const dash = '—';
@@ -364,6 +450,11 @@ function internalNotification(input: BookingNotificationInput): Message {
     // shouting about. `row` escapes, like every other row here.
     row('Email', input.email || NO_EMAIL_NOTICE),
     row('Service', input.serviceLabel),
+    // BK-31. The office is about to approve this and set an amount, so the tier
+    // and the computed price belong on the message they decide from. "Not
+    // chosen" rather than a blank: an admin entry legitimately has none, and a
+    // blank row reads as a rendering fault.
+    row('Assessment', assessmentSummary(input)),
     row('Address', fullAddress(input)),
     row('Payment', insurance ? 'Insurance claim' : 'Private pay'),
   ];
@@ -469,6 +560,7 @@ function icsEventOf(input: BookingNotificationInput): IcsEvent {
 export function planBookingNotifications(input: BookingNotificationInput): NotificationPlan {
   return {
     bookingId: input.id,
+    messageType: input.messageType,
     customer: customerConfirmation(input),
     internal: internalNotification(input),
   };

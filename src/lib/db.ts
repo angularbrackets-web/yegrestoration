@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 
+import type { AssessmentTier } from './booking-pricing';
 import { readEnv } from './env';
 
 export type Lead = {
@@ -51,6 +52,9 @@ export type PipelineStage = 'assessment' | 'mitigation' | 'restoration';
 /** Lifecycle of the booking itself. Only 'cancelled' releases the slot. */
 export type AppointmentStatus = 'booked' | 'completed' | 'cancelled' | 'no_show';
 
+/** Re-exported from the pricing module so a row type does not import a price table. */
+export type { AssessmentTier };
+
 export type Appointment = {
   id: number;
   name: string;
@@ -69,6 +73,15 @@ export type Appointment = {
   claim_number: string | null;
   pipeline_stage: PipelineStage;
   status: AppointmentStatus;
+  /**
+   * Which assessment the customer chose (BK-31). NULL for admin entries and for
+   * every row predating migration 007 — see the migration for why that is
+   * permanent rather than a backfill waiting to happen.
+   *
+   * Typed as the union rather than `string` so a render site cannot silently
+   * print an unknown tier; the DB CHECK is what makes the narrowing true.
+   */
+  assessment_tier: AssessmentTier | null;
   /** UTC instant. Compare with `.getTime()`, never against an ISO string. */
   slot_start: Date;
   duration_minutes: number;

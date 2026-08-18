@@ -66,7 +66,7 @@ export const POST: APIRoute = async ({ request }) => {
     return redirect(back);
   }
 
-  const { id, status, pipeline_stage, admin_notes } = parsed.update;
+  const { id, status, pipeline_stage, admin_notes, assessment_tier } = parsed.update;
   const detail = adminAppointmentPath(id);
 
   let sql: ReturnType<typeof getDb>;
@@ -83,6 +83,10 @@ export const POST: APIRoute = async ({ request }) => {
   // the same untyped-boolean-parameter shape `stampNotifications` already uses
   // against this driver.
   const notesProvided = admin_notes !== undefined;
+  // Same shape, same reason (BK-31): the select's empty option is a legitimate
+  // write of NULL — the office un-choosing a tier — which COALESCE cannot
+  // express.
+  const tierProvided = assessment_tier !== undefined;
   const nextStatus = status ?? null;
   const now = new Date().toISOString();
 
@@ -105,6 +109,8 @@ export const POST: APIRoute = async ({ request }) => {
           pipeline_stage = COALESCE(${pipeline_stage ?? null}::text, pipeline_stage),
           admin_notes    = CASE WHEN ${notesProvided}
                              THEN ${admin_notes ?? null}::text ELSE admin_notes END,
+          assessment_tier = CASE WHEN ${tierProvided}
+                             THEN ${assessment_tier ?? null}::text ELSE assessment_tier END,
           -- Entering cancelled stamps the clock; leaving it clears the stamp;
           -- re-submitting cancelled keeps the ORIGINAL time, because the bare
           -- \`status\` on the right-hand side is still the pre-UPDATE value.

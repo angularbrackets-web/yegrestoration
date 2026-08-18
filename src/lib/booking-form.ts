@@ -34,6 +34,7 @@ import {
   isPlausiblePhone,
   type FieldError,
 } from './booking-payload';
+import type { AssessmentTier } from './booking-pricing';
 import { earliestBookableInstant, slotStartsForDate } from './booking-time';
 import { EXTENSION_TO_TYPE, formatBytes, isAllowedContentType } from './booking-uploads';
 
@@ -61,6 +62,12 @@ export type FormValues = {
   smsConsent: boolean;
   /** BK-27's fee-terms acknowledgment. Unlike `smsConsent`, this one blocks. */
   termsAck: boolean;
+  /**
+   * BK-31's chosen assessment. `null` until the visitor picks one — there is no
+   * default, deliberately: a pre-selected tier charges someone for a choice
+   * they never made.
+   */
+  assessmentTier: AssessmentTier | null;
 };
 
 export function emptyFormValues(): FormValues {
@@ -82,6 +89,8 @@ export function emptyFormValues(): FormValues {
     // False, and never anything else. A default of true would tick the box for
     // the visitor, which is not an acknowledgment of anything.
     termsAck: false,
+    // Null for the same reason, and it matters more: this one becomes a charge.
+    assessmentTier: null,
   };
 }
 
@@ -151,6 +160,9 @@ export const FIELD_STEPS: Readonly<Record<string, Step>> = {
   // degrades to the generic form message beside an unticked box nobody is told
   // to tick. Different reason, same conclusion.
   terms_ack: 3,
+  // Same reason as `terms_ack` — step ROUTING. A 422 whose only field is the
+  // tier must land the visitor on the step that asks for one.
+  assessment_tier: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +267,12 @@ export function validateStep(
   // complaints in the order the page presents them. BK-27: this one mirrors the
   // server's public arm exactly — an unticked box is a 422 either way, and the
   // point of checking it here is that the visitor finds out before submitting.
+  // BK-31, BEFORE the acknowledgment: the ack label says "the terms above",
+  // and the radios sit above the checkbox, so complaining in that order matches
+  // what the visitor is looking at.
+  if (values.assessmentTier === null) {
+    add('assessment_tier', 'Choose which assessment you would like.');
+  }
   if (values.termsAck !== true) {
     add('terms_ack', 'Please confirm you understand the assessment terms.');
   }
@@ -300,6 +318,11 @@ export function assembleBookingPayload(
     // this field is the correct reading, but it should be the visitor's, not a
     // side effect of how the payload was assembled.
     terms_ack: values.termsAck === true,
+    // The tier KEY and nothing else. No amount is assembled here, ever — the
+    // server computes the price from this key plus the service and the slot it
+    // stored. `verify-booking-payload.ts` asserts the server ignores an amount
+    // if one is sent anyway; this is the near side of the same rule.
+    assessment_tier: values.assessmentTier,
   };
 
   const optional: [string, string][] = [

@@ -214,6 +214,10 @@ async function notify(
   try {
     const plan = planBookingNotifications({
       id,
+      // Today a committed booking IS confirmed, so this is the confirmation.
+      // BK-23 flips it to 'request' when submission stops confirming, and the
+      // type carries into the idempotency key — see `notifyIdempotencyPrefix`.
+      messageType: 'confirmed',
       slotLabel,
       // The instant as well as the label: the internal message carries the
       // calendar invite (BK-14), and an ICS carries instants. The payload has
@@ -230,6 +234,10 @@ async function notify(
       // a key here. Kept so the two cannot drift into a `undefined` in a subject
       // line, not because raw user input can reach one.
       serviceLabel: SERVICE_LABELS[payload.service] ?? payload.service,
+      // The KEY as well as the label: the price depends on the service (mould
+      // has its own figures) and a label cannot be looked up in the table.
+      service: payload.service,
+      assessmentTier: payload.assessmentTier,
       description: payload.description,
       address: payload.address,
       city: payload.city,
