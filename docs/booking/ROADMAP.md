@@ -51,6 +51,30 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **A GSAP `from()` tween cannot reveal an element that has a CSS transition on
+  the property being tweened.** The tween sets the start state, then re-reads the
+  element to learn its destination; on a transitioning element that read lands
+  mid-transition and records the START value as the destination, so the tween
+  runs `0 -> 0` and the element never appears. **The homepage booking CTA was
+  invisible on production for exactly this reason** — `.cta-primary` carried
+  `transition-all duration-200` and was the only one of the reveal stagger's
+  eight children with a non-zero transition duration. Found by production
+  testing, not by a gate. **Therefore:** never give an animated element
+  `transition-all`; name the properties `:hover` actually changes. And because
+  that alone still strands `transform` (which CTAs legitimately transition for
+  the hover scale), every reveal tween in `ContactSection.astro` ends with
+  `clearProps` so the final state is the stylesheet's whatever the tween
+  recorded. Pinned by `npm run verify:reveal`, which reads the BUILT css because
+  the hazard is `transition-all` in source and `transition-property:all` in the
+  artifact. Severity: **high** — it silently deletes the page's primary
+  conversion element while every gate stays green; owner: fixed in BK-42.
+- **A ticket whose subject is UI needs at least one assertion about the RENDERED
+  result, not only about the data behind it.** BK-39 shipped six red rows, all
+  of them true, all of them about `booking-preview.ts`; its live check confirmed
+  the CTA's label string was in the DOM. The string was in the DOM. The element
+  was at `opacity: 0`. **A string is in the DOM long before a visitor can see
+  it**, and "verified live" meant "found the text", which is the weakest reading
+  of the phrase. Severity: **medium**; owner: none, this entry is the fix.
 - **The "assertion that cannot fail" family has a sixth instance, and this one
   was written BY the process rather than caught by it.** Found repairing
   `verify-booking-admin-db.ts` during BK-40. The repair compared the stored
@@ -1001,8 +1025,17 @@ three were flagged to the user before implementation and re-decided
 | BK-37 | Upload link: copy button, `navigator.share` on mobile with a `wa.me` desktop fallback, and the link's absolute expiry stated on the page | Light | ✅ committed |
 | BK-38 | Day strip: `Closed` for closed weekdays and `Call us` for an elapsed day, both distinct from `Full`; month header above the strip, month on a boundary chip | Light | ✅ committed |
 | BK-39 | Homepage booking CTA relabelled, plus a live next-opening teaser above it | Light | ✅ committed |
-| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | ✅ **reviewed** 2026-08-16 — no blockers; 4 should-fix + 3 nits folded in. Gates green, 21 red rows, migration 006 applied to dev. **Production migration pending — 006 applies before the deploy** |
+| BK-40 | Appointment files: uploaded-at and provenance per row, plus soft delete with an audit line (**migration 006**) | Reviewed | ✅ **reviewed** 2026-08-16 — no blockers; 4 should-fix + 3 nits folded in. Gates green, 21 red rows. **Migration 006 is applied to PRODUCTION** — `npm run migrate:status` against `DATABASE_URL` (host `ep-young-sea…`, which is not the dev `ep-steep-scene…`) lists `006-file-provenance` as applied, checked 2026-08-17. The earlier "production pending" note was stale and is corrected here rather than left to worry the next implementer. |
 | BK-41 | HEIC — findings and options **only**, nothing built pending the client's choice | — | ✅ report delivered 2026-08-16 — awaiting the client's choice; the recommended first step is a 2-minute test on a real iPhone |
+| BK-42 | The homepage booking CTA was rendering at `opacity: 0` on production — a GSAP `from()` tween against `.cta-primary`'s `transition-all` | Light | ✅ committed 2026-08-17 — found by client testing after Deploy 1.5; gates green, 4 script red rows + 2 behavioural, verified against the real built bundle |
+
+**BK-42 is an eighth item and does not come from the same place as the other
+seven.** They came from the client using Deploy 1; BK-42 came from the client
+using **Deploy 1.5 itself** and finding that the CTA BK-39 had just relabelled
+was invisible. The defect predates BK-39 and would have hidden the old label
+equally — what is new is that a batch shipped with every gate green over a
+homepage whose primary conversion element was not on the screen. Both halves of
+that are in Known traps.
 
 **Migration numbering moved.** BK-40 takes **006**, so BK-31 → **007**,
 BK-23 → **008**, BK-32 → **009**. Mechanical, but the numbers are load-bearing

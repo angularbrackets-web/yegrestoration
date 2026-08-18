@@ -236,9 +236,21 @@
   transform: scale(1.03);
 }
 
-/* CTA Button Styles */
+/*
+  CTA Button Styles
+
+  BK-42: `transition-property` is the two properties the hover and active rules
+  actually change — NEVER `all`. A CTA that transitions `opacity` cannot be
+  revealed by a GSAP `from()` tween: the tween sets opacity 0, then re-reads the
+  element to learn what to animate back to, and on a transitioning element that
+  read lands mid-transition and records ~0 as the destination. The tween then
+  runs 0 -> 0 and the button is invisible forever. That is exactly what shipped
+  on the homepage, where the CTA was the only child of the reveal stagger
+  carrying a transition. Keep this list explicit and keep `opacity` out of it.
+*/
 .cta-primary {
-  @apply inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full font-semibold text-sm transition-all duration-200;
+  @apply inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full font-semibold text-sm duration-200;
+  transition-property: transform, background-color;
   background-color: #f2c94c;
   color: #0F1419;
 }
@@ -252,8 +264,10 @@
   transform: scale(0.98);
 }
 
+/* Same rule as `.cta-primary` above: only what `:hover` changes. */
 .cta-secondary {
-  @apply inline-flex items-center gap-2 text-sm font-medium transition-all duration-200;
+  @apply inline-flex items-center gap-2 text-sm font-medium duration-200;
+  transition-property: color;
   color: #5A6270;
 }
 

@@ -28,7 +28,8 @@
     "verify:booking:admin:entry": "tsx scripts/verify-booking-admin-entry.ts",
     "verify:booking:admin:db": "tsx scripts/verify-booking-admin-db.ts",
     "verify:booking:files": "tsx scripts/verify-booking-files.ts",
-    "verify:appointment:upload": "npm run build && tsx scripts/verify-appointment-upload.ts"
+    "verify:appointment:upload": "npm run build && tsx scripts/verify-appointment-upload.ts",
+    "verify:reveal": "npm run build && tsx scripts/verify-reveal.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.2",

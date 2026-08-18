@@ -377,18 +377,46 @@ const { showForm = false } = Astro.props;
     // the stagger survives the split rather than silently animating nothing.
     const formFields = section.querySelectorAll('.form-field, [data-contact-stagger] > *');
 
-    const trigger = { trigger: section, start: 'top 85%', once: true };
+    // A fresh config per tween. One shared object handed to three ScrollTriggers
+    // is three instances holding one mutable `vars`; they are identical here, so
+    // there is nothing to gain from sharing and a class of cross-talk to lose.
+    const trigger = () => ({ trigger: section, start: 'top 85%', once: true });
+
+    /**
+     * BK-42. **The reveal must not be the only thing standing between a visitor
+     * and the CTA.**
+     *
+     * A `from()` tween sets the start state, then re-reads the element to learn
+     * what to animate back to. On an element with a CSS transition that read can
+     * land mid-transition and record the START value as the destination, so the
+     * tween runs 0 -> 0 and the element never appears. That shipped: the
+     * homepage booking CTA was invisible in production, because `.cta-primary`
+     * was the only child of this stagger carrying a transition.
+     *
+     * `global.css` now keeps `opacity` out of that transition, which fixes the
+     * fade. This clears the inline styles GSAP wrote once the tween is done, so
+     * the final state is the stylesheet's regardless of what GSAP recorded —
+     * including the `transform` residue, which the CTA still transitions for its
+     * hover scale and which otherwise leaves the button 16px low forever.
+     *
+     * Anything added to this card inherits the guarantee. Do not remove it to
+     * "clean up" — a reveal animation that can strand the page's primary
+     * conversion element is worth an unconditional net.
+     */
+    const settle = (targets: gsap.TweenTarget) => () => {
+      gsap.set(targets, { clearProps: 'opacity,transform,translate,rotate,scale' });
+    };
 
     if (leftCol) {
-      gsap.from(leftCol, { x: '-8vw', opacity: 0, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(leftCol, { x: '-8vw', opacity: 0, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger(), onComplete: settle(leftCol) });
     }
 
     if (formCard) {
-      gsap.from(formCard, { x: '8vw', opacity: 0, rotateY: 6, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(formCard, { x: '8vw', opacity: 0, rotateY: 6, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger(), onComplete: settle(formCard) });
     }
 
     if (formFields.length) {
-      gsap.from(formFields, { y: 16, opacity: 0, stagger: 0.06, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger });
+      gsap.from(formFields, { y: 16, opacity: 0, stagger: 0.06, duration: 0.7, ease: 'power2.out', scrollTrigger: trigger(), onComplete: settle(formFields) });
     }
   }
 </script>
