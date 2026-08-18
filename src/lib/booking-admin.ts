@@ -9,6 +9,7 @@
  */
 
 import { TIMEZONE } from './booking-config';
+import { LIVE_STATUSES } from './booking-status';
 import type { Appointment } from './db';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,9 @@ export const ADMIN_FILE_ENDPOINT = '/api/admin/files/';
 export const ADMIN_APPOINTMENT_CREATE_ENDPOINT = '/api/admin/appointments/create/';
 export const ADMIN_APPOINTMENT_UPDATE_ENDPOINT = '/api/admin/appointments/update/';
 export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend/';
+
+/** Approve or decline a request (BK-23). Separate from update for the reason in that route's header. */
+export const ADMIN_APPOINTMENT_REVIEW_ENDPOINT = '/api/admin/appointments/review/';
 
 /**
  * BK-40's soft delete.
@@ -94,16 +98,26 @@ export type AppointmentPartition<T> = {
 /**
  * Split appointments into what the office still has to do and what it does not.
  *
- * `upcoming` is `status === 'booked'` AND `slot_start >= now`. The boundary
- * instant counts as upcoming: an appointment starting exactly now has not
- * happened yet, and dropping it out of the operational list at the moment it
- * matters most is the wrong way to round.
+ * `upcoming` is a LIVE status AND `slot_start >= now`. The boundary instant
+ * counts as upcoming: an appointment starting exactly now has not happened yet,
+ * and dropping it out of the operational list at the moment it matters most is
+ * the wrong way to round.
  *
- * Cancelled and no-show rows are *past* whatever their date, because nobody is
- * driving to them — but they stay visible rather than being filtered away, since
- * a cancelled slot that gets rebooked is tomorrow's confusion.
+ * **BK-23 widened "live" from the single `booked` to three statuses**, and the
+ * widening is the point rather than a rename. Under prepay the office's day
+ * contains work at three stages: requests waiting on a decision, approvals
+ * waiting on money, and confirmed visits. All three are things somebody still
+ * has to act on before the slot passes, so all three are upcoming. Leaving this
+ * as "confirmed only" would have hidden every unreviewed request from the one
+ * screen the office works from — which is the failure the review flow exists to
+ * prevent, reintroduced one layer up.
  *
- * `completed` is past for the same reason it is not `booked`.
+ * Cancelled, declined, expired and no-show rows are *past* whatever their date,
+ * because nobody is driving to them — but they stay visible rather than being
+ * filtered away, since a released slot that gets rebooked is tomorrow's
+ * confusion.
+ *
+ * `completed` is past for the same reason it was never `booked`.
  */
 export function partitionAppointments<T extends PartitionableAppointment>(
   appointments: readonly T[],
@@ -115,7 +129,7 @@ export function partitionAppointments<T extends PartitionableAppointment>(
 
   for (const appointment of appointments) {
     const start = appointment.slot_start.getTime();
-    if (appointment.status === 'booked' && start >= cutoff) upcoming.push(appointment);
+    if (LIVE_STATUSES.includes(appointment.status) && start >= cutoff) upcoming.push(appointment);
     else past.push(appointment);
   }
 
@@ -262,13 +276,12 @@ export const PAYMENT_ROUTE_LABELS: Record<Appointment['payment_route'], string> 
   private: 'Private pay',
 };
 
-/** Human label for `status`. `no_show` is the only one that does not read well raw. */
-export const STATUS_LABELS: Record<Appointment['status'], string> = {
-  booked: 'Booked',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  no_show: 'No show',
-};
+/**
+ * Human label for `status`. Defined in `booking-status.ts` beside the enum, so
+ * a status added there without a label is a type error rather than an
+ * `undefined` rendered into an admin table.
+ */
+export { STATUS_LABELS } from './booking-status';
 
 /**
  * Human label for `appointment_files.source` (BK-40).

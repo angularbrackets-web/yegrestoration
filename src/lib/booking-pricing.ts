@@ -146,6 +146,19 @@ export function tierDefaultCents(tier: AssessmentTier): number {
   return TIER_DEFAULT_CENTS[tier];
 }
 
+/**
+ * GST on a subtotal, rounded once.
+ *
+ * Exported because the approval screen lets an admin override the base amount,
+ * and the tax on THAT number has to come from the same rounding as the tax on a
+ * table price. Recomputing it by scaling a previously-rounded figure — the
+ * obvious shortcut — drifts by a cent and puts the email and the charge on
+ * different numbers.
+ */
+export function gstFor(subtotalCents: number): number {
+  return Math.round((subtotalCents * GST_RATE_PERCENT) / 100);
+}
+
 export type AssessmentQuote = {
   /** The tier/service price with the after-hours multiplier already applied. */
   baseCents: number;
@@ -183,7 +196,7 @@ export function assessmentQuote(input: {
 
   const travelCents = Math.max(0, Math.round(input.travelFeeCents ?? 0));
   const subtotalCents = baseCents + travelCents;
-  const gstCents = Math.round((subtotalCents * GST_RATE_PERCENT) / 100);
+  const gstCents = gstFor(subtotalCents);
 
   return {
     baseCents,

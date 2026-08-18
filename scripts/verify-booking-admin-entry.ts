@@ -382,7 +382,7 @@ console.log('\nparseAppointmentUpdate — the whitelist (AC2)');
   // that is not here cannot reach an UPDATE.
   const hostile = parseAppointmentUpdate({
     id: '12',
-    status: 'booked',
+    status: 'confirmed',
     slot_start: '2026-01-01T00:00:00Z',
     duration_minutes: '90',
     policy_number: 'POLICYSENTINEL-77Q',

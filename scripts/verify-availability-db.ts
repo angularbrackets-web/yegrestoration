@@ -210,8 +210,8 @@ try {
 
   seeded = true;
   for (const [slot, status] of [
-    [bookedSlot, 'booked'],
-    [horizonSlot, 'booked'],
+    [bookedSlot, 'confirmed'],
+    [horizonSlot, 'confirmed'],
     [cancelledSlot, 'cancelled'],
   ] as const) {
     await sql`

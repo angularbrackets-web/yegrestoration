@@ -1112,9 +1112,9 @@ minimum-notice change is a prerequisite for its own payment deadline.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | draft — **ships first, before BK-31** |
-| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | draft — prerequisite for BK-32 |
-| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + travel-fee field**, approve → payment link, escalation timers, service-area badge, ICS boundary rewrite | Reviewed | draft |
+| BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | ✅ **implemented 2026-08-18** — gates green, 4 red rows; awaiting review |
+| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
+| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + travel-fee field**, approve → payment link, escalation timers, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **partially implemented 2026-08-18** — Tasks 1/2/3/7 built and gated (14 red rows); **Tasks 4 (escalation), 5 (service area), 6 (photo gallery) NOT started**. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 009**), GST line item, expiry cron, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
@@ -1130,7 +1130,14 @@ together or the site tells a lie between deploys.
    without touching the booking flow.
 2. **Deploy 2 — the flip.** **BK-43 first** (the idempotency prefix — it is a
    blocker on every new email in this deploy and it is invisible in dev), then
-   BK-31 → BK-23 → BK-32 → BK-36. Commit separately, one ticket per commit;
+   BK-31 → BK-23 → BK-32 → BK-36.
+
+   **Progress, 2026-08-18:** BK-43 and BK-31 are implemented and gated; BK-23 is
+   implemented except Tasks 4, 5 and 6; **BK-32 and BK-36 are not started.** The
+   branch is `deploy-2-prepay`. Nothing is deployable yet — the flip is half
+   made, and the half that is made assumes the other half. In particular the
+   approval email currently offers the Interac route only, because
+   `createCheckoutUrl` returns null until BK-32 fills it in. Commit separately, one ticket per commit;
    deploy as one release. Migrations 007/008/009 apply to **production first**,
    in order, before the code ships — `insertBooking` will name the new columns,
    so new code against the old schema 500s every booking. Same rollout shape as

@@ -948,13 +948,37 @@ console.log('\nSource pins (weak by construction — see the header)');
       .replace(/^import[\s\S]*?from '[^']*';$/gm, '');
   const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 
-  for (const [label, file, helper, needles] of [
-    [
-      'the admin entry route',
-      'src/pages/api/admin/appointments/create.ts',
+  // BK-23 REMOVED THE ADMIN ENTRY ROUTE FROM THIS LIST, and inverted what is
+  // pinned about it.
+  //
+  // That route used to send the office a calendar invite the moment a phone
+  // booking was typed in. Under prepay that is an invite for a slot nobody has
+  // paid for, and there is no CANCEL to clear it when the request is later
+  // declined or the payment lapses — a row reaching `declined` from
+  // `pending_review` never had one issued, which is the property that makes
+  // the decline path a clean no-op.
+  //
+  // So the assertion below is the OPPOSITE of the one it replaced: the entry
+  // route must call none of these. Kept rather than deleted, because "no invite
+  // at entry" is exactly the kind of property somebody restores by accident
+  // while fixing something else, and the route-level log assertion in
+  // `verify-booking-admin-db.ts` cannot tell "removed" from "muted".
+  {
+    const entrySource = strip('src/pages/api/admin/appointments/create.ts');
+    for (const needle of [
+      'planCalendarInvite(',
+      'sendCalendarInvite(',
+      'inviteEventFromPayload(',
       'sendOfficeInvite(',
-      ['planCalendarInvite(', 'sendCalendarInvite(', 'inviteEventFromPayload('],
-    ],
+    ]) {
+      check(
+        !entrySource.includes(needle),
+        `the admin entry route no longer calls ${needle} — invites issue at payment, not at entry`,
+      );
+    }
+  }
+
+  for (const [label, file, helper, needles] of [
     [
       'the status-edit route',
       'src/pages/api/admin/appointments/update.ts',

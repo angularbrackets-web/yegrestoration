@@ -14,6 +14,10 @@ import {
   SUPPORT_PHONE,
 } from '../src/lib/booking-config';
 import {
+  CALENDAR_ATTACHED_LINE,
+  RECEIVED_HEADING,
+  RECEIVED_HOLD_LINE,
+  RECEIVED_NEXT_STEPS,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
@@ -685,6 +689,91 @@ console.log('\nThe deadline');
   await new Promise((r) => setTimeout(r, 60));
   process.off('unhandledRejection', onUnhandled);
   check(unhandled === null, 'and the late rejection is swallowed rather than crashing the function');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-23 — a request must never claim a booking');
+// ---------------------------------------------------------------------------
+//
+// THE CLAIM THIS PINS. Submitting the form used to confirm a booking, so both
+// messages said so and both carried a calendar invite. Under P9 submission
+// produces a REQUEST: the office has not looked at it and nobody has paid.
+//
+// A calendar invite is the worst offender of the two, and not because it is
+// louder. The sentence is read once; the calendar entry repeats the claim back
+// to the customer every day until the appointment, and nothing about a calendar
+// entry says "provisional".
+{
+  const requestPlan = planBookingNotifications({ ...INSURANCE, messageType: 'request' });
+  const confirmedPlan = planBookingNotifications({ ...INSURANCE, messageType: 'confirmed' });
+
+  const cust = requestPlan.customer!;
+  const office = requestPlan.internal;
+
+  // --- no invite, on either message
+  check(cust.attachments === undefined, 'the request message carries NO calendar attachment');
+  check(office.attachments === undefined, 'and neither does the office copy of it');
+  check(
+    confirmedPlan.customer?.attachments?.length === 1,
+    'while a confirmed message still carries exactly one',
+  );
+  check(
+    confirmedPlan.internal.attachments?.length === 1,
+    'and so does the office copy of that',
+  );
+
+  // --- and nothing that describes an invite
+  for (const [label, body] of [
+    ['html', cust.html],
+    ['text', cust.text],
+  ] as const) {
+    check(
+      !body.includes(CALENDAR_ATTACHED_LINE),
+      `the request ${label} never mentions an attached invite`,
+    );
+    check(
+      !/you'?re booked/i.test(body),
+      `the request ${label} never says "you're booked"`,
+    );
+  }
+  check(
+    !/you'?re booked/i.test(cust.subject),
+    'and neither does the subject line — the one part that shows in a list view',
+  );
+
+  // --- it says what it IS, and what happens next
+  check(cust.subject.includes(RECEIVED_HEADING), 'the subject names it a request');
+  for (const step of RECEIVED_NEXT_STEPS) {
+    check(cust.html.includes(escapeHtml(step)), 'every next step appears in the html');
+    check(cust.text.includes(step), 'and in the plaintext arm');
+  }
+  check(cust.html.includes(escapeHtml(RECEIVED_HOLD_LINE)), 'the slot-held line appears');
+
+  // --- NO PUBLISHED SLA. The client stated "max 1 hour" internally and
+  //     deliberately did not publish it; a page a customer can screenshot turns
+  //     an operational intent into a commitment.
+  for (const body of [cust.html, cust.text, cust.subject]) {
+    check(
+      !/within (an|1) hour|max(imum)? 1 hour|within \d+ (minutes|hours)/i.test(body),
+      'no review-time promise is published anywhere in the request message',
+    );
+  }
+
+  // --- the office copy is distinguishable at a glance in an inbox
+  check(
+    office.subject.includes('REQUEST'),
+    'the office subject says REQUEST, not "New booking" — it is a decision to make, not news',
+  );
+
+  // --- the confirmed message is unchanged in the ways that matter
+  check(
+    /you'?re booked/i.test(confirmedPlan.customer!.html),
+    'the confirmed message still says it plainly',
+  );
+  check(
+    confirmedPlan.customer!.html.includes(CALENDAR_ATTACHED_LINE),
+    'and still describes its invite',
+  );
 }
 
 // ---------------------------------------------------------------------------

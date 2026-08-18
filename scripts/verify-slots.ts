@@ -7,7 +7,7 @@
 // Exits non-zero on the first failed assertion.
 import {
   MAX_ADVANCE_DAYS,
-  MIN_NOTICE_HOURS,
+  MIN_NOTICE_DAYS,
   SLOT_START_TIMES,
   TIMEZONE,
 } from '../src/lib/booking-config';
@@ -140,9 +140,26 @@ const now = new Date(`${year}-06-15T09:00:00-06:00`); // a Monday morning, mid-s
 const todayKey = localDateKey(now);
 const todaySlots = slotStartsForDate(todayKey);
 
-const tooSoon = todaySlots.filter((s) => s.getTime() < now.getTime() + MIN_NOTICE_HOURS * HOUR_MS);
-for (const slot of tooSoon) {
-  check(!isWithinBookingWindow(slot, now), `${formatSlot(slot)}: inside ${MIN_NOTICE_HOURS}h notice but allowed`);
+// BK-23: next-day earliest. EVERY slot today is refused, not just the ones
+// inside a rolling window — that is the difference between the calendar rule
+// that shipped and the 24-hour rule P9 first recorded.
+for (const slot of todaySlots) {
+  check(
+    !isWithinBookingWindow(slot, now),
+    `${formatSlot(slot)}: same-day slots must never be publicly bookable`,
+  );
+}
+
+// And every slot on the first bookable date IS offered, whatever the hour now.
+// A rolling-hours rule would drop the early ones on a late-afternoon visit, so
+// this is the assertion that distinguishes the two rules rather than merely
+// restating the one above.
+const tomorrowKey = addDays(todayKey, MIN_NOTICE_DAYS);
+for (const slot of slotStartsForDate(tomorrowKey)) {
+  check(
+    isWithinBookingWindow(slot, now),
+    `${formatSlot(slot)}: every slot on the first bookable date must be offered`,
+  );
 }
 
 const withinHorizon = slotStartsForDate(addDays(todayKey, MAX_ADVANCE_DAYS))[0];
@@ -152,7 +169,7 @@ check(!isWithinBookingWindow(pastHorizon, now), `day ${MAX_ADVANCE_DAYS + 1} sho
 
 console.log(
   `\nBooking window from ${formatSlot(now)}: ` +
-    `${tooSoon.length} of today's slots blocked by the ${MIN_NOTICE_HOURS}h notice rule, ` +
+    `all ${todaySlots.length} of today's slots blocked by next-day-earliest, ` +
     `horizon ends ${addDays(todayKey, MAX_ADVANCE_DAYS)}.`,
 );
 

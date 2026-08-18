@@ -5,6 +5,7 @@ import {
   ADMIN_APPOINTMENTS_PATH,
   ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT,
   ADMIN_APPOINTMENT_RESEND_ENDPOINT,
+  ADMIN_APPOINTMENT_REVIEW_ENDPOINT,
   ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
   adminFilePath,
   customerStampState,
@@ -28,6 +29,8 @@ import {
   assessmentQuote,
   formatCents,
 } from '../../../lib/booking-pricing';
+import { paymentDeadline } from '../../../lib/booking-review';
+import { TRAVEL_FEE_CENTS_PER_KM, TRAVEL_FEE_FREE_RADIUS_KM } from '../../../lib/booking-pricing';
 import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
   appointmentUploadUrl,
@@ -161,7 +164,7 @@ const internalStamp = appointment ? internalStampState(appointment) : 'not-appli
 // re-checks this rather than trusting the button's absence.
 const canResend =
   !!appointment &&
-  appointment.status === 'booked' &&
+  appointment.status === 'confirmed' &&
   typeof appointment.email === 'string' &&
   appointment.email.trim() !== '';
 
@@ -216,16 +219,102 @@ const FILE_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
 
 const filesFlash = Astro.url.searchParams.get('files');
 
+/**
+ * The review outcomes (BK-23).
+ *
+ * Every refusal below leaves the row in `pending_review`, and each message says
+ * what to do about it — a decision screen that reports "that did not work" and
+ * stops is a screen somebody clicks again.
+ */
+const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  approved: {
+    tone: 'ok',
+    text: 'Approved. The customer has been emailed the amount, the deadline and how to pay.',
+  },
+  'approved-nomail': {
+    tone: 'warn',
+    text: 'Approved and the time is held — but the email did not send. Call the customer: they have no way to pay and the reservation is on a clock.',
+  },
+  declined: { tone: 'ok', text: 'Declined, and the time is back on the calendar.' },
+  'declined-nomail': {
+    tone: 'warn',
+    text: 'Declined and the time is released, but the notice did not send. The customer has not been told.',
+  },
+  // Refusals. None of these changed anything.
+  notier: {
+    tone: 'warn',
+    text: 'Choose an assessment first — the amount comes from it. Nothing was approved.',
+  },
+  amount: { tone: 'warn', text: 'That assessment amount was not a valid figure. Nothing was approved.' },
+  travel: { tone: 'warn', text: 'That travel fee was not a valid figure. Nothing was approved.' },
+  noemail: {
+    tone: 'warn',
+    text: 'This booking has no email address, so there is nobody to send a payment link to. Take payment by phone and mark it paid instead.',
+  },
+  nopayment: {
+    tone: 'warn',
+    text: 'No way to take payment is configured, so the customer could not be told how to pay. Nothing was approved.',
+  },
+  // Not an error: somebody else got there first, or a double-click arrived
+  // twice. Said plainly so nobody goes looking for a fault.
+  stale: {
+    tone: 'ok',
+    text: 'This request had already been reviewed, so nothing changed and no second email went out.',
+  },
+  invalid: { tone: 'warn', text: 'That request was not valid. Nothing changed.' },
+  error: { tone: 'warn', text: 'The database rejected that decision. Nothing changed.' },
+};
+
+const reviewFlash = Astro.url.searchParams.get('review');
+
 const flashes = [
   emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
   savedFlash ? SAVED_MESSAGES[savedFlash] : null,
   filesFlash ? FILE_MESSAGES[filesFlash] : null,
+  reviewFlash ? REVIEW_MESSAGES[reviewFlash] : null,
 ].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
+/**
+ * The suggested amounts for the approval screen.
+ *
+ * Computed from the row's own `(tier, service, slot)`, so the office sees the
+ * weekend rate and the mould price without doing anything. They are a
+ * PRE-FILL, not a decision: the server recomputes the suggestion and accepts
+ * an override, and nothing on this page is trusted on the way back.
+ */
+const suggestedQuote =
+  appointment && appointment.assessment_tier
+    ? assessmentQuote({
+        tier: appointment.assessment_tier,
+        service: appointment.service,
+        slotStart: appointment.slot_start,
+      })
+    : null;
+
+/** Dollars, for a form field. `39900` → `399.00`. */
+function amountField(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+const isPendingReview = appointment?.status === 'pending_review';
+
+/**
+ * What the customer will be asked to pay if the office approves as suggested.
+ *
+ * Shown beside the fields, and it is the number that matters: the two inputs
+ * are a base and a fee, and nobody approves a base — they approve a total.
+ */
+const suggestedDeadline =
+  appointment && isPendingReview ? paymentDeadline(appointment.slot_start, new Date()) : null;
+
 function statusClasses(status: Appointment['status']) {
+  if (status === 'pending_review') return 'bg-amber-900/40 text-amber-300 border-amber-700';
+  if (status === 'approved_awaiting_payment') return 'bg-amber-900/25 text-amber-200/90 border-amber-800';
   if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
-  if (status === 'cancelled') return 'bg-zinc-800 text-zinc-500 border-zinc-700';
   if (status === 'no_show') return 'bg-red-900/40 text-red-300 border-red-800';
+  if (status === 'cancelled' || status === 'declined' || status === 'payment_expired') {
+    return 'bg-zinc-800 text-zinc-500 border-zinc-700';
+  }
   return 'bg-blue-900/40 text-blue-300 border-blue-800';
 }
 ---
@@ -710,6 +799,132 @@ function statusClasses(status: Appointment['status']) {
         button, and cancelling never deletes the row. Rescheduling is not here:
         it is cancel + re-enter (see the ticket's Out of scope).
       -->
+      <!--
+        THE REVIEW PANEL (BK-23). Only for `pending_review`, and it posts to its
+        own route rather than to the update form's.
+
+        The separation is deliberate and it is a safety property, not tidiness.
+        `update.ts` is a whitelist editor: it sets a status and nothing else.
+        Approving has to compute a deadline, snapshot four amounts and send the
+        customer a message they will act on — so if the status dropdown could
+        also produce `approved_awaiting_payment`, the office would be one
+        careless selection away from an approved booking with no amount, no
+        deadline and no email. It cannot: `review.ts` is the only path that
+        performs the transition, and it guards on `status = 'pending_review'`.
+      -->
+      {isPendingReview && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REVIEW_ENDPOINT}
+          class="bg-zinc-900 border border-amber-800/60 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+          <h2 class="text-white font-semibold mb-1">Review this request</h2>
+          <p class="text-zinc-500 text-xs mb-5">
+            The time is held while this sits here. Approving emails the customer an
+            amount, a deadline and how to pay; declining releases the slot and tells
+            them we are at capacity.
+          </p>
+
+          {appointment.assessment_tier && suggestedQuote ? (
+            <>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="assessment_amount">
+                    Assessment ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    id="assessment_amount"
+                    name="assessment_amount"
+                    value={amountField(suggestedQuote.baseCents)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  <p class="text-zinc-600 text-xs mt-1.5">
+                    {ASSESSMENT_TIER_NAMES[appointment.assessment_tier]}
+                    {suggestedQuote.afterHours ? ' · weekend rate, 1.5× applied' : ''}
+                  </p>
+                </div>
+                <div>
+                  <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="travel_fee">
+                    Travel fee ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    id="travel_fee"
+                    name="travel_fee"
+                    value="0.00"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  {/*
+                    The rule, not a computed number. There is no distance API in
+                    this infrastructure and the client asked not to block on
+                    adding one, so the office reads the rule, uses the
+                    directions link above, and types the figure. Never applied
+                    automatically — the field defaults to zero.
+                  */}
+                  <p class="text-zinc-600 text-xs mt-1.5">
+                    ${(TRAVEL_FEE_CENTS_PER_KM / 100).toFixed(2)}/km round trip beyond {TRAVEL_FEE_FREE_RADIUS_KM} km. Leave at 0 if none.
+                  </p>
+                </div>
+              </div>
+
+              <p class="text-zinc-400 text-sm mb-1">
+                GST and the total are worked out from these — there is no field for either.
+              </p>
+              <p class="text-zinc-500 text-xs mb-4">
+                As suggested: {formatCents(suggestedQuote.baseCents)} + GST {formatCents(suggestedQuote.gstCents)}
+                = <span class="text-zinc-300 font-semibold">{formatCents(suggestedQuote.totalCents)}</span>.
+                {suggestedDeadline && suggestedDeadline.dueAt
+                  ? ` Payment due by ${formatSlot(suggestedDeadline.dueAt)} (${TIMEZONE_NOTE}).`
+                  : ' This slot is close, so the link will be sent to be paid right away rather than on a deadline.'}
+              </p>
+
+              <div class="flex flex-wrap gap-3">
+                <button
+                  type="submit"
+                  name="action"
+                  value="approve"
+                  class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+                >
+                  Approve and send payment link
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="decline"
+                  class="border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+                >
+                  Decline — at capacity
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/*
+                No tier means no amount to charge, so approval is impossible
+                rather than merely awkward. Declining still works — a request
+                the office cannot price is one they may well want to turn down.
+              */}
+              <p class="text-amber-300/90 text-sm mb-4">
+                This booking has no assessment chosen, so there is no amount to charge.
+                Set one in Update below, then approve.
+              </p>
+              <button
+                type="submit"
+                name="action"
+                value="decline"
+                class="border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+              >
+                Decline — at capacity
+              </button>
+            </>
+          )}
+        </form>
+      )}
+
       <form method="POST" action={ADMIN_APPOINTMENT_UPDATE_ENDPOINT} class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <input type="hidden" name="id" value={String(appointment.id)} />
         <h2 class="text-white font-semibold mb-1">Update</h2>

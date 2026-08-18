@@ -9,7 +9,7 @@
 // covers those.
 //
 // Exits non-zero on the first failed assertion.
-import { MAX_ADVANCE_DAYS, MIN_NOTICE_HOURS, SLOT_START_TIMES } from '../src/lib/booking-config';
+import { MAX_ADVANCE_DAYS, MIN_NOTICE_DAYS, SLOT_START_TIMES } from '../src/lib/booking-config';
 import {
   bookedQueryRange,
   computeAvailability,
@@ -128,7 +128,7 @@ console.log('\nBooked slots and cancellation');
   );
 
   // AC3 (a cancelled booking frees its slot) is NOT testable here. Cancellation
-  // is expressed solely by the endpoint's `status <> 'cancelled'` predicate, so
+  // is expressed solely by the endpoint's SLOT_HOLD_PREDICATE, so
   // a cancelled row simply never reaches this function — asserting on the
   // empty-bookings case would restate a check already made above. AC3 is
   // covered by verify-availability-db.ts against real rows.
@@ -147,20 +147,28 @@ console.log('\nMinimum notice boundary');
   const date = '2026-08-05';
   const [firstSlot] = slotStartsForDate(date); // 11:30 local
 
-  // One second inside the cutoff: the slot is exactly MIN_NOTICE_HOURS away.
-  const exactly = new Date(firstSlot.getTime() - MIN_NOTICE_HOURS * HOUR_MS);
-  const justInside = slotsOn(availability(exactly), date);
+  // BK-23's cutoff is a CALENDAR boundary, so it is probed at the boundary that
+  // exists: the last instant of the previous day and the first instant of the
+  // day itself, both in Edmonton.
+  //
+  // 23:59:59 the night before — the slot is tomorrow, so it is offered.
+  const nightBefore = new Date(zonedTimeToUtc(addDays(date, -MIN_NOTICE_DAYS), '00:00').getTime() + 86_399_000);
+  const justInside = slotsOn(availability(nightBefore), date);
   check(
     justInside.some((s) => s.start === firstSlot.toISOString()),
-    'a slot exactly at the notice cutoff must still be bookable',
+    'at one second to midnight, the next day is still bookable',
   );
 
-  const justOutside = slotsOn(availability(new Date(exactly.getTime() + 1000)), date);
+  // 00:00:00 on the day itself — now it is today, and today is never bookable,
+  // even eleven and a half hours ahead of the slot. This is the assertion a
+  // rolling-hours rule would fail.
+  const sameDay = zonedTimeToUtc(date, '00:00');
+  const justOutside = slotsOn(availability(sameDay), date);
   check(
     !justOutside.some((s) => s.start === firstSlot.toISOString()),
-    'a second past the cutoff the slot must disappear',
+    'one second later it is same-day, and same-day is never offered',
   );
-  console.log(`  ${MIN_NOTICE_HOURS}h cutoff exact on both sides`);
+  console.log('  next-day-earliest cutoff exact on both sides of local midnight');
 }
 
 // ---------------------------------------------------------------------------

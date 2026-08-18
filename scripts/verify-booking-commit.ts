@@ -10,6 +10,11 @@
 // nothing on its own — the variable has to be SWAPPED, and the route module
 // imported only afterwards, or a static import binds the production connection
 // before the swap happens.
+import {
+  APPOINTMENT_STATUSES,
+  SLOT_HOLD_PREDICATE,
+  SLOT_RELEASING_STATUSES,
+} from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -267,7 +272,7 @@ const bodies: string[] = [];
 async function countBookings(slot: Date) {
   const rows = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${slot.toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${slot.toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   return rows[0].n;
 }
@@ -329,7 +334,7 @@ function nextSlot(): Date {
  */
 async function recycleSlot(): Promise<Date> {
   const taken = (await sql`
-    SELECT slot_start FROM appointments WHERE status <> 'cancelled'
+    SELECT slot_start FROM appointments WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { slot_start: Date }[];
   const busy = new Set(taken.map((r) => new Date(r.slot_start).getTime()));
   const free = freeSlots().find((s) => !busy.has(s.getTime()));
@@ -858,10 +863,24 @@ try {
       SELECT * FROM appointments WHERE id = ${tierBooking.body?.id}
     `) as Record<string, unknown>[];
     check(tierRow[0]?.assessment_tier === 'sketch', 'and the chosen tier must reach the column');
+    // BK-23 added the amount columns (migration 008), so "no such column
+    // exists" stopped being the assertion. The durable form is stronger: the
+    // columns exist, the request named amounts, and the request wrote NONE of
+    // them. They are the approval screen's to set, server-side, after the
+    // office has looked at the job.
     check(
-      tierRow[0] !== undefined &&
-        !Object.keys(tierRow[0]).some((k) => /amount|price|cents|total/i.test(k)),
-      'and the row carries no amount-shaped column at all for a request to have written',
+      tierRow[0]?.assessment_amount_cents === null &&
+        tierRow[0]?.gst_cents === null &&
+        tierRow[0]?.total_amount_cents === null,
+      'and every amount column is still NULL — a request cannot price itself',
+    );
+    check(
+      tierRow[0]?.travel_fee_cents === 0,
+      'and the travel fee is zero, never a value a request supplied',
+    );
+    check(
+      tierRow[0]?.payment_status === 'not_required',
+      'and payment_status is untouched by the request',
     );
 
     // The DB CHECK is the backstop under the parser. Asserted directly, because
@@ -898,6 +917,74 @@ try {
     check(probeRows[0].n === 0, 'and nothing landed');
 
     console.log('  required, stored, and no amount ever reaches a column');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nSlot hold and release, and the ON CONFLICT arbiter (BK-23)');
+  // -------------------------------------------------------------------------
+  //
+  // THE FAILURE THIS EXISTS FOR. `insertBooking`'s
+  // `ON CONFLICT (slot_start) WHERE <predicate>` is resolved by Postgres
+  // proving the INDEX predicate implies it. When it cannot, it raises 42P10 —
+  // on every booking, public and admin, the entire funnel at once. Migration
+  // 008 widened both from `status <> 'cancelled'` to a three-status deny-list,
+  // and both now come from SLOT_HOLD_PREDICATE so they cannot be typed apart.
+  //
+  // Asserted against the REAL INDEX rather than by reading the two strings: the
+  // strings being equal is what we control, and the planner accepting them is
+  // what actually matters. Postgres stores `NOT IN (...)` normalised to
+  // `<> ALL (ARRAY[...])`, so a textual comparison would not have proved this.
+  {
+    const holdSlot = new Date('2097-05-05T18:30:00.000Z');
+    await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+
+    // Inserted directly rather than through the route: this arm is about the
+    // statement, and a far-future instant needs no bookable slot from the pool.
+    const insert = async (name: string, status: string) => {
+      const rows = (await sql`
+        INSERT INTO appointments (name, phone, service, address, city, payment_route, slot_start, status)
+        VALUES (${name}, '7805550134', 'water', '1 Test Way', 'Edmonton', 'private',
+                ${holdSlot.toISOString()}, ${status})
+        ON CONFLICT (slot_start) WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)} DO NOTHING
+        RETURNING id
+      `) as { id: number }[];
+      return rows.length;
+    };
+
+    check(
+      (await insert('BK-23 hold probe', 'pending_review')) === 1,
+      'the arbiter resolves at all — a mismatch here is 42P10 on every booking',
+    );
+    check(
+      (await insert('BK-23 hold probe 2', 'pending_review')) === 0,
+      'and a second booking of a held slot is refused',
+    );
+
+    // Every status, both directions, against the real index. A status added
+    // later and left out of the deny-list must HOLD — the deny-list's whole
+    // point is that the forgetful case fails safe.
+    for (const status of APPOINTMENT_STATUSES) {
+      await sql`
+        UPDATE appointments SET status = ${status}
+        WHERE slot_start = ${holdSlot.toISOString()}
+      `;
+      const free = (await insert(`BK-23 probe after ${status}`, 'pending_review')) === 1;
+      const shouldRelease = SLOT_RELEASING_STATUSES.includes(status);
+      check(
+        free === shouldRelease,
+        `'${status}' must ${shouldRelease ? 'RELEASE' : 'HOLD'} its slot`,
+      );
+      // Put the slot back to a single row before the next iteration.
+      await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+      await sql`
+        INSERT INTO appointments (name, phone, service, address, city, payment_route, slot_start, status)
+        VALUES ('BK-23 hold probe', '7805550134', 'water', '1 Test Way', 'Edmonton', 'private',
+                ${holdSlot.toISOString()}, 'pending_review')
+      `;
+    }
+
+    await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+    console.log('  arbiter resolves; five statuses hold, three release');
   }
 
   // -------------------------------------------------------------------------
@@ -970,7 +1057,10 @@ try {
     check(insRow[0].sms_consent_at !== null, 'consent must be stamped when given');
     check(insRow[0].source === 'web', "source must be 'web'");
     check(insRow[0].pipeline_stage === 'assessment', 'pipeline stage must default to assessment');
-    check(insRow[0].status === 'booked', 'status must default to booked');
+    // BK-23: the default moved with the flow. A public booking is a REQUEST
+    // now, and a row landing in any other status is the review gate not
+    // existing.
+    check(insRow[0].status === 'pending_review', "status must default to 'pending_review'");
 
     const privSlot = nextSlot();
     const priv = await post(

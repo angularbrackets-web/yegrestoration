@@ -20,7 +20,7 @@
   import {
     ALLOWED_UPLOAD_TYPES,
     BOOKING_AVAILABILITY_ENDPOINT,
-    BOOKING_CONFIRMED_PATH,
+    BOOKING_RECEIVED_PATH,
     BOOKING_CREATE_ENDPOINT,
     BOOKING_DRAFT_ENDPOINT,
     BOOKING_UPLOAD_ENDPOINT,
@@ -544,7 +544,7 @@
             // booking id — not here as well, or one booking counts twice.
             // `replace`, not `assign`: Back from the confirmation must not land
             // on a fresh empty form, which is how one job gets booked twice.
-            window.location.replace(BOOKING_CONFIRMED_PATH);
+            window.location.replace(BOOKING_RECEIVED_PATH);
             break;
           }
 

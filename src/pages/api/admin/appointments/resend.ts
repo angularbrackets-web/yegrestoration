@@ -75,8 +75,15 @@ export const POST: APIRoute = async ({ request }) => {
     const appointment = rows[0];
     if (!appointment) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
 
+    // BK-23: `booked` became `confirmed`, and the guard stays NARROW on purpose.
+    // This button re-sends the "you're booked" confirmation with its calendar
+    // invite. A `pending_review` or `approved_awaiting_payment` row has not been
+    // paid for, so re-sending that message would tell a customer they have an
+    // appointment they have not bought — the single claim this whole flow
+    // exists to stop making. The other statuses get the payment link or the
+    // decline notice through their own paths, not through this one.
     const hasEmail = typeof appointment.email === 'string' && appointment.email.trim() !== '';
-    if (appointment.status !== 'booked' || !hasEmail) {
+    if (appointment.status !== 'confirmed' || !hasEmail) {
       return redirect(`${detail}?email=refused`);
     }
 

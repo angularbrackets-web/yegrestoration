@@ -16,7 +16,8 @@ import {
 import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
 import type { IcsKind } from '../../../../lib/booking-ics';
 import { sendCalendarInvite, withDeadline } from '../../../../lib/booking-notify';
-import { getDb, SERVICE_LABELS } from '../../../../lib/db';
+import { couldHoldCalendarInvite } from '../../../../lib/booking-status';
+import { getDb, SERVICE_LABELS, type AppointmentStatus } from '../../../../lib/db';
 
 /** Postgres unique_violation. The partial index on `slot_start` is what raises it. */
 const UNIQUE_VIOLATION = '23505';
@@ -189,13 +190,26 @@ type UpdatedRow = {
  * The mail a status edit owes: the office's calendar artifact, and — since
  * BK-16 — the customer's written notice carrying their own copy of it.
  *
- * THE RULE IS THE CANCELLED BOUNDARY, not the status names. Into `cancelled`
- * from anything sends a CANCEL; out of `cancelled` to anything sends a fresh
- * REQUEST — same UID, and a SEQUENCE that is strictly greater because it comes
- * from a later clock. Everything else sends nothing: a re-submit that keeps the
- * status (the office fixing a typo in the notes on a cancelled row), and the
- * ordinary `booked → completed` / `booked → no_show` edits, which do not change
+ * THE RULE IS THE INVITE BOUNDARY, not the status names — and BK-23 is what
+ * made that distinction load-bearing rather than pedantic.
+ *
+ * It used to be the CANCELLED boundary, keyed on the literal `'cancelled'`,
+ * because that was the only status a booking could leave the calendar through.
+ * P9 added two more: a `confirmed` row can now be edited to `payment_expired`
+ * or `declined`, and under the old rule each of those would have left a live
+ * invite on two calendars with nothing to clear it.
+ *
+ * So the question is asked of the STATUSES rather than of one name: did the old
+ * status hold an invite, and does the new one? Crossing that boundary outward
+ * sends a CANCEL; crossing it inward sends a fresh REQUEST — same UID, and a
+ * SEQUENCE strictly greater because it comes from a later clock. Everything
+ * else sends nothing: a re-submit that keeps the status, and the ordinary
+ * `confirmed → completed` / `confirmed → no_show` edits, which do not change
  * whether a crew is expected somewhere.
+ *
+ * `couldHoldCalendarInvite` is deliberately not "is it live" — invites issue at
+ * payment-confirmed, so `pending_review` and `approved_awaiting_payment` never
+ * had one, and moving between those and `declined` correctly sends nothing.
  *
  * A 23505 never reaches here — the statement threw, and the row is untouched.
  *
@@ -212,11 +226,14 @@ type UpdatedRow = {
  * a change that saved.
  */
 async function sendBoundaryMail(row: UpdatedRow, now: Date): Promise<void> {
-  const wasCancelled = row.prev_status === 'cancelled';
-  const isCancelled = row.next_status === 'cancelled';
-  if (wasCancelled === isCancelled) return;
+  // Cast rather than validate: these came out of a CHECK-constrained column,
+  // and `parseAppointmentUpdate` already refused anything outside the set on
+  // the way in.
+  const hadInvite = couldHoldCalendarInvite(row.prev_status as AppointmentStatus);
+  const hasInvite = couldHoldCalendarInvite(row.next_status as AppointmentStatus);
+  if (hadInvite === hasInvite) return;
 
-  const kind: IcsKind = isCancelled ? 'cancel' : 'request';
+  const kind: IcsKind = hadInvite ? 'cancel' : 'request';
 
   try {
     const event = inviteEventFromAppointment(

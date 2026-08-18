@@ -36,6 +36,7 @@
 // reached the send and the mute stopped it" from "the route was never wired to
 // send at all" — which is what the boundary section below asserts, in both
 // directions. It still says nothing about what the message contained.
+import { SLOT_HOLD_PREDICATE } from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -91,6 +92,7 @@ process.env.BOOKING_NOTIFY_DISABLED = '1';
 const { POST: createRoute } = await import('../src/pages/api/admin/appointments/create');
 const { POST: updateRoute } = await import('../src/pages/api/admin/appointments/update');
 const { POST: resendRoute } = await import('../src/pages/api/admin/appointments/resend');
+const { POST: reviewRoute } = await import('../src/pages/api/admin/appointments/review');
 const { POST: blackoutAdd } = await import('../src/pages/api/admin/blackouts/add');
 const { POST: blackoutDelete } = await import('../src/pages/api/admin/blackouts/delete');
 const { GET: availability } = await import('../src/pages/api/booking/availability');
@@ -191,6 +193,7 @@ type Row = {
   internal_notified_at: Date | null;
   admin_notes: string | null;
   policy_number: string | null;
+  payment_status: string;
   updated_at: Date;
 };
 
@@ -315,7 +318,12 @@ try {
   check(rowA !== null, 'the row exists');
   if (rowA) {
     check(rowA.source === 'admin', 'it is marked as office-entered');
-    check(rowA.status === 'booked', 'and booked');
+    // BK-23: an office entry is a REQUEST like any other. It lands in
+    // `pending_review` and the office approves it from the review panel, which
+    // is where the amount is set. "Payment always precedes dispatch, no
+    // exceptions" (client, 2026-08-16) applies to phone bookings too.
+    check(rowA.status === 'pending_review', 'and it lands in pending_review, not confirmed');
+    check(rowA.payment_status === 'not_required', 'with payment_status untouched until approval');
     check(rowA.pipeline_stage === 'assessment', 'at the default pipeline stage');
     check(rowA.duration_minutes === 30, 'with the locked 30-minute duration');
     // BK-35 pins BOTH halves here, and the equality is the point.
@@ -373,13 +381,13 @@ try {
   // -------------------------------------------------------------------------
   const before = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   const dupe = await call(createRoute, entryFields({ name: 'BK-08 duplicate' }));
   check(dupe.includes('taken=1'), `a duplicate slot reports taken, got "${dupe}"`);
   const after = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   check(
     before[0].n === 1 && after[0].n === 1,
@@ -396,7 +404,8 @@ try {
   check(rowACancelled?.cancelled_at != null, 'and cancelled_at is stamped');
   const cancelledAt = rowACancelled?.cancelled_at?.getTime();
 
-  // The slot is now free — the partial index only covers status <> 'cancelled'.
+  // The slot is now free — `cancelled` is one of SLOT_RELEASING_STATUSES, so the
+  // partial unique index no longer covers the row.
   const locationB = await call(createRoute, entryFields({ name: 'BK-08 rebook' }));
   const idB = idFromLocation(locationB);
   check(idB !== null, `the freed slot accepts a new booking, got "${locationB}"`);
@@ -411,7 +420,7 @@ try {
   // this is what makes that true rather than merely claimed.
   const conflict = await call(updateRoute, {
     id: String(idA),
-    status: 'booked',
+    status: 'confirmed',
     pipeline_stage: 'restoration',
     admin_notes: MARKER,
   });
@@ -432,10 +441,10 @@ try {
   // -------------------------------------------------------------------------
   const freed = await call(updateRoute, { id: String(idB), status: 'cancelled' });
   check(freed.endsWith('?saved=1'), 'the rebooking is cancelled out of the way');
-  const restored = await call(updateRoute, { id: String(idA), status: 'booked' });
+  const restored = await call(updateRoute, { id: String(idA), status: 'confirmed' });
   check(restored.endsWith('?saved=1'), `un-cancelling now succeeds, got "${restored}"`);
   const rowARestored = await read(idA);
-  check(rowARestored?.status === 'booked', 'the row is booked again');
+  check(rowARestored?.status === 'confirmed', 'the row is confirmed again');
   check(rowARestored?.cancelled_at === null, 'and cancelled_at is cleared, not left stale');
 
   // -------------------------------------------------------------------------
@@ -443,7 +452,7 @@ try {
   // -------------------------------------------------------------------------
   const edited = await call(updateRoute, {
     id: String(idA),
-    status: 'booked',
+    status: 'confirmed',
     pipeline_stage: 'mitigation',
     admin_notes: `${MARKER} edited`,
     // Everything below is outside the whitelist and must change nothing.
@@ -475,7 +484,7 @@ try {
   // ORDER MATTERS. The absent-field case is checked FIRST, while the notes
   // still hold a value: doing it after the clear compares NULL to NULL, which
   // is an assertion that cannot fail — the red pass caught exactly that.
-  await call(updateRoute, { id: String(idA), status: 'booked' });
+  await call(updateRoute, { id: String(idA), status: 'confirmed' });
   check(
     (await read(idA))?.admin_notes === `${MARKER} edited`,
     'an absent notes field leaves the notes alone',
@@ -486,7 +495,7 @@ try {
   check((await read(idA))?.admin_notes === MARKER, 'and writing them back works');
 
   // A well-formed id that matches nothing.
-  const missing = await call(updateRoute, { id: '2147483647', status: 'booked' });
+  const missing = await call(updateRoute, { id: '2147483647', status: 'confirmed' });
   check(missing.includes('saved=missing'), `a vanished appointment is reported, got "${missing}"`);
 
   // -------------------------------------------------------------------------
@@ -497,8 +506,11 @@ try {
   const noEmail = await call(resendRoute, { id: String(idA) });
   check(noEmail.endsWith('?email=refused'), `no email → refused, got "${noEmail}"`);
 
-  // Give it one, and a booked row is accepted — the send itself is muted here,
-  // so this asserts the GATE opened, not that mail went out.
+  // Give it one — and BK-23 narrowed the gate. The resend button re-sends the
+  // "you're booked" confirmation WITH its calendar invite, so it is now
+  // `confirmed`-only. A fresh entry lands in `pending_review`, and offering to
+  // re-send a confirmation for a booking nobody has paid for is the false claim
+  // this whole flow removes.
   const withEmail = await call(
     createRoute,
     entryFields({
@@ -511,10 +523,20 @@ try {
   check(idD !== null, `the emailable entry saved, got "${withEmail}"`);
   if (idD !== null) {
     createdIds.push(idD);
+
+    const pending = await call(resendRoute, { id: String(idD) });
+    check(
+      pending.endsWith('?email=refused'),
+      `a pending_review row is refused even with an email, got "${pending}"`,
+    );
+
+    // Move it to confirmed and the gate opens. The send itself is muted here,
+    // so this asserts the GATE, not that mail went out.
+    await call(updateRoute, { id: String(idD), status: 'confirmed' });
     const accepted = await call(resendRoute, { id: String(idD) });
     check(
       !accepted.endsWith('?email=refused'),
-      `a booked row with an email is accepted, got "${accepted}"`,
+      `a confirmed row with an email is accepted, got "${accepted}"`,
     );
 
     // Cancel it and the gate must close again: a cancelled appointment must not
@@ -887,18 +909,24 @@ try {
       check(enteredId !== null, `the entry ${label} saved, got "${entered.location}"`);
       if (enteredId !== null) {
         createdIds.push(enteredId);
+        // BK-23 INVERTED THIS ONE. It used to assert that the office invite
+        // fires regardless of the customer-confirmation checkbox. The office
+        // invite is now GONE from the entry path entirely: an invite at entry
+        // time is an invite for a slot nobody has paid for, and there is no
+        // CANCEL to clear it when the request is declined or the payment lapses
+        // — a row reaching `declined` from `pending_review` never had one.
+        //
+        // The assertion is kept rather than deleted, pointing the other way,
+        // because "no invite at entry" is a property somebody will otherwise
+        // restore by accident while fixing something else. This fixture HAS an
+        // email address, so both halves are falsifiable rather than vacuous.
         check(
-          muteLine(enteredId, 'request', 'office').test(entered.logs),
-          `an entry ${label} still reaches the office invite send`,
+          !muteLine(enteredId, 'request', 'office').test(entered.logs),
+          `an entry ${label} sends the office NO calendar invite`,
         );
-        // AND THE ENTRY MAILS THE CUSTOMER NOTHING FROM THE INVITE PATH. The
-        // entry's customer mail is the confirmation, gated on the checkbox and
-        // sent through `sendConfirmationAndStamp`; BK-16 must not have grown a
-        // second customer send here. This fixture HAS an email address, so the
-        // assertion is falsifiable rather than vacuous.
         check(
           !muteLine(enteredId, 'request', 'customer').test(entered.logs),
-          `and an entry ${label} sends the customer no separate invite`,
+          `and an entry ${label} sends the customer no invite either`,
         );
         // And it is cleaned up out of the slot so the next iteration can reuse it.
         await call(updateRoute, { id: String(enteredId), status: 'cancelled' });
@@ -928,6 +956,46 @@ try {
       emailless[0]?.email == null,
       `and it really has no email, got ${JSON.stringify(emailless[0]?.email)} — otherwise the arm below is vacuous`,
     );
+    // BK-23: THE BOUNDARY IS NOW "DID THIS STATUS HOLD AN INVITE", not "is it
+    // the word cancelled". An office entry lands in `pending_review`, which
+    // never had an invite issued — so it has to be moved to `confirmed` first
+    // for there to be anything to cancel. That step is not scaffolding; it is
+    // the new rule made visible, and the arm immediately below asserts the
+    // other half of it.
+    const preInvite = await callCapturingLogs({ id: String(idE), status: 'pending_review' });
+    check(!anyMute(idE).test(preInvite.logs), 'a pending_review row has no invite, so no mail crosses');
+    const cancelPending = await callCapturingLogs({ id: String(idE), status: 'declined' });
+    check(
+      !anyMute(idE).test(cancelPending.logs),
+      'and declining a never-confirmed request sends NO cancellation — there was never an invite',
+    );
+    await callCapturingLogs({ id: String(idE), status: 'pending_review' });
+
+    const toConfirmed = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+    check(
+      muteLine(idE, 'request', 'office').test(toConfirmed.logs),
+      'confirming a request issues the office invite',
+    );
+
+    // THE CASE P9 CREATED, and the reason the boundary had to stop being the
+    // word "cancelled".
+    //
+    // A confirmed booking can now leave the calendar through `payment_expired`
+    // and `declined` as well as `cancelled` — a refund, a reversal, an office
+    // correction. Under the old rule NONE of those sent a CANCEL, because
+    // neither the old status nor the new one was the literal `'cancelled'`, and
+    // the invite would sit on two calendars forever with nothing to clear it.
+    // Silent, and only visible to whoever turns up at the door.
+    for (const exit of ['payment_expired', 'declined'] as const) {
+      await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+      const left = await callCapturingLogs({ id: String(idE), status: exit });
+      check(
+        muteLine(idE, 'cancel', 'office').test(left.logs),
+        `confirmed → ${exit} sends a CANCEL — the invite must not outlive the booking`,
+      );
+    }
+    await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+
     const toCancelled = await callCapturingLogs({ id: String(idE), status: 'cancelled' });
     check(toCancelled.location.endsWith('?saved=1'), `the cancel still saves, got "${toCancelled.location}"`);
     check((await read(idE))?.status === 'cancelled', 'and the row is cancelled');
@@ -955,9 +1023,9 @@ try {
     check(!anyMute(idE).test(resubmit.logs), 'and sends nothing — it crossed no boundary');
 
     // 3. Out of cancelled: a fresh REQUEST, office only for this row.
-    const restored = await callCapturingLogs({ id: String(idE), status: 'booked' });
+    const restored = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
     check(restored.location.endsWith('?saved=1'), `the un-cancel saves, got "${restored.location}"`);
-    check((await read(idE))?.status === 'booked', 'and the row is booked again');
+    check((await read(idE))?.status === 'confirmed', 'and the row is confirmed again');
     check(
       muteLine(idE, 'request', 'office').test(restored.logs),
       'and the route reached the office invite send again',
@@ -968,7 +1036,7 @@ try {
     );
 
     // 4. Edits that do not touch the boundary send nothing.
-    for (const status of ['completed', 'no_show', 'booked']) {
+    for (const status of ['completed', 'no_show', 'confirmed']) {
       const edit = await callCapturingLogs({ id: String(idE), status });
       check(edit.location.endsWith('?saved=1'), `a ${status} edit saves`);
       check(!anyMute(idE).test(edit.logs), `and a ${status} edit sends nothing`);
@@ -996,6 +1064,9 @@ try {
     if (idG !== null) {
       createdIds.push(idG);
 
+      // Same as above: confirm it first, because that is when an invite exists
+      // to be cancelled.
+      await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       const cancelG = await callCapturingLogs({ id: String(idG), status: 'cancelled' });
       check(cancelG.location.endsWith('?saved=1'), `the cancel saves, got "${cancelG.location}"`);
       check((await read(idG))?.status === 'cancelled', 'and the row is cancelled');
@@ -1018,9 +1089,9 @@ try {
       // button's fixed idempotency key cannot carry it (the plan-review
       // blocker). Without this the customer's calendar shows "cancelled"
       // forever with no working recovery.
-      const restoreG = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      const restoreG = await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       check(restoreG.location.endsWith('?saved=1'), `the un-cancel saves, got "${restoreG.location}"`);
-      check((await read(idG))?.status === 'booked', 'and the row is booked again');
+      check((await read(idG))?.status === 'confirmed', 'and the row is confirmed again');
       check(
         muteLine(idG, 'request', 'office').test(restoreG.logs),
         'the office REQUEST was reached',
@@ -1038,7 +1109,7 @@ try {
       // what makes them mean something. On `idE` they could not fail.
       const resubmitG = await callCapturingLogs({
         id: String(idG),
-        status: 'booked',
+        status: 'confirmed',
         admin_notes: MARKER,
       });
       check(resubmitG.location.endsWith('?saved=1'), 'a re-submit on the with-email row saves');
@@ -1074,7 +1145,7 @@ try {
       // blank to NULL and so cannot produce this row — which is exactly why a
       // row like it can exist from some other writer.
       await sql`UPDATE appointments SET email = '   ' WHERE id = ${idG}`;
-      const blankEmail = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      const blankEmail = await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       check(blankEmail.location.endsWith('?saved=1'), 'a boundary crossing on a blank-email row saves');
       check(
         muteLine(idG, 'request', 'office').test(blankEmail.logs),
@@ -1096,7 +1167,7 @@ try {
     check(idF !== null, `the freed slot was taken, got "${stealer}"`);
     if (idF !== null) createdIds.push(idF);
 
-    const conflicted = await callCapturingLogs({ id: String(idE), status: 'booked' });
+    const conflicted = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
     check(
       conflicted.location.endsWith('?saved=conflict'),
       `the collision is still reported, got "${conflicted.location}"`,
@@ -1609,6 +1680,176 @@ async function dayIsOffered(day: string): Promise<boolean> {
     dates: { date: string; slots: unknown[] }[];
   };
   return (body.dates.find((d) => d.date === day)?.slots.length ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-23 — approve and decline, against the real route');
+// ---------------------------------------------------------------------------
+//
+// THE GUARDED UPDATE IS WHAT THIS EXISTS FOR. Every transition is
+// `WHERE id = $1 AND status = 'pending_review'`, and zero rows returned means
+// the decision was not this caller's to make. A double-click, a second tab, and
+// a decline racing an approve all land there. Getting that wrong does not
+// corrupt a row — it sends the customer a second email, or an approval for a
+// booking somebody already declined.
+{
+  const REVIEW_DATE = '2029-06-12';
+
+  const makeRequest = async (time: string, over: Record<string, string> = {}) => {
+    const location = await call(
+      createRoute,
+      entryFields({
+        slot_date: REVIEW_DATE,
+        slot_time: time,
+        name: `BK-23 review ${time}`,
+        email: 'bk23-verify@example.com',
+        assessment_tier: 'standard',
+        ...over,
+      }),
+    );
+    const id = idFromLocation(location);
+    if (id !== null) createdIds.push(id);
+    return id;
+  };
+
+  // --- APPROVE -------------------------------------------------------------
+  const approveId = await makeRequest('11:30');
+  check(approveId !== null, 'a request to approve was created');
+  if (approveId !== null) {
+    const before = await read(approveId);
+    check(before?.status === 'pending_review', 'and it starts in pending_review');
+
+    const location = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+    check(
+      location.includes('review=approved'),
+      `approving reports success, got "${location}"`,
+    );
+
+    const row = (await sql`
+      SELECT status, payment_status, approved_at, assessment_amount_cents,
+             travel_fee_cents, gst_cents, total_amount_cents, payment_due_at
+      FROM appointments WHERE id = ${approveId}
+    `) as Record<string, unknown>[];
+
+    check(row[0]?.status === 'approved_awaiting_payment', 'the row moves to approved_awaiting_payment');
+    check(row[0]?.payment_status === 'pending', 'and payment_status becomes pending');
+    check(row[0]?.approved_at !== null, 'approved_at is stamped');
+
+    // THE AMOUNTS ARE SNAPSHOTTED, not left to be recomputed later. A price
+    // change under a live row must not move a quote the customer accepted.
+    check(row[0]?.assessment_amount_cents === 39900, 'the base amount is snapshotted from the table');
+    check(row[0]?.travel_fee_cents === 0, 'travel defaults to zero — never applied automatically');
+    check(row[0]?.gst_cents === 1995, 'GST is computed, not typed');
+    check(row[0]?.total_amount_cents === 41895, 'and the total is base + travel + GST');
+    check(row[0]?.payment_due_at !== null, 'a distant slot carries a real deadline');
+
+    // THE SLOT IS STILL HELD. `approved_awaiting_payment` is not in
+    // SLOT_RELEASING_STATUSES — the whole point of a deadline is that the time
+    // is reserved until it lapses.
+    const held = await call(
+      createRoute,
+      entryFields({ slot_date: REVIEW_DATE, slot_time: '11:30', name: 'BK-23 collide' }),
+    );
+    check(held.includes('taken=1'), 'and the slot stays held against a second booking');
+
+    // IDEMPOTENCE. A second approve is a no-op, not a second email.
+    const again = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+    check(again.includes('review=stale'), `a second approve is a no-op, got "${again}"`);
+    const after = (await sql`
+      SELECT approved_at FROM appointments WHERE id = ${approveId}
+    `) as { approved_at: Date }[];
+    check(
+      after[0].approved_at.getTime() === (row[0].approved_at as Date).getTime(),
+      'and it does not restamp approved_at',
+    );
+
+    // A DECLINE CANNOT OVERTAKE AN APPROVAL. Same guard, other action.
+    const raced = await call(reviewRoute, { id: String(approveId), action: 'decline' });
+    check(raced.includes('review=stale'), 'declining an already-approved row is a no-op');
+    const stillApproved = await read(approveId);
+    check(
+      stillApproved?.status === 'approved_awaiting_payment',
+      'and the row is untouched by it',
+    );
+  }
+
+  // --- APPROVE WITH AN OVERRIDE AND A TRAVEL FEE ---------------------------
+  const overrideId = await makeRequest('12:30', { assessment_tier: 'report' });
+  if (overrideId !== null) {
+    await call(reviewRoute, {
+      id: String(overrideId),
+      action: 'approve',
+      assessment_amount: '750.00',
+      travel_fee: '46.50',
+    });
+    const row = (await sql`
+      SELECT assessment_amount_cents, travel_fee_cents, gst_cents, total_amount_cents
+      FROM appointments WHERE id = ${overrideId}
+    `) as Record<string, number>[];
+    check(row[0]?.assessment_amount_cents === 75000, 'an admin override replaces the suggested base');
+    check(row[0]?.travel_fee_cents === 4650, 'and the typed travel fee is stored');
+    // GST on base + travel, one rounding. 79650 * 5% = 3982.5 → 3983.
+    check(row[0]?.gst_cents === 3983, 'GST is recomputed on the overridden subtotal');
+    check(row[0]?.total_amount_cents === 83633, 'and the total adds up');
+  }
+
+  // --- A BAD AMOUNT CHANGES NOTHING ----------------------------------------
+  const badId = await makeRequest('13:30');
+  if (badId !== null) {
+    const refused = await call(reviewRoute, {
+      id: String(badId),
+      action: 'approve',
+      assessment_amount: '399abc',
+    });
+    check(refused.includes('review=amount'), `a malformed amount is refused, got "${refused}"`);
+    const row = await read(badId);
+    check(
+      row?.status === 'pending_review',
+      'and the row is left in pending_review — a refusal must not half-approve',
+    );
+  }
+
+  // --- NO TIER, NO APPROVAL ------------------------------------------------
+  const noTierId = await makeRequest('14:30', { assessment_tier: '' });
+  if (noTierId !== null) {
+    const refused = await call(reviewRoute, { id: String(noTierId), action: 'approve' });
+    check(refused.includes('review=notier'), `no tier means no amount, so no approval, got "${refused}"`);
+    check((await read(noTierId))?.status === 'pending_review', 'and nothing changed');
+
+    // ...but it can still be declined. A request the office cannot price is
+    // one they may well want to turn down.
+    const declined = await call(reviewRoute, { id: String(noTierId), action: 'decline' });
+    check(declined.includes('review=declined'), `an unpriced request can still be declined, got "${declined}"`);
+    check((await read(noTierId))?.status === 'declined', 'and it lands in declined');
+  }
+
+  // --- DECLINE RELEASES THE SLOT -------------------------------------------
+  const declineId = await makeRequest('15:30');
+  if (declineId !== null) {
+    await call(reviewRoute, { id: String(declineId), action: 'decline' });
+    const row = (await sql`
+      SELECT status, declined_at FROM appointments WHERE id = ${declineId}
+    `) as { status: string; declined_at: Date | null }[];
+    check(row[0]?.status === 'declined', 'declining moves the row to declined');
+    check(row[0]?.declined_at !== null, 'and stamps declined_at');
+
+    // THE SLOT IS BACK ON THE MARKET, through the real index rather than a
+    // separate release step: `declined` is in SLOT_RELEASING_STATUSES, so the
+    // row falls out of the partial unique index the moment it commits.
+    const rebooked = await call(
+      createRoute,
+      entryFields({ slot_date: REVIEW_DATE, slot_time: '15:30', name: 'BK-23 rebook' }),
+    );
+    const rebookedId = idFromLocation(rebooked);
+    check(rebookedId !== null, `the declined slot can be booked again, got "${rebooked}"`);
+    if (rebookedId !== null) createdIds.push(rebookedId);
+  }
+
+  // --- A BAD ACTION IS NOT A DECISION --------------------------------------
+  const bogus = await call(reviewRoute, { id: String(approveId ?? 1), action: 'confirm' });
+  check(bogus.includes('review=invalid'), `an unrecognised action is refused, got "${bogus}"`);
+
+  console.log('  approve, decline, override, refusals, and both idempotence guards');
 }
 
 if (failures > 0) {

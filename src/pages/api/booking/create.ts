@@ -12,6 +12,7 @@ import { countUnclaimedFiles, insertBooking, stampNotifications } from '../../..
 import { planBookingNotifications } from '../../../lib/booking-email';
 import { notifyAndStamp, withDeadline } from '../../../lib/booking-notify';
 import { parseBookingPayload, type BookingPayload } from '../../../lib/booking-payload';
+import { SLOT_HOLD_PREDICATE } from '../../../lib/booking-status';
 import { formatSlot, type DateKey } from '../../../lib/booking-time';
 import { verifyDraftToken } from '../../../lib/draft-token';
 import { getDb, SERVICE_LABELS } from '../../../lib/db';
@@ -100,7 +101,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       sql`
         SELECT slot_start
         FROM appointments
-        WHERE status <> 'cancelled'
+        WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)}
           AND slot_start >= ${slots.from.toISOString()}
           AND slot_start <  ${slots.to.toISOString()}
       `,
@@ -214,10 +215,12 @@ async function notify(
   try {
     const plan = planBookingNotifications({
       id,
-      // Today a committed booking IS confirmed, so this is the confirmation.
-      // BK-23 flips it to 'request' when submission stops confirming, and the
-      // type carries into the idempotency key — see `notifyIdempotencyPrefix`.
-      messageType: 'confirmed',
+      // BK-23: submitting the form produces a REQUEST, not a booking. This
+      // single value decides three things at once — the copy in both messages,
+      // whether a calendar invite is attached, and the idempotency key the send
+      // goes out under. Flipping it back to 'confirmed' would tell a customer
+      // they have an appointment nobody has approved or paid for.
+      messageType: 'request',
       slotLabel,
       // The instant as well as the label: the internal message carries the
       // calendar invite (BK-14), and an ICS carries instants. The payload has

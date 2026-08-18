@@ -35,7 +35,7 @@ import {
   type FieldError,
 } from './booking-payload';
 import type { AssessmentTier } from './booking-pricing';
-import { earliestBookableInstant, slotStartsForDate } from './booking-time';
+import { earliestBookableDate, earliestBookableInstant, slotStartsForDate } from './booking-time';
 import { EXTENSION_TO_TYPE, formatBytes, isAllowedContentType } from './booking-uploads';
 
 export type Step = 1 | 2 | 3;
@@ -501,11 +501,22 @@ export type DayChipKind = 'open' | 'closed' | 'elapsed' | 'full';
  * `closed` is tested before `elapsed` because a Friday that is also in the past
  * is a Friday: the policy is the durable reason and the clock is incidental.
  *
- * `elapsed` is a PROOF, not a guess. Every one of the day's five grid instants
- * is earlier than the earliest instant the notice rule permits, so no booking
- * is involved in the day being empty and no disclosure is made by saying so.
- * A day with even one slot still inside the window that is nonetheless empty is
- * genuinely taken, and falls through to `full` correctly.
+ * `elapsed` is a PROOF, not a guess: the date is before the first date the
+ * notice rule permits, so no booking is involved in the day being empty and no
+ * disclosure is made by saying so. An empty day that IS bookable is genuinely
+ * taken, and falls through to `full` correctly. That distinction is the whole
+ * reason this function exists — "Full" on a day nobody could have booked would
+ * be a lie about the office's calendar.
+ *
+ * **BK-23 made this a date comparison rather than an instant one**, following
+ * the notice rule from rolling hours to calendar days. The consequence is worth
+ * stating because it changed what the chips say: TODAY IS NOW ALWAYS
+ * `elapsed`, at every hour, including first thing in the morning. It is not
+ * bookable online at all, so "Full" would misdescribe it. Under the old rule a
+ * day could be partly elapsed, and this function had to prove that EVERY slot
+ * was past the cutoff before claiming it; under a calendar rule a date is
+ * wholly before the cutoff or wholly after it, and there is no partial case
+ * left to get wrong.
  */
 export function dayChipKind(
   date: string,
@@ -515,8 +526,7 @@ export function dayChipKind(
 ): DayChipKind {
   if (slotCount > 0) return 'open';
   if (CLOSED_WEEKDAYS.includes(weekday)) return 'closed';
-  const cutoff = earliestBookableInstant(now).getTime();
-  if (slotStartsForDate(date).every((start) => start.getTime() < cutoff)) return 'elapsed';
+  if (date < earliestBookableDate(now)) return 'elapsed';
   return 'full';
 }
 

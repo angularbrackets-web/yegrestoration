@@ -31,11 +31,97 @@ export const SLOT_MINUTES = 30;
 /** 0 = Sunday … 6 = Saturday. Fridays are permanently off — config, not a blackout row. */
 export const CLOSED_WEEKDAYS: readonly number[] = [5];
 
-/** A slot must start at least this far in the future to be publicly bookable. */
-export const MIN_NOTICE_HOURS = 4;
+/**
+ * How many CALENDAR DAYS ahead the earliest publicly bookable slot sits.
+ *
+ * `1` means next-day earliest: no same-day web bookings, and every slot from
+ * tomorrow onward is offered regardless of the hour it is now. Client decision,
+ * 2026-08-18.
+ *
+ * ── WHY DAYS AND NOT HOURS ────────────────────────────────────────────────
+ *
+ * This replaced `MIN_NOTICE_HOURS = 4`. P9 first recorded the client's
+ * 2026-08-12 decision as "4h → 24h", and 24 rolling hours is NOT the same rule:
+ * it would refuse a Wednesday 11:30 slot to somebody booking Tuesday at 15:00,
+ * which next-day-earliest allows. The client's 2026-08-18 answer is the
+ * calendar-day version, so that is what ships. The intent was always the same —
+ * the office will not take a web booking for today.
+ *
+ * ── WHAT IT DOES TO THE PAYMENT DEADLINE ──────────────────────────────────
+ *
+ * The tight case is a request at 15:29 for the next day's 11:30: about 20 hours
+ * of notice, but an 07:00 approval leaves barely half an hour before
+ * `slot − 4h`. That case is covered by the pay-now branch rather than by this
+ * constant — see `PAY_NOW_THRESHOLD_HOURS`, which skips the deferred deadline
+ * entirely when the slot is close. This constant deliberately does not try to
+ * guarantee a payable window; a rule that did would have to be hours-based and
+ * would refuse the bookings the client wants to take.
+ *
+ * The admin grid is exempt from this and from every other window check — see
+ * `ADMIN_MIN_NOTICE_HOURS`.
+ */
+export const MIN_NOTICE_DAYS = 1;
+
+/**
+ * The floor the office works to when typing a booking in by hand.
+ *
+ * Documentation rather than enforcement: `api/admin/appointments/create.ts`
+ * never calls `isSlotBookable`, so nothing checks this. It is recorded because
+ * "the admin path has a 4-hour floor" is the sentence everybody repeats, and
+ * the truth is that the admin path has no floor at all — an emergency at 08:00
+ * for 11:30 is exactly what that bypass is for.
+ */
+export const ADMIN_MIN_NOTICE_HOURS = 4;
 
 /** The public calendar shows at most this many days ahead. */
 export const MAX_ADVANCE_DAYS = 14;
+
+// ---------------------------------------------------------------------------
+// The payment window (BK-23 / BK-32)
+//
+// Three constants that have to be read together, because two of them describe
+// the same deadline from different ends and the third is what stops them
+// producing a deadline in the past.
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a customer gets to pay, measured from the moment the office
+ * approves.
+ *
+ * Approve at 9am, pay by 9pm. Long enough for somebody at work, short enough to
+ * recycle a slot that is not going to be paid for. A business-feel number, not
+ * an engineering one — the client may move it and it is a constant so that they
+ * can.
+ */
+export const PAYMENT_WINDOW_HOURS = 12;
+
+/**
+ * The other end of the same deadline: payment must land at least this far
+ * before the visit.
+ *
+ * Past this point a confirmation can no longer usefully complete — the crew is
+ * being dispatched — which is why the auto-decline timer is pinned to the same
+ * instant rather than to a number somebody picked.
+ */
+export const PAYMENT_DEADLINE_LEAD_HOURS = 4;
+
+/**
+ * Below this much time-to-slot at approval, the deferred deadline is skipped
+ * and the link is sent to be paid NOW.
+ *
+ * REQUIRED, NOT AN OPTIMISATION. `min(approved_at + 12h, slot − 4h)` produces a
+ * deadline in the past — or minutes away — whenever the slot is close, and
+ * "close" is reachable on both paths: a 2am emergency typed in by the office,
+ * and an ordinary web request made at 15:29 for the next day's 11:30 that the
+ * office approves at 07:00. Without this branch those bookings get a link that
+ * is dead on arrival, or one that expires while the customer is finding their
+ * card.
+ *
+ * Eight hours covers both. When it applies, `payment_due_at` is left NULL and
+ * the expiry cron must leave the row alone — the office is on the phone to that
+ * customer, not waiting on a timer.
+ */
+export const PAY_NOW_THRESHOLD_HOURS = 8;
 
 /** How long before the appointment the reminder SMS goes out. */
 export const REMINDER_LEAD_HOURS = 3;
@@ -184,7 +270,29 @@ export const APPOINTMENT_UPLOAD_RATE_LIMIT_PER_HOUR = 30;
 /** The booking form. Where a confirmed page with nothing to show sends people. */
 export const BOOKING_PATH = '/book/';
 
-/** Where a committed booking lands. Both `noindex` and out of the sitemap. */
+/**
+ * Where a SUBMITTED REQUEST lands (BK-23). Both `noindex` and out of the
+ * sitemap, like its sibling below.
+ *
+ * New in P9, and the split is the point. Submitting the form used to produce a
+ * booking, so it landed on a page that said "You're booked". It now produces a
+ * REQUEST the office has not looked at and nobody has paid for, and that page
+ * would be making the exact claim this whole flow exists to stop making — on
+ * the one surface a customer is most likely to believe, and most likely to
+ * screenshot.
+ *
+ * `/book/confirmed/` is kept rather than repurposed, for two reasons: it is
+ * live and may be linked, and BK-32's Stripe `success_url` needs a
+ * post-payment landing page anyway. Reusing it there is the smaller diff and
+ * leaves both URLs saying something true.
+ */
+export const BOOKING_RECEIVED_PATH = '/book/received/';
+
+/**
+ * Where a PAID booking lands. Both `noindex` and out of the sitemap.
+ *
+ * Since BK-23 this is reached from the payment redirect, not from the form.
+ */
 export const BOOKING_CONFIRMED_PATH = '/book/confirmed/';
 
 export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
@@ -260,6 +368,20 @@ export const BOOKING_EMAIL_REPLY_TO = 'info@yegrestoration.ca';
 
 /** Who hears that a crew is expected somewhere. Settled with the user 2026-08-09. */
 export const BOOKING_INTERNAL_TO = 'info@yegrestoration.ca';
+
+/**
+ * Where an Interac e-Transfer goes (BK-32, merged in 2026-08-18).
+ *
+ * A real payment route, not a fallback: the client offers it alongside the card
+ * link, and the approval email names both. There is no inbox automation — the
+ * office reads their own mail and marks the booking paid, which is deliberate
+ * and is recorded as out of scope rather than as a gap.
+ *
+ * `null` would mean the client has not given one, and the approval message
+ * would then have to rely on the card link alone. It is a constant rather than
+ * an env var because it is a published address, not a secret.
+ */
+export const INTERAC_EMAIL: string | null = 'info@yegrestoration.ca';
 
 // ---------------------------------------------------------------------------
 // Calendar invites (BK-14)

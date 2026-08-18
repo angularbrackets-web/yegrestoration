@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 
 import type { AssessmentTier } from './booking-pricing';
+import type { AppointmentStatus } from './booking-status';
 import { readEnv } from './env';
 
 export type Lead = {
@@ -50,7 +51,12 @@ export type Lead = {
 export type PipelineStage = 'assessment' | 'mitigation' | 'restoration';
 
 /** Lifecycle of the booking itself. Only 'cancelled' releases the slot. */
-export type AppointmentStatus = 'booked' | 'completed' | 'cancelled' | 'no_show';
+/**
+ * Re-exported from `booking-status.ts`, which owns the lifecycle and the
+ * slot-hold predicate together — they are one decision, and separating the
+ * enum from the rule that reads it is how the two drifted before BK-23.
+ */
+export type { AppointmentStatus };
 
 /** Re-exported from the pricing module so a row type does not import a price table. */
 export type { AssessmentTier };

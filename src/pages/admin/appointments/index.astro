@@ -56,16 +56,41 @@ function serviceLabel(service: string) {
   return SERVICE_LABELS[service] ?? service;
 }
 
+/**
+ * Badge colour by status.
+ *
+ * BK-23 added four statuses, and the colours carry a meaning the office reads
+ * at a glance: AMBER is "this is waiting on you". Both new live states get it,
+ * because both are somebody's inaction with a deadline attached — an
+ * unreviewed request and an unpaid approval. Confirmed stays blue (booked
+ * work), completed green, and everything released is muted, because a released
+ * slot needs no action at all.
+ */
 function statusClasses(status: Appointment['status']) {
+  if (status === 'pending_review') return 'bg-amber-900/40 text-amber-300 border-amber-700';
+  if (status === 'approved_awaiting_payment') return 'bg-amber-900/25 text-amber-200/90 border-amber-800';
   if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
-  if (status === 'cancelled') return 'bg-zinc-800 text-zinc-500 border-zinc-700';
   if (status === 'no_show') return 'bg-red-900/40 text-red-300 border-red-800';
+  if (status === 'cancelled' || status === 'declined' || status === 'payment_expired') {
+    return 'bg-zinc-800 text-zinc-500 border-zinc-700';
+  }
   return 'bg-blue-900/40 text-blue-300 border-blue-800';
 }
 
-/** A `booked` row sitting in Past has simply elapsed — nobody has closed it out. */
+/**
+ * A live row sitting in Past has simply elapsed — nobody closed it out.
+ *
+ * BK-23: three statuses can elapse now, not one, and the two new ones elapse
+ * for worse reasons than a confirmed visit does. A `pending_review` row in the
+ * past is a request nobody answered; an `approved_awaiting_payment` one is a
+ * link nobody paid. Both are the office's own failure to act, so they are named
+ * rather than folded into a generic "Elapsed".
+ */
 function pastStatusLabel(appointment: Appointment) {
-  return appointment.status === 'booked' ? 'Elapsed' : STATUS_LABELS[appointment.status];
+  if (appointment.status === 'confirmed') return 'Elapsed';
+  if (appointment.status === 'pending_review') return 'Never reviewed';
+  if (appointment.status === 'approved_awaiting_payment') return 'Never paid';
+  return STATUS_LABELS[appointment.status];
 }
 
 // Where an edit or a resend lands when there is no detail page to return to —

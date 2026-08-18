@@ -8,6 +8,7 @@ import {
   computeAvailability,
 } from '../../../lib/booking-availability';
 import { getDb } from '../../../lib/db';
+import { SLOT_HOLD_PREDICATE } from '../../../lib/booking-status';
 
 function json(data: object, status: number, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
@@ -38,13 +39,15 @@ export const GET: APIRoute = async () => {
   try {
     const sql = getDb();
 
-    // status <> 'cancelled' mirrors the partial unique index
+    // The predicate is the partial unique index's, shared rather than mirrored:
+    // an availability query that offers a held slot is a double booking one
+    // click later. See SLOT_HOLD_PREDICATE.
     // (appointments_slot_unique), so a cancelled booking frees its slot.
     const [bookedRows, blackoutRows] = await Promise.all([
       sql`
         SELECT slot_start
         FROM appointments
-        WHERE status <> 'cancelled'
+        WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)}
           AND slot_start >= ${slots.from.toISOString()}
           AND slot_start <  ${slots.to.toISOString()}
       `,

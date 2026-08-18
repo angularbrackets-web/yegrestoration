@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * `/book/confirmed/` — the page a committed booking lands on.
+   * The page a submitted booking lands on — in one of TWO variants (BK-23).
    *
    * It renders from `sessionStorage`, never from the URL, so there is no link
    * anyone can craft that shows a confirmation for a booking that is not
@@ -24,12 +24,34 @@
     EMAILED_LINE,
     HAVE_READY_HEADING,
     HAVE_READY_ITEMS,
+    RECEIVED_EMAILED_LINE,
+    RECEIVED_HEADING,
+    RECEIVED_HOLD_LINE,
+    RECEIVED_LEAD,
+    RECEIVED_NEXT_STEPS,
+    RECEIVED_TIMING_LINE,
     VISIT_LENGTH_LINE,
   } from '../lib/booking-copy';
   import { loadConfirmation, reportBookingConversion } from '../lib/booking-handoff';
   import { SUPPORT_PHONE } from '../lib/booking-form';
 
   const PHONE_HREF = 'tel:+17804793285';
+
+  /**
+   * WHICH OF THE TWO PAGES THIS IS, and it is required rather than defaulted.
+   *
+   * `received` is where the form lands: a request exists, nothing is confirmed,
+   * and no invite has been sent. `confirmed` is where the payment redirect
+   * lands (BK-32).
+   *
+   * No default, deliberately. The two variants differ in whether they tell a
+   * customer they have an appointment, and a defaulted prop means a new caller
+   * silently gets whichever the default happens to be. Getting that wrong in
+   * the `confirmed` direction is precisely the false claim P9 exists to remove.
+   */
+  let { variant }: { variant: 'received' | 'confirmed' } = $props();
+
+  const isReceived = $derived(variant === 'received');
 
   let confirmation = $state<Confirmation | null>(null);
 
@@ -56,12 +78,20 @@
       >
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
       </div>
-      <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">You're booked</h1>
+      <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">
+        {isReceived ? RECEIVED_HEADING : "You're booked"}
+      </h1>
+      {#if isReceived}
+        <p class="text-yeg-text-secondary mb-4">{RECEIVED_LEAD}</p>
+      {/if}
       {#if confirmation.slotLabel}
         <p class="text-lg text-yeg-text">{confirmation.slotLabel}</p>
       {/if}
       {#if confirmation.address}
         <p class="text-yeg-text-secondary">{confirmation.address}</p>
+      {/if}
+      {#if isReceived}
+        <p class="text-sm text-yeg-text-secondary mt-2">{RECEIVED_HOLD_LINE}</p>
       {/if}
       <p class="text-sm text-yeg-text-secondary mt-2">
         {VISIT_LENGTH_LINE}{#if confirmation.id > 0}
@@ -74,9 +104,34 @@
           booking with no email address all render nothing here rather than
           promising a message that will not arrive.
         -->
-        <p class="text-sm text-yeg-text-secondary mt-2">{EMAILED_LINE}</p>
+        <p class="text-sm text-yeg-text-secondary mt-2">
+          {isReceived ? RECEIVED_EMAILED_LINE : EMAILED_LINE}
+        </p>
       {/if}
     </div>
+
+    <!--
+      What happens next, on the received page only. The confirmed page needs no
+      such list: nothing further happens there except the visit.
+
+      This block does the work the old "You're booked" heading was doing badly.
+      It tells the customer where they actually stand, in order, including that
+      the calendar invite arrives AFTER payment rather than now.
+    -->
+    {#if isReceived}
+      <ol class="mt-8 rounded-lg p-5 text-left space-y-3" style="background-color:rgba(0,0,0,0.03)">
+        {#each RECEIVED_NEXT_STEPS as step, i (step)}
+          <li class="flex items-start gap-3 text-sm text-yeg-text-secondary">
+            <span
+              class="shrink-0 w-6 h-6 rounded-full bg-yeg-amber/20 text-yeg-amber-deep font-semibold flex items-center justify-center text-xs"
+              aria-hidden="true">{i + 1}</span
+            >
+            <span>{step}</span>
+          </li>
+        {/each}
+      </ol>
+      <p class="mt-4 text-sm text-yeg-text-secondary text-center">{RECEIVED_TIMING_LINE}</p>
+    {/if}
 
     <div class="mt-8 rounded-lg p-5 text-left" style="background-color:rgba(0,0,0,0.03)">
       <h2 class="font-display font-bold text-lg text-yeg-text mb-3">{HAVE_READY_HEADING}</h2>
@@ -100,7 +155,7 @@
       payload-less visit redirects. Deliberately says nothing about a booking.
     -->
     <p class="text-sm text-yeg-text-secondary py-12 text-center" role="status">
-      Checking your booking…
+      {isReceived ? 'Checking your request…' : 'Checking your booking…'}
     </p>
   {/if}
 </div>

@@ -266,3 +266,98 @@ export const QUOTE_HEADING = 'Your assessment';
 
 /** Says when the money moves. Under prepay BK-36 replaces this wholesale. */
 export const QUOTE_TIMING_NOTE = 'Nothing is charged now.';
+
+// ---------------------------------------------------------------------------
+// The request-received surfaces (BK-23)
+//
+// EVERY LINE HERE IS WRITTEN AGAINST ONE CONSTRAINT: nothing may say, imply, or
+// let a reader infer that the appointment is booked. Not "confirmed", not
+// "scheduled", not "we'll see you then", and no calendar invite — a request has
+// been received and a person will look at it.
+//
+// The time being HELD is true and is worth saying, because the customer's real
+// question while they wait is whether somebody else can take their slot.
+//
+// The old page said "You're booked" and attached an invite. Under prepay that
+// is false at submission, and it is false on the surface a customer is most
+// likely to screenshot and hold us to.
+// ---------------------------------------------------------------------------
+
+export const RECEIVED_HEADING = 'Request received';
+
+export const RECEIVED_LEAD =
+  'Thanks — we have your request. It is not confirmed yet: someone from our office reviews every request before we take it.';
+
+/** What happens next, in order, so the wait has a shape. */
+export const RECEIVED_NEXT_STEPS: readonly string[] = [
+  'We review your request and the photos you sent.',
+  'If we can take it, we email you to approve it, with a secure payment link.',
+  'Your appointment is confirmed once that payment goes through — and we send the calendar invite then.',
+];
+
+export const RECEIVED_HOLD_LINE = 'We are holding this time for you while we review it.';
+
+/**
+ * NO SERVICE-LEVEL PROMISE, and that is a decision rather than an omission.
+ *
+ * The client said "almost right away, max 1 hour" internally (2026-08-16) and
+ * deliberately did not publish it: an operational intention becomes a
+ * commitment the moment it is on a page somebody can screenshot. What this line
+ * does instead is give the customer an action for the case the intention fails,
+ * which is the only part of an SLA that helps them.
+ *
+ * `verify-booking-email.ts` asserts no review-time promise appears anywhere in
+ * the request message, so a well-meaning copy edit cannot reintroduce one.
+ */
+export const RECEIVED_TIMING_LINE =
+  'If you have not heard from us and the appointment is close, call or text us — do not wait.';
+
+export const RECEIVED_EMAILED_LINE = "We've emailed you a copy of this request.";
+
+// ---------------------------------------------------------------------------
+// Approval and decline (BK-23)
+//
+// The approval message is the one that asks for money, so it carries three
+// facts and cannot be allowed to lose any of them: WHAT the amount is, WHEN it
+// is due, and WHAT HAPPENS if it is not paid. A payment request that omits the
+// consequence is the one people leave in the inbox.
+// ---------------------------------------------------------------------------
+
+export const APPROVED_HEADING = 'Your assessment is approved';
+
+export const APPROVED_LEAD =
+  'Good news — we can take your assessment at the time you asked for. To confirm it, all that is left is the payment below.';
+
+/**
+ * What happens if nobody pays.
+ *
+ * Stated plainly and without threat. The slot is genuinely released — that is
+ * the mechanism, not a collection tactic — and saying so is what makes the
+ * deadline mean something to a customer who would otherwise read it as
+ * administrative.
+ */
+export const APPROVED_DEADLINE_NOTE =
+  'If it is not paid by then, we release the time for someone else and you are welcome to book again.';
+
+/** The pay-now variant. Same fact, no clock, because there is no useful window. */
+export const APPROVED_PAY_NOW_NOTE =
+  'Your appointment is close, so please pay as soon as you can — we hold the time until you do, and we will call you if anything changes.';
+
+export const APPROVED_INTERAC_LEAD = 'Prefer an Interac e-Transfer?';
+
+export const DECLINED_HEADING = 'We cannot take this one';
+
+/**
+ * The decline, and it says ONE thing (client, 2026-08-16): we are at capacity.
+ *
+ * No reason menu and no free text. A reason chosen from a list is a reason
+ * somebody has to defend on the phone, and the honest answer for almost every
+ * decline is scheduling. The customer is given a route back in — a different
+ * time, or a call — because a decline that ends the conversation ends it for
+ * every future job too.
+ */
+export const DECLINED_LEAD =
+  "We are sorry — we are at capacity at this time and cannot take your assessment. Nothing has been charged.";
+
+export const DECLINED_REBOOK_LINE =
+  'You are welcome to pick another time, and if the damage is urgent please call or text us — we will do what we can.';

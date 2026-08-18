@@ -296,6 +296,47 @@ export async function sendCustomerConfirmation(
 }
 
 /**
+ * Send ONE customer message that is not a booking confirmation (BK-23).
+ *
+ * The approval, the payment reminder and the decline all have this shape: one
+ * recipient, one message, no office copy, and a lifecycle transition that must
+ * key the idempotency prefix. `sendCustomerConfirmation` could not be reused —
+ * it takes a whole `NotificationPlan`, which would mean building an internal
+ * message for every one of these that nothing ever sends.
+ *
+ * Same contract as the rest of the module: it never throws. It runs after the
+ * status has already changed, and an approval that saved must not be reported
+ * as a failure because a mail server was slow.
+ */
+export async function sendCustomerMessage(
+  bookingId: number,
+  messageType: BookingMessageType,
+  message: Message,
+  deps: NotifyDeps = {},
+): Promise<SendOutcome> {
+  const label = messageType;
+
+  if (mailDisabled()) {
+    console.error(`${DISABLE_FLAG} is set — no ${label} message for booking ${bookingId}.`);
+    return 'skipped';
+  }
+
+  const keyPrefix = notifyIdempotencyPrefix(bookingId, messageType);
+
+  let send = deps.send;
+  if (!send) {
+    const apiKey = readEnv('RESEND_API_KEY');
+    if (!apiKey) {
+      console.error(`RESEND_API_KEY is not configured — the ${label} message was not sent.`);
+      return 'failed';
+    }
+    send = createResendSender(apiKey, keyPrefix);
+  }
+
+  return deliver(send, message, label, bookingId, keyPrefix);
+}
+
+/**
  * Send one calendar invite. The office's copy of what the crew is doing.
  *
  * A separate exported function rather than a `NotificationPlan` wrapped around

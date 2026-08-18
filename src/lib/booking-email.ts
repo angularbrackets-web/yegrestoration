@@ -45,8 +45,22 @@ import {
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
   ASSESSMENT_TIER_NAMES,
+  RECEIVED_HEADING,
+  RECEIVED_HOLD_LINE,
+  RECEIVED_LEAD,
+  RECEIVED_NEXT_STEPS,
+  RECEIVED_TIMING_LINE,
+  APPROVED_DEADLINE_NOTE,
+  APPROVED_HEADING,
+  APPROVED_INTERAC_LEAD,
+  APPROVED_LEAD,
+  APPROVED_PAY_NOW_NOTE,
+  DECLINED_HEADING,
+  DECLINED_LEAD,
+  DECLINED_REBOOK_LINE,
 } from './booking-copy';
 import { assessmentQuote, formatCents, type AssessmentTier } from './booking-pricing';
+import { formatSlot } from './booking-time';
 
 /**
  * A file riding along with a message. Structurally Resend's `Attachment`
@@ -286,10 +300,29 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
   const where = fullAddress(input);
   const reference = input.id > 0 ? `Reference #${input.id}` : null;
 
+  /**
+   * WHETHER THIS MESSAGE MAY CLAIM AN APPOINTMENT EXISTS (BK-23).
+   *
+   * A `request` is what submitting the form produces: the office has not looked
+   * at it and nobody has paid. It gets no "you're booked" heading, no calendar
+   * invite, and no line about one. A `confirmed` message is sent from behind
+   * the payment webhook, where every one of those is true.
+   *
+   * Keyed off `messageType` rather than off a separate flag, so the thing that
+   * decides the idempotency key and the thing that decides the claim cannot
+   * disagree — a message that says "booked" under a `request` key would be both
+   * wrong and undeliverable.
+   */
+  const isRequest = input.messageType === 'request';
+
   const html = [
     WRAP_OPEN,
-    `<h1 style="font-size:22px;margin:0 0 16px;">You're booked, ${escapeHtml(input.name)}</h1>`,
-    `<p style="margin:0 0 16px;">Thanks for booking an assessment with YEG Restoration. Here are the details.</p>`,
+    isRequest
+      ? `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(`${RECEIVED_HEADING}, ${input.name}`)}</h1>`
+      : `<h1 style="font-size:22px;margin:0 0 16px;">You're booked, ${escapeHtml(input.name)}</h1>`,
+    isRequest
+      ? `<p style="margin:0 0 16px;">${escapeHtml(RECEIVED_LEAD)}</p>`
+      : `<p style="margin:0 0 16px;">Thanks for booking an assessment with YEG Restoration. Here are the details.</p>`,
     table(
       [
         rawRow('When', `<strong>${escapeHtml(when)}</strong>`),
@@ -299,6 +332,19 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
       ].filter(Boolean),
     ),
     `<p style="margin:16px 0;">${escapeHtml(VISIT_LENGTH_LINE)}</p>`,
+    // What happens next, request only. The confirmed message has no next step
+    // to describe, and the request message is useless without one — "we have
+    // your request" with no account of what follows is the message that
+    // generates the phone call this flow was meant to avoid.
+    ...(isRequest
+      ? [
+          `<p style="margin:16px 0;">${escapeHtml(RECEIVED_HOLD_LINE)}</p>`,
+          '<ol style="margin:0 0 16px;padding-left:20px;">',
+          ...RECEIVED_NEXT_STEPS.map((step) => `<li style="margin:4px 0;">${escapeHtml(step)}</li>`),
+          '</ol>',
+          `<p style="margin:16px 0;">${escapeHtml(RECEIVED_TIMING_LINE)}</p>`,
+        ]
+      : []),
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(HAVE_READY_HEADING)}</h2>`,
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...HAVE_READY_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
@@ -309,11 +355,11 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // submission, not a per-booking value; the acknowledgment itself is the
     // `terms_acked_at` stamp on the row.
     //
-    // Handoff to BK-23: when the confirmation splits into "we have your
-    // request" (at submission) and "you're booked" (at approval), this section
-    // belongs in the FIRST of the two, because that is the message that
-    // corresponds to the moment the box was ticked. Keeping it in both is
-    // recommended and is BK-23's call.
+    // BK-23 made that split, and kept this section in BOTH messages. The
+    // request message carries it because that is the moment the box was ticked;
+    // the confirmed message carries it because it is the one the customer keeps
+    // after paying, and terms that vanish from the record of a completed
+    // purchase are terms nobody can point at afterwards.
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(FEE_TERMS_HEADING)}</h2>`,
     `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`,
     '<ul style="margin:0 0 16px;padding-left:20px;">',
@@ -327,16 +373,21 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     ...(input.assessmentTier
       ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(`You chose: ${assessmentSummary(input)}`)}</strong></p>`]
       : []),
-    `<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`,
+    // NO INVITE ON A REQUEST. An .ics for an unpaid slot is the "you're booked"
+    // claim in a form the customer's calendar repeats back to them every day
+    // until the appointment — worse than the sentence, because nothing about a
+    // calendar entry says "provisional". The attachment itself is gated
+    // alongside this line; see the `attachments` array below.
+    ...(isRequest ? [] : [`<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`]),
     `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
     WRAP_CLOSE,
   ].join('');
 
   const text = [
-    `You're booked, ${input.name}`,
+    isRequest ? `${RECEIVED_HEADING}, ${input.name}` : `You're booked, ${input.name}`,
     '',
-    'Thanks for booking an assessment with YEG Restoration. Here are the details.',
+    isRequest ? RECEIVED_LEAD : 'Thanks for booking an assessment with YEG Restoration. Here are the details.',
     '',
     `When:      ${when}`,
     `Where:     ${where}`,
@@ -345,6 +396,16 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     '',
     VISIT_LENGTH_LINE,
     '',
+    ...(isRequest
+      ? [
+          RECEIVED_HOLD_LINE,
+          '',
+          ...RECEIVED_NEXT_STEPS.map((step, i) => `  ${i + 1}. ${step}`),
+          '',
+          RECEIVED_TIMING_LINE,
+          '',
+        ]
+      : []),
     `${HAVE_READY_HEADING}:`,
     ...HAVE_READY_ITEMS.map((item) => `  - ${item}`),
     '',
@@ -353,8 +414,7 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
     ...FEE_TERMS_OUTRO.flatMap((line) => ['', line]),
     ...(input.assessmentTier ? ['', `You chose: ${assessmentSummary(input)}`] : []),
-    '',
-    CALENDAR_ATTACHED_LINE,
+    ...(isRequest ? [] : ['', CALENDAR_ATTACHED_LINE]),
     '',
     CANCEL_LINE,
     '',
@@ -368,17 +428,243 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // the time is talking to nobody. Cancellation is phone-in, but people reply
     // to confirmations regardless.
     replyTo: BOOKING_EMAIL_REPLY_TO,
-    subject: headerSafe(`You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`),
+    subject: headerSafe(
+      isRequest
+        ? `${RECEIVED_HEADING} — ${input.slotLabel} (${TIMEZONE_NOTE})`
+        : `You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`,
+    ),
     html,
     text,
-    attachments: [
-      icsAttachment(
-        buildBookingIcs(icsEventOf(input), 'request', input.now, icsCustomer(input.email)),
-        'request',
-        input.id,
-      ),
-    ],
+    // THE INVITE MOVES TO PAYMENT-CONFIRMED (BK-23), and this is the line that
+    // moves it. `'request'` here is the iCalendar METHOD, not the message type
+    // — an unfortunate collision of words, and worth being clear about, because
+    // `isRequest` being true is exactly when this attachment must NOT be built.
+    //
+    // Spreading an empty array rather than passing `attachments: undefined`:
+    // `createResendSender` maps the field with `...(message.attachments ? ...)`,
+    // so an absent key and an empty array behave the same at the SDK boundary,
+    // and the absent key is what the type already means by "no attachments".
+    ...(isRequest
+      ? {}
+      : {
+          attachments: [
+            icsAttachment(
+              buildBookingIcs(icsEventOf(input), 'request', input.now, icsCustomer(input.email)),
+              'request',
+              input.id,
+            ),
+          ],
+        }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Approval and decline (BK-23)
+//
+// Both are customer-only: the office just performed the action, so mailing them
+// about their own click is noise. Both are built here rather than in the route
+// for the reason every other message is — one module owns the copy, the
+// escaping and the PII rules, and `policy_number` / `claim_number` reach none of
+// them.
+// ---------------------------------------------------------------------------
+
+/** What the approval message needs beyond the booking itself. */
+export type ApprovalDetails = {
+  /** The itemised amounts as the office settled them, in cents. */
+  baseCents: number;
+  travelCents: number;
+  gstCents: number;
+  totalCents: number;
+  /** When payment is due, or null when it is due immediately (pay-now). */
+  dueAt: Date | null;
+  /**
+   * The hosted checkout URL, or null when no card payment is configured.
+   *
+   * BK-32 supplies it. Null is not an error state: the Interac route below is a
+   * complete way to pay, confirmed by the client, so a message with no card
+   * link still asks for money in a way the customer can act on. What must never
+   * happen is a message with neither.
+   */
+  paymentUrl: string | null;
+  /** Where an e-Transfer goes, or null if the client has not given one. */
+  interacEmail: string | null;
+};
+
+/**
+ * The approval: what it costs, when it is due, and what happens if it is not
+ * paid.
+ *
+ * Returns null when the booking has no email address. An approval nobody can
+ * receive is not an approval, and the route treats the null as a refusal to
+ * transition rather than as a message it may skip — see `review.ts`.
+ */
+export function approvalMessage(
+  input: BookingNotificationInput,
+  details: ApprovalDetails,
+): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+  const deadlineLabel = details.dueAt
+    ? `${formatSlot(details.dueAt)} (${TIMEZONE_NOTE})`
+    : null;
+
+  // THE MESSAGE MUST OFFER AT LEAST ONE WAY TO PAY. Asserted here rather than
+  // left to the caller, because "approved, pay us, no idea how" is a message
+  // that generates a phone call for every single booking it goes out on.
+  const ways: string[] = [];
+  if (details.paymentUrl) ways.push('card');
+  if (details.interacEmail) ways.push('interac');
+
+  const amountRows = [
+    row('Assessment', formatCents(details.baseCents)),
+    // A zero travel fee renders NO row rather than "$0.00". A line item for
+    // nothing invites the question of what it might have been.
+    details.travelCents > 0 ? row('Travel', formatCents(details.travelCents)) : '',
+    row('GST', formatCents(details.gstCents)),
+    rawRow('Total', `<strong>${escapeHtml(formatCents(details.totalCents))}</strong>`),
+  ].filter(Boolean);
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(APPROVED_HEADING)}, ${escapeHtml(input.name)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(APPROVED_LEAD)}</p>`,
+    table([
+      rawRow('When', `<strong>${escapeHtml(when)}</strong>`),
+      row('Where', fullAddress(input)),
+      row('Service', input.serviceLabel),
+      input.id > 0 ? row('Reference', `#${input.id}`) : '',
+    ].filter(Boolean)),
+    `<h2 style="font-size:16px;margin:24px 0 8px;">Amount</h2>`,
+    table(amountRows),
+    ...(deadlineLabel
+      ? [
+          `<p style="margin:16px 0;"><strong>${escapeHtml(`Please pay by ${deadlineLabel}.`)}</strong></p>`,
+          `<p style="margin:0 0 16px;">${escapeHtml(APPROVED_DEADLINE_NOTE)}</p>`,
+        ]
+      : [`<p style="margin:16px 0;">${escapeHtml(APPROVED_PAY_NOW_NOTE)}</p>`]),
+    ...(details.paymentUrl
+      ? [
+          `<p style="margin:24px 0;"><a href="${escapeHtml(details.paymentUrl)}" style="background:#111;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Pay ${escapeHtml(formatCents(details.totalCents))}</a></p>`,
+        ]
+      : []),
+    ...(details.interacEmail
+      ? [
+          `<p style="margin:16px 0;">${escapeHtml(APPROVED_INTERAC_LEAD)} ${escapeHtml(
+            `Send ${formatCents(details.totalCents)} to ${details.interacEmail} and put your booking number #${input.id} in the message so we can match it.`,
+          )}</p>`,
+        ]
+      : []),
+    `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    `${APPROVED_HEADING}, ${input.name}`,
+    '',
+    APPROVED_LEAD,
+    '',
+    `When:      ${when}`,
+    `Where:     ${fullAddress(input)}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    'Amount',
+    `  Assessment  ${formatCents(details.baseCents)}`,
+    ...(details.travelCents > 0 ? [`  Travel      ${formatCents(details.travelCents)}`] : []),
+    `  GST         ${formatCents(details.gstCents)}`,
+    `  Total       ${formatCents(details.totalCents)}`,
+    '',
+    ...(deadlineLabel
+      ? [`Please pay by ${deadlineLabel}.`, '', APPROVED_DEADLINE_NOTE]
+      : [APPROVED_PAY_NOW_NOTE]),
+    ...(details.paymentUrl ? ['', `Pay here: ${details.paymentUrl}`] : []),
+    ...(details.interacEmail
+      ? [
+          '',
+          `${APPROVED_INTERAC_LEAD} Send ${formatCents(details.totalCents)} to ${details.interacEmail} and put your booking number #${input.id} in the message so we can match it.`,
+        ]
+      : []),
+    '',
+    CANCEL_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    from: BOOKING_EMAIL_FROM,
+    to: input.email,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(
+      `${APPROVED_HEADING} — ${formatCents(details.totalCents)} to confirm ${input.slotLabel}`,
+    ),
+    html,
+    text,
+    // NO CALENDAR INVITE. Approval is not confirmation; the invite goes out
+    // behind the payment, from `messageType: 'confirmed'`.
+  };
+}
+
+/**
+ * The decline. One reason, no menu, and a route back in.
+ *
+ * Returns null when there is no email address — the office declines those by
+ * phone, which is how they were taken.
+ */
+export function declineMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(DECLINED_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(DECLINED_LEAD)}</p>`,
+    table([
+      rawRow('Requested', `<strong>${escapeHtml(when)}</strong>`),
+      row('Service', input.serviceLabel),
+      input.id > 0 ? row('Reference', `#${input.id}`) : '',
+    ].filter(Boolean)),
+    `<p style="margin:16px 0;">${escapeHtml(DECLINED_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    DECLINED_HEADING,
+    '',
+    DECLINED_LEAD,
+    '',
+    `Requested: ${when}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    DECLINED_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    from: BOOKING_EMAIL_FROM,
+    to: input.email,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(`About your assessment request — ${input.slotLabel}`),
+    html,
+    text,
+  };
+}
+
+/**
+ * Whether an approval message can be sent at all.
+ *
+ * Exported so the route can refuse the TRANSITION rather than perform it and
+ * then discover the message cannot go. An approved booking whose customer was
+ * never told is worse than a request left pending: the slot is held, the clock
+ * is running, and nobody is coming.
+ */
+export function canOfferPayment(details: Pick<ApprovalDetails, 'paymentUrl' | 'interacEmail'>): boolean {
+  return details.paymentUrl !== null || details.interacEmail !== null;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +723,7 @@ function assessmentSummary(input: BookingNotificationInput): string {
 
 function internalNotification(input: BookingNotificationInput): Message {
   const insurance = input.paymentRoute === 'insurance';
+  const isRequest = input.messageType === 'request';
   const dash = '—';
   const or = (value: string | null) => value ?? dash;
 
@@ -524,17 +811,34 @@ function internalNotification(input: BookingNotificationInput): Message {
     // makes `headerSafe` load-bearing rather than decorative. The customer's own
     // subject is built entirely from constants and server-formatted values.
     subject: headerSafe(
-      `New booking #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`,
+      isRequest
+        ? `NEW REQUEST #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`
+        : `New booking #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`,
     ),
     html,
     text,
-    attachments: [
-      icsAttachment(
-        buildBookingIcs(icsEventOf(input), 'request', input.now, ICS_OFFICE),
-        'request',
-        input.id,
-      ),
-    ],
+    // THE OFFICE INVITE MOVES TOO (P9, 2026-08-16), not only the customer's.
+    //
+    // If it stayed at request time the office calendar would fill with slots
+    // that may be declined or never paid — and there is no CANCEL to clear them
+    // on either path, because a row that reaches `declined` from
+    // `pending_review` never had an invite to cancel. The office already sees
+    // pending requests in the admin queue and in this very email; the calendar
+    // should carry only real visits.
+    //
+    // This was flagged as a behaviour change from what P7 implied rather than
+    // assumed silently — see prepay-flow-spec.md section 6, item 7.
+    ...(isRequest
+      ? {}
+      : {
+          attachments: [
+            icsAttachment(
+              buildBookingIcs(icsEventOf(input), 'request', input.now, ICS_OFFICE),
+              'request',
+              input.id,
+            ),
+          ],
+        }),
   };
 }
 

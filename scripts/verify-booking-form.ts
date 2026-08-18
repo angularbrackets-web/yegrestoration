@@ -9,7 +9,6 @@ import {
   MAX_FILES_PER_BOOKING,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
-  MIN_NOTICE_HOURS,
   SLOT_START_TIMES,
 } from '../src/lib/booking-config';
 import {
@@ -693,13 +692,17 @@ console.log('\nQuery-param prefill trusts nothing (BK-10 AC4)');
   const future = addDays(today, 10);
   const gridToday = slotStartsForDate(today);
   const afterHours = new Date(gridToday[SLOT_START_TIMES.length - 1].getTime() + 60 * 60 * 1000);
-  const morning = new Date(gridToday[0].getTime() - 12 * 60 * 60 * 1000);
-  // A clock whose cutoff lands EXACTLY on the second slot, derived rather than
-  // written: the first slot is then past the cutoff and the rest are not, which
-  // is the only shape that separates `every` from `some`. Without this case an
-  // `every` → `some` edit stays green, and `some` would claim "Call us" on a
-  // day that still has bookable time on it and is empty because it is booked.
-  const midday = new Date(gridToday[1].getTime() - MIN_NOTICE_HOURS * 60 * 60 * 1000);
+  // Early on the same day. Under the old rolling-hours rule this was the
+  // "still bookable, therefore genuinely Full" case; under BK-23's calendar
+  // rule it is `elapsed` like every other hour of today, and that difference is
+  // exactly what the assertions below pin.
+  // 07:30 local — four hours before the first slot, and still TODAY. (Twelve
+  // hours before 11:30 would be 23:30 the previous evening, which is a
+  // different day and would have tested nothing about today's chip.)
+  const morning = new Date(gridToday[0].getTime() - 4 * 60 * 60 * 1000);
+  // Midday on the same day. Kept as a second same-day clock so "today is
+  // elapsed at every hour" is asserted rather than inferred from one sample.
+  const midday = new Date(gridToday[1].getTime() - 60 * 60 * 1000);
 
   check(
     dayChipKind(future, closedWeekday, 0, afterHours) === 'closed',
@@ -729,15 +732,23 @@ console.log('\nQuery-param prefill trusts nothing (BK-10 AC4)');
     dayChipKind(today, openWeekday, 0, afterHours) === 'elapsed',
     'a day whose every slot is past the notice cutoff is not Full',
   );
-  // ...and the boundary in the other direction: the same day, early enough that
-  // slots remain inside the window, is genuinely taken.
+  // BK-23: today is elapsed at EVERY hour, because next-day-earliest means it
+  // was never bookable. Both same-day clocks agree, which is the property that
+  // replaced the old partly-elapsed case.
   check(
-    dayChipKind(today, openWeekday, 0, morning) === 'full',
-    'an empty day with slots still inside the notice window is Full',
+    dayChipKind(today, openWeekday, 0, morning) === 'elapsed',
+    'today reads Elapsed first thing in the morning — it is not bookable at all',
   );
   check(
-    dayChipKind(today, openWeekday, 0, midday) === 'full',
-    'a PARTLY elapsed day that is empty is Full — some of it was still bookable',
+    dayChipKind(today, openWeekday, 0, midday) === 'elapsed',
+    'and at midday, for the same reason',
+  );
+  // The "genuinely taken" case moves to the first bookable date, which is where
+  // Full can now honestly appear. Without this the elapsed branch could swallow
+  // everything and nothing would notice.
+  check(
+    dayChipKind(addDays(today, 1), openWeekday, 0, morning) === 'full',
+    'an empty day that IS bookable reads Full, not Elapsed',
   );
   // Policy outranks the clock: an elapsed Friday is still a closed Friday.
   check(

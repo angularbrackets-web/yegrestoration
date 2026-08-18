@@ -46,17 +46,19 @@ import {
   type ParseOptions,
 } from './booking-payload';
 import { isAssessmentTier, type AssessmentTier } from './booking-pricing';
+import { APPOINTMENT_STATUSES, isAppointmentStatus } from './booking-status';
 import type { AppointmentStatus, PipelineStage } from './db';
 
 export type { FieldError, ParseOptions };
 
 /** The closed sets the update form validates against. Mirrors the DB CHECKs. */
-export const APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
-  'booked',
-  'completed',
-  'cancelled',
-  'no_show',
-];
+/**
+ * Re-exported, not redeclared (BK-23). This list is what the admin dropdown
+ * renders AND what it validates against, and keeping a second copy here is how
+ * the enum, the CHECK and the dropdown drifted into three lists that had to be
+ * moved by hand together.
+ */
+export { APPOINTMENT_STATUSES } from './booking-status';
 
 export const PIPELINE_STAGES: readonly PipelineStage[] = [
   'assessment',
@@ -285,6 +287,13 @@ export function parseAdminEntry(
       insurer_name: raw.insurer_name,
       policy_number: raw.policy_number,
       claim_number: raw.claim_number,
+      // BK-31. Optional on this door — the office may not know the tier while
+      // typing — but it has to be LISTED, or the select on the entry form posts
+      // into a whitelist that drops it and the row saves with no tier at all.
+      // That is not a hypothetical: it is how this shipped for one red pass,
+      // and the symptom was the review panel refusing to approve a booking the
+      // office had already chosen an assessment for.
+      assessment_tier: raw.assessment_tier,
       slot_start: (slotStart ?? PLACEHOLDER_SLOT).toISOString(),
       sms_consent: checked(raw.sms_consent),
     },
@@ -373,8 +382,8 @@ export function parseAppointmentUpdate(input: unknown): UpdateParseResult {
 
   const status = str(raw.status);
   if (status !== null) {
-    if ((APPOINTMENT_STATUSES as readonly string[]).includes(status)) {
-      update.status = status as AppointmentStatus;
+    if (isAppointmentStatus(status)) {
+      update.status = status;
     } else {
       errors.push({ field: 'status', message: 'Choose one of the listed statuses.' });
     }

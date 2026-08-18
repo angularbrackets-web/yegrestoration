@@ -14,6 +14,7 @@
 // The guard order below is load-bearing and is the same one BK-02 established:
 // refuse without DATABASE_URL_DEV, assert it differs from production, SWAP
 // DATABASE_URL, and only then start anything that reaches a database.
+import { SLOT_HOLD_PREDICATE } from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { spawn } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
@@ -498,7 +499,7 @@ try {
   // production plus BK-02's hammer rows, so it is nowhere near empty.
   const rows = (await sql`
     SELECT id, sms_consent_at, policy_number FROM appointments
-    WHERE slot_start = ${slot.start} AND status <> 'cancelled'
+    WHERE slot_start = ${slot.start} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { id: number; sms_consent_at: Date | null; policy_number: string | null }[];
   check(rows.length === 1, `exactly one appointment must exist for that slot (got ${rows.length})`);
   check(rows[0]?.id === createdId, "the row's id must be the one the endpoint returned");
