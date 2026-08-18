@@ -1,9 +1,15 @@
 # Prepay flow — audit and spec (client direction, 2026-08-16)
 
-**Status: draft spec, nothing built.** This document is the audit-and-spec
-output for the client-confirmed flow change. It supersedes P7 and P8 decisions
-where they conflict; every conflict is named in §6 rather than silently
-resolved. Fold into `ROADMAP.md` + ticket files after review.
+**Status: audit-and-spec, folded into the ROADMAP and the tickets.** This
+document is the audit output for the client-confirmed flow change. It supersedes
+P7 and P8 decisions where they conflict; every conflict is named in §6 rather
+than silently resolved.
+
+**Read §8 first.** On 2026-08-18 a second, independently-written spec arrived
+from outside the repo and was merged in, together with a batch of new client
+answers. §8 records what changed and what in the sections below is now stale.
+**Where this document and `ROADMAP.md` §P9 disagree, the ROADMAP wins** — it
+carries the later decisions.
 
 **The target flow:**
 
@@ -844,3 +850,114 @@ Two notes on the wording:
    Edmonton-metro default that the client should confirm or correct.
 9. **Does the office want the calendar invite for pending requests?** (§6
    item 7.) Recommendation is no; it is their calendar.
+
+---
+
+## 8. External-spec merge and 2026-08-18 client answers
+
+On 2026-08-18 an independently-written spec (`deploy-2-prepay-spec.md`, authored
+outside the repo) was dropped in, presenting itself as authoritative for
+Deploy 2. It was audited against the codebase before any of it was adopted.
+
+**Outcome: it is an independent document, merged into P9, and P9 wins every
+conflict** (user instruction, 2026-08-18). It is not kept in the repo — keeping
+a superseded "authoritative" spec beside the real one is precisely the failure
+§6 item 4 already records against BK-27's stale FINAL block. What it contributed
+and what it got wrong is recorded here instead, which is the whole of its
+remaining value.
+
+### 8.1 What it contributed — genuinely new, now in the tickets
+
+| Item | Where it landed |
+| --- | --- |
+| **Interac e-Transfer as a payment path** — approval email offers it, admin marks it paid, same transition | BK-32, as a second caller of `markPaid()` |
+| **The refund baseline** — full refund 24h+ before, none within 24h | BK-33 constants, BK-36 copy; answers open question #4 |
+
+Nothing else in it was new. Its state machine, its Stripe design, its webhook
+idempotency layering and its cron expiry were all already specified here in
+§3–§4 and in BK-32, in more detail and with the 2026-08-16 client answers it did
+not have.
+
+### 8.2 What it got wrong about this codebase
+
+Each verified against the code on 2026-08-18. These are corrections applied to
+it, not decisions taken from it.
+
+1. **"Minimum notice is already next-day earliest — verify, don't rebuild."**
+   False: `MIN_NOTICE_HOURS = 4`, and same-day web booking works today. Its own
+   `slot − 4h` payment deadline is uncomputable under a 4-hour notice rule, so
+   the change it listed as *out of scope* is a prerequisite for its own design.
+2. **"The client clicks Yes in an email and that creates the calendar event."**
+   No such flow exists anywhere. A booking auto-confirms at commit and sends two
+   ICS-bearing emails. There is no approval endpoint to repoint; approve/decline
+   is built from nothing (BK-23).
+3. **"Google Calendar integration — service account or OAuth, a calendar id."**
+   None. Calendar events are `.ics` attachments on emails (`booking-ics.ts`).
+   Consequences its §4 ordering assumes away: confirmation is **one send**
+   carrying a `REQUEST` ics, not "create event, then send email"; cancellation
+   needs a `CANCEL` ics under the same UID with a **byte-identical
+   `ORGANIZER`**; and decline/expiry must never have sent a `REQUEST` in the
+   first place, which is exactly why §1.4 moves both invites to
+   payment-confirmed.
+4. **"Pricing is `service_type → { amount_cents, label, bookable_online }`."**
+   Prices are **assessment tiers**, orthogonal to service, and no customer can
+   choose one yet. Its instruction to flag a mould *service* price had no
+   target. Superseded anyway by the 2026-08-18 answer below.
+5. **"Admin manual booking respects blackout dates."** It bypasses blackouts,
+   Fridays, the horizon and the notice rule — deliberately, documented at
+   `api/admin/appointments/create.ts:34-38`. **Kept as-is** (user, 2026-08-18):
+   documented behaviour beats an outside assumption.
+
+It also did not mention the Resend idempotency prefix (§1.5) at all, which would
+have silently eaten four of the five emails its own §6 specifies.
+
+### 8.3 New client answers, 2026-08-18 (WhatsApp)
+
+Full text in `ROADMAP.md` §P9, "Amendments — client answers 2026-08-18". In
+brief, and with what each supersedes in the sections above:
+
+- **Minimum notice: next-day earliest**, not the 24 rolling hours §2 of this
+  document recommends. §2's *reasoning* stands — the 4-hour floor makes the
+  deadline uncomputable — but its **value is superseded**. The two rules differ:
+  next-day-earliest allows a Wednesday 11:30 slot booked Tuesday at 15:00, which
+  24h notice would refuse. The residual tight window is absorbed by the pay-now
+  branch (`PAY_NOW_THRESHOLD_HOURS = 8`), not by a new mechanism.
+- **Mould tier prices** — $385 / $645 / $1,185 + GST against the standard
+  $399 / $699 / $1,199. **Supersedes BK-31's flat `ASSESSMENT_TIERS` map** in
+  §3: the table is keyed `(tier, service)` with a default row per tier and one
+  mould override map.
+- **After-hours multiplier 1.5x on weekend slots**, shown on the form before the
+  customer sends the request. New; nothing above anticipated it. Stat holidays
+  deferred out of v1.
+- **Travel fee $1.15/km round trip beyond 30 km** — an admin-side *suggestion*
+  at review time, never auto-charged, and shipped without a computed distance
+  because no distance API exists here and the client said not to block on one.
+- **Admin-adjustable amount at approval** — two fields (base, travel), GST and
+  total computed, so the approval email can itemize. **This is the one place a
+  price may legitimately differ from the table**, and it is authenticated,
+  server-side, after the request exists. The public payload still carries a tier
+  key and never an amount.
+- **All three tiers stay bookable online**; tier 3 must disclose that lab
+  results take 3-5 business days.
+- **GST registration number: still pending.** Unchanged from §7 item 7.
+
+### 8.4 What in this document is now stale
+
+- **§2's "raise web minimum notice to 24h"** — right diagnosis, superseded
+  value. Read §8.3.
+- **§3, BK-31's `ASSESSMENT_TIERS` block** — the flat per-tier map is replaced
+  by the `(tier, service)` table with the mould override.
+- **§3, BK-32's column table** — `payment_method` is now
+  `stripe|interac|onsite|none`, and the itemization columns (`travel_fee_cents`,
+  `gst_cents`, `total_amount_cents`, `needs_attention`) were added.
+- **§3, BK-33's policy placeholders** — answered; `REFUND_NO_SHOW` was dropped
+  rather than answered, because a no-show falls inside the 24-hour rule and a
+  separate constant would invent a policy.
+- **§5's `[PLACEHOLDER]` refund lines** — filled. The rest of §5's draft copy
+  stands, plus the three additions BK-36 now carries: the lab-result turnaround,
+  the weekend surcharge, and the sentence that keeps the standard figures honest
+  for a mould customer seeing a different number beside the button.
+- **§7 item 1 (refund values)** and **§6 item 9's "non-refundable" concern** —
+  both closed by the 24-hour answer.
+- **§1.5's idempotency fix** is now **BK-43**, its own ticket, shipping before
+  BK-31 rather than as BK-23's Task 0.
