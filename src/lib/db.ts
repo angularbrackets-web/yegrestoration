@@ -107,6 +107,56 @@ export type Appointment = {
   internal_notified_at: Date | null;
   admin_notes: string | null;
   cancelled_at: Date | null;
+
+  // ── The review lifecycle's own columns (BK-23, migration 008) ────────────
+  //
+  // These were added to the TABLE by migration 008 and read by the admin
+  // detail page from the day it shipped, but never declared here — so
+  // `astro check` had eight errors against `[id].astro` and the ticket's gate
+  // table recorded "typecheck: pass". `npm run build` cannot catch it: Vite
+  // strips types without checking them, so the gate that would have failed is
+  // the only one that was misread. Same family as the ROADMAP's
+  // `verify:booking:admin:db` trap — a gate reported green while red.
+
+  /** Stamped by the approve transition. NULL for anything never approved. */
+  approved_at: Date | null;
+  /** Stamped by the decline transition and by the stale-request expiry sweep. */
+  declined_at: Date | null;
+  /** For BK-25's alert timers. Nothing writes it yet. */
+  escalated_at: Date | null;
+  /** For BK-23 Task 6's unseen-files badge. Nothing writes it yet. */
+  files_reviewed_at: Date | null;
+
+  // The amounts as the office SETTLED them at approval — a snapshot, never
+  // recomputed. Prices change under live rows, and the figure the approval
+  // email quoted is the figure the receipt has to match. All NULL until the row
+  // is approved; `travel_fee_cents` is the exception, `NOT NULL DEFAULT 0`,
+  // because a travel fee is never computed and never auto-charged.
+  assessment_amount_cents: number | null;
+  travel_fee_cents: number;
+  gst_cents: number | null;
+  total_amount_cents: number | null;
+
+  /**
+   * When payment is due, or NULL on the PAY-NOW branch.
+   *
+   * NULL is an answer, not a missing value, and the expiry cron's predicate
+   * depends on it being one — see `isPaymentOverdue` and
+   * `api/cron/expire-payments.ts`. Never COALESCE it to a date.
+   */
+  payment_due_at: Date | null;
+  /**
+   * `not_required` is correct and permanent ONLY for rows predating migration
+   * 008. Everything since starts `pending` at approval.
+   */
+  payment_status:
+    | 'not_required'
+    | 'pending'
+    | 'paid'
+    | 'refunded'
+    | 'partially_refunded'
+    | 'failed';
+
   created_at: Date;
   updated_at: Date;
 };

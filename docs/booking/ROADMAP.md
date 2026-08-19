@@ -79,6 +79,31 @@ request did not commit, which means it has to know the outcome, which is a
 rework of every call site. Not worth doing until the next ticket needs slots.
 
 
+- **`npm run typecheck` was red from the day BK-23 shipped until BK-32 opened,
+  and BK-23's gate table recorded it as "pass — 0 errors" (found 2026-08-19).**
+  Migration 008 added ten columns to `appointments`, and
+  `admin/appointments/[id].astro` reads five of them — but `Appointment` in
+  `src/lib/db.ts` was never widened, and `adminAppointmentPath` was used at
+  `:961` without being imported. Eight `astro check` errors, all in one file,
+  all present at `444135a`.
+
+  **The reason it was reported green is the interesting half.** `npm run build`
+  passes with all eight: Vite strips TypeScript without checking it, so the
+  build gate is structurally incapable of failing on a type error. Two gates ran
+  and only one of them could see this, and the one that could was the one whose
+  output was mis-copied. **A build is not a typecheck, and "gates green" has to
+  name which gate.**
+
+  It is also the BK-35 lesson one column-family later, from the other end: that
+  entry says a ticket which changes what a column STORES must grep for
+  assertions on it. This says a ticket which ADDS a column must widen the row
+  type in the same commit — the migration and the TypeScript record of the
+  schema are one change, and nothing in the process pairs them. Severity:
+  **medium** — a permanently red gate stops being read, and the next real type
+  error hides behind eight known ones. Fixed in BK-32's opening fixup
+  (`Appointment` widened with 008's columns and their reasoning, missing import
+  restored); BK-32's own migration-010 columns land on the same type with the
+  rest of that ticket.
 - **A GSAP `from()` tween cannot reveal an element that has a CSS transition on
   the property being tweened.** The tween sets the start state, then re-reads the
   element to learn its destination; on a transitioning element that read lands
