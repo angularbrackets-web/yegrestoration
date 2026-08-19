@@ -514,6 +514,71 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
     'and the checkbox is still bound to the field the server enforces',
   );
 
+  // BK-31, and the same gate for the same reason one step later.
+  //
+  // The tier picker went in with NO assertion anywhere: a review deleted the
+  // whole fieldset and the quote block and typecheck plus four verify scripts
+  // stayed green. That failure is worse than the terms-box one above, because
+  // the server REQUIRES the tier — a public booking with the control missing
+  // 422s with `field: assessment_tier`, `FIELD_STEPS` routes the visitor to
+  // step 3, and step 3 no longer contains anything that can set it. The funnel
+  // is 100% dead with every gate passing.
+  //
+  // These are presence-and-order pins, deliberately not a recomputation of the
+  // price: an assertion that calls `assessmentQuote` to check a number
+  // `assessmentQuote` produced moves both sides together and cannot go red.
+  // What is pinned instead is that the island's figures COME FROM that function
+  // and from nowhere else, which is the property a wrong number would break.
+  for (const constant of [
+    'ASSESSMENT_TIER_LEGEND',
+    'ASSESSMENT_TIERS',
+    'ASSESSMENT_TIER_NAMES',
+    'QUOTE_HEADING',
+    'AFTER_HOURS_NOTE',
+  ]) {
+    check(island.includes(constant), `the booking island renders ${constant}`);
+  }
+  check(
+    island.includes('values.assessmentTier'),
+    'the tier radios are bound to the field the server enforces',
+  );
+  const tierAt = island.indexOf('ASSESSMENT_TIER_LEGEND');
+  check(
+    tierAt > 0 && tierAt > outroAt && ackAt > tierAt,
+    'the tier picker renders inside the terms box and ABOVE the acknowledgment label, which is what "the terms above" claims of it',
+  );
+
+  // AC10 — the displayed figure is `assessmentQuote`'s, not a second
+  // calculation. Every rendered amount goes through `formatCents` over a field
+  // of a quote object; a hand-rolled multiply or a hard-coded price in the
+  // island would be a number that can disagree with the charge.
+  check(
+    island.includes('formatCents(quote.totalCents)') &&
+      island.includes('formatCents(quote.gstCents)') &&
+      island.includes('formatCents(tierQuotes[tier].baseCents)'),
+    'the island prints its amounts from quote fields through formatCents, never from its own arithmetic',
+  );
+  check(
+    !/\*\s*3\s*\/\s*2|\*\s*1\.5|GST_RATE_PERCENT/.test(island),
+    'and the island contains no price arithmetic of its own — the multiplier and the GST rate live in booking-pricing.ts',
+  );
+
+  // AC11 — a weekend price must be EXPLAINED where it is shown. The radio
+  // prices are multiplied before any tier is selected, so the note has to be
+  // gated on the same value they are; gating it on `quote` (which needs a tier)
+  // showed three inflated figures against a terms box quoting the standard ones
+  // with nothing on the page saying why.
+  const noteAt = island.indexOf('AFTER_HOURS_NOTE');
+  const radiosAt = island.indexOf('bind:group={values.assessmentTier}');
+  check(
+    /\{#if tierQuotes\?\.\[ASSESSMENT_TIERS\[0\]\]\.afterHours\}/.test(island),
+    'the weekend note is gated on the same tierQuotes the radio prices are computed from, so it cannot render later than the number it explains',
+  );
+  check(
+    noteAt > 0 && radiosAt > noteAt,
+    'and it renders ABOVE the radio list, where the comparison actually happens',
+  );
+
   // NOT a check on `contact.astro`. The first version asserted that file
   // contains no `FEE_TERMS` — which it cannot, since all it renders is
   // `<ContactSection showForm={true} />`; the string could only appear there by

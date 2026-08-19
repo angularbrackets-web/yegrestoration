@@ -1044,6 +1044,20 @@
             -->
             <fieldset class="mt-4">
               <legend class="font-semibold text-yeg-text mb-2">{ASSESSMENT_TIER_LEGEND}</legend>
+              <!--
+                The weekend note belongs HERE, not beside the total, because
+                the radio prices are already multiplied before any tier is
+                picked. Gated on the same `tierQuotes` the prices come from,
+                so the explanation and the higher number appear together by
+                construction: a Saturday visitor comparing three inflated
+                figures against a terms box quoting the standard ones sees why
+                at the moment of comparison, not after committing to a radio.
+                Any tier answers `afterHours` — it is a property of the slot,
+                not of the tier — so the first one is read arbitrarily.
+              -->
+              {#if tierQuotes?.[ASSESSMENT_TIERS[0]].afterHours}
+                <p class="text-yeg-text-secondary mb-2">{AFTER_HOURS_NOTE}</p>
+              {/if}
               <div class="space-y-2">
                 {#each ASSESSMENT_TIERS as tier}
                   <label
@@ -1092,9 +1106,6 @@
             {#if quote}
               <div class="mt-4 pt-3" style="border-top:1px solid rgba(0,0,0,0.08)">
                 <p class="font-semibold text-yeg-text">{QUOTE_HEADING}</p>
-                {#if quote.afterHours}
-                  <p class="text-yeg-text-secondary mt-1">{AFTER_HOURS_NOTE}</p>
-                {/if}
                 <dl class="mt-2 space-y-1">
                   <div class="flex justify-between gap-4">
                     <dt class="text-yeg-text-secondary">Assessment</dt>

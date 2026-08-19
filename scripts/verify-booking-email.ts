@@ -882,6 +882,73 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nThe assessment tier reaches both bodies (BK-31 AC5)');
+// ---------------------------------------------------------------------------
+// The tier line is what a customer points at in a dispute and what BK-32
+// charges from, and nothing asserted it: `assessmentSummary` could have named
+// the wrong tier, dropped the weekend suffix or vanished from both templates
+// with every gate green.
+//
+// The figures are SPELLED OUT rather than recomputed with `assessmentQuote`.
+// An expectation built by the function under test moves with it — the repo has
+// six recorded instances of that family, and this is exactly where a seventh
+// would go.
+{
+  // INSURANCE is standard/water on a Tuesday: $399.00 + 5% = $418.95.
+  const plan = planBookingNotifications(INSURANCE);
+  for (const [who, body] of [
+    ['customer', plan.customer?.html ?? ''],
+    ['customer text', plan.customer?.text ?? ''],
+    ['office', plan.internal.html],
+  ] as const) {
+    check(
+      body.includes('On-site assessment'),
+      `the ${who} body names the tier`,
+    );
+    check(body.includes('$399.00'), `the ${who} body states the base $399.00`);
+    check(body.includes('$418.95'), `the ${who} body states the $418.95 total`);
+    check(
+      !body.includes('weekend rate'),
+      `the ${who} body does NOT claim a weekend rate for a Tuesday slot`,
+    );
+  }
+
+  // A weekend mould booking is the case every hand-written figure gets wrong:
+  // the override ($385.00) and the 1.5x both apply. 38500 * 3 / 2 = 57750,
+  // + 5% = 60638 (rounded once, at the end).
+  const weekendMould = planBookingNotifications({
+    ...INSURANCE,
+    service: 'mold',
+    // 2026-08-15 is a Saturday in Edmonton. Asserted as a local-calendar fact
+    // by verify:booking:pricing; used here only to reach the branch.
+    slotStart: new Date('2026-08-15T19:30:00.000Z'),
+  });
+  const mouldBody = weekendMould.customer?.html ?? '';
+  check(mouldBody.includes('$577.50'), 'a weekend mould booking states the multiplied base $577.50');
+  check(mouldBody.includes('$606.38'), 'and the $606.38 total');
+  check(
+    mouldBody.includes('weekend rate'),
+    'and says WHY it is higher — an unexplained 1.5x reads as an error or as sharp practice',
+  );
+  check(
+    !mouldBody.includes('$399.00'),
+    'and does not also carry the standard figure it replaced',
+  );
+
+  // The phone-booking fallback. A NULL tier is permanent for admin entries, so
+  // the line must degrade to prose rather than to "undefined" or a $0 total.
+  const noTier = planBookingNotifications({ ...INSURANCE, assessmentTier: null });
+  check(
+    noTier.internal.html.includes('Not chosen'),
+    'a NULL tier renders as "Not chosen" on the office copy, not as a price',
+  );
+  check(
+    !/undefined|NaN|\$0\.00/.test(noTier.internal.html),
+    'and never as undefined, NaN or $0.00',
+  );
+}
+
+// ---------------------------------------------------------------------------
 if (failures > 0) {
   console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed\n`);
   process.exit(1);

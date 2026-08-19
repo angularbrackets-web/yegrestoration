@@ -62,15 +62,27 @@ console.log('\nDefault prices agree with the customer-facing copy');
     sketch: '$1,199',
   };
 
+  // The copy list and the tier list are zipped by POSITION, so a fourth bullet
+  // added to the terms would leave one tier's figure pinned by nothing while
+  // every assertion below still passed.
+  check(
+    FEE_TERMS_ITEMS.length === ASSESSMENT_TIERS.length,
+    `FEE_TERMS_ITEMS has one bullet per tier (${FEE_TERMS_ITEMS.length} vs ${ASSESSMENT_TIERS.length}) — the pin below zips them by position`,
+  );
+
   ASSESSMENT_TIERS.forEach((tier, i) => {
     const copy = FEE_TERMS_ITEMS[i];
     check(
       copy.includes(expected[tier]),
       `FEE_TERMS_ITEMS[${i}] still states ${expected[tier]} for the ${tier} tier`,
     );
+    // EXACT, not `startsWith`. `formatCents(39990)` is "$399.90", and
+    // "$399.90".startsWith("$399") is true — so the one assertion whose entire
+    // job is price drift passed while the table charged 90 cents more than the
+    // copy states. The cents are the part a typo lands in.
     check(
-      formatCents(tierDefaultCents(tier)).startsWith(expected[tier]),
-      `the ${tier} default (${formatCents(tierDefaultCents(tier))}) matches the copy's ${expected[tier]}`,
+      formatCents(tierDefaultCents(tier)) === `${expected[tier]}.00`,
+      `the ${tier} default (${formatCents(tierDefaultCents(tier))}) matches the copy's ${expected[tier]} to the cent`,
     );
     check(copy.includes('+ GST'), `FEE_TERMS_ITEMS[${i}] still says "+ GST" — the figures are ex-tax`);
   });
