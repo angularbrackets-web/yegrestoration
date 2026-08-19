@@ -995,14 +995,21 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
   are exempt from the whole gate.
 - **Payment deadline** = `min(approved_at + 12h, slot_start − 4h)`.
 - **Timers, all three** — auto-decline stops being slot−24h and becomes
-  submission- and escalation-relative:
-  | Trigger | Action |
-  | --- | --- |
-  | unreviewed 2h after submission | owner SMS (Twilio-gated; email until then) |
-  | still unreviewed at slot−12h | second escalation |
-  | still `pending_review` at slot−4h | auto-decline + apology email |
+  submission- and escalation-relative. **Split across two deploys, 2026-08-19:**
+  | Trigger | Action | Ticket / deploy |
+  | --- | --- | --- |
+  | unreviewed 2h after submission | owner SMS (Twilio-gated; email until then) | BK-25, Deploy 3 |
+  | still unreviewed at slot−12h | second escalation | BK-25, Deploy 3 |
+  | still `pending_review` at slot−4h | **expire: release the slot + apology email** | **BK-23 Task 4, Deploy 2** |
   The last one is forced rather than arbitrary: past slot−4h the payment
-  deadline has expired, so a confirmation can no longer complete.
+  deadline has expired, so a confirmation can no longer complete. **It moved
+  into Deploy 2 on 2026-08-19** because it is the only automatic exit from
+  `pending_review`, which holds its slot — and BK-23's review added a guard
+  refusing to approve an elapsed slot, so without the sweep a lapsed request is
+  stuck in a slot-holding status with its only transition out blocked. It lands
+  in BK-32's cron handler as a second sweep rather than a second schedule. The
+  two *alert* timers stay in Deploy 3: they want Twilio, and nothing breaks
+  without them.
 - **ICS: customer AND office invites both move to payment-confirmed.** The
   admin panel is the pending view; the calendar only ever shows money-confirmed
   work. CANCEL goes out on decline/expire/cancel **for any invite already
@@ -1187,8 +1194,8 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | --- | --- | --- | --- |
 | BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | ✅ **implemented 2026-08-18** — gates green, 4 red rows; awaiting review |
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
-| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + travel-fee field**, approve → payment link, escalation timers, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **partially implemented 2026-08-18** — Tasks 1/2/3/7 built and gated (14 red rows); **Tasks 4 (escalation), 5 (service area), 6 (photo gallery) NOT started**. Not deployable alone |
-| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, expiry cron, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft |
+| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 (2026-08-19) and NOT built** — it ships inside BK-32's cron. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft — also inherits BK-23's S2 (attempt-varying idempotency prefix, a prerequisite once cancel-and-re-approve exists) and N5 (double conversion on `success_url`) |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1205,13 +1212,23 @@ together or the site tells a lie between deploys.
    blocker on every new email in this deploy and it is invisible in dev), then
    BK-31 → BK-23 → BK-32 → BK-36.
 
-   **Progress, 2026-08-18:** BK-43 and BK-31 are implemented and gated; BK-23 is
-   implemented except Tasks 4, 5 and 6; **BK-32 and BK-36 are not started.** The
-   branch is `deploy-2-prepay`. Nothing is deployable yet — the flip is half
-   made, and the half that is made assumes the other half. In particular the
-   approval email currently offers the Interac route only, because
-   `createCheckoutUrl` returns null until BK-32 fills it in. Commit separately, one ticket per commit;
-   deploy as one release.
+   **Progress, 2026-08-19.** BK-43, BK-31 and BK-23's Tasks 1/2/3/7 are
+   implemented, **reviewed by fresh agents, and their blockers fixed** — 7
+   blockers, 11 should-fix and 8 nits across the three tickets; one blocker
+   (BK-31 B3) refused in writing as BK-36's, two should-fix handed to BK-32.
+   The branch is `deploy-2-prepay`.
+
+   **Still to build before this deploys:**
+
+   | | |
+   | --- | --- |
+   | **BK-32** | not started. Until it exists `createCheckoutUrl` returns null, so the approval email offers Interac alone |
+   | **BK-36** | not started, and it is a **release gate** — the terms box states the standard prices while the picker and both emails show the price that applies. A Saturday mould booking mails a customer a document that contradicts itself about the amount *and* about whether the choice binds |
+   | **BK-23 Task 4** | respec'd into this deploy 2026-08-19 — the stale-request expiry sweep, built inside BK-32's cron handler. Without it a lapsed request holds its slot forever, and the review's S3 guard closed the manual way out |
+
+   BK-23's Tasks 5 and 6 stay out of Deploy 2; both are additive UI and nothing
+   built depends on them. Commit separately, one ticket per commit; deploy as one
+   release.
 
    **ROLLOUT — THREE STEPS, AND THE ORDER IS NOT BK-27's.** This paragraph used
    to read "migrations 007/008/009 apply to production first, in order, before
@@ -1245,8 +1262,10 @@ together or the site tells a lie between deploys.
    build order needed it committed *before* BK-31 while BK-23 lands *after* —
    one ticket spanning two commits either side of another ticket is exactly the
    shape the one-ticket-per-commit rule exists to prevent.
-3. **Deploy 3 — safety net and office UX.** BK-25 (timers, re-spaced per the
-   table above), BK-24 (one-click approve/decline), BK-33.
+3. **Deploy 3 — safety net and office UX.** BK-25 (the two **alert** timers per
+   the table above — the slot−4h expiry left for BK-23 Task 4 in Deploy 2 on
+   2026-08-19), BK-24 (one-click approve/decline), BK-33, plus BK-23's Tasks 5
+   (service-area badge) and 6 (photo gallery + unseen-files badge).
 4. **Twilio-gated.** BK-34b; BK-06 with the reminder query filtered to
    `status = 'confirmed'`; escalation transport swaps email → owner SMS.
 5. **Independent, pull in anytime.** BK-26, BK-28.
@@ -1270,8 +1289,11 @@ PII rules all stand.
 
 - **BK-24** — mechanism unchanged, but Approve now means "approve and send the
   payment link". Its POST-not-GET rule matters more, not less.
-- **BK-25** — owns the re-spaced timers in the table above, not P7's
-  slot−24h auto-decline, which is withdrawn.
+- **BK-25** — owns the two **alert** timers in the table above (+2h and
+  slot−12h), not P7's slot−24h auto-decline, which is withdrawn, and **no longer
+  the slot−4h expiry**: that became BK-23 Task 4 and moved into Deploy 2 on
+  2026-08-19. What is left here is notification only, which is why it can wait
+  for Twilio.
 - **BK-06** — acceptance criterion added while blocked: the reminder query
   filters `status = 'confirmed'`, never `status <> 'cancelled'`. A
   `pending_review` or `approved_awaiting_payment` row must never be reminded of
