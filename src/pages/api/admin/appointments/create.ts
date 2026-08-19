@@ -130,6 +130,7 @@ export const POST: APIRoute = async ({ request }) => {
       ? await sendConfirmationAndStamp(
           sql,
           planForPayload(created.id, payload, serviceLabel, now, created.files, 'request'),
+          now,
         )
       : null;
 

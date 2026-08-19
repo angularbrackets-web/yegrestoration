@@ -4,6 +4,7 @@ import AdminLayout from '../../../layouts/AdminLayout.astro';
 import {
   ADMIN_APPOINTMENTS_PATH,
   ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT,
+  ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT,
   adminAppointmentPath,
   ADMIN_APPOINTMENT_RESEND_ENDPOINT,
   ADMIN_APPOINTMENT_REVIEW_ENDPOINT,
@@ -252,14 +253,12 @@ const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
   },
   amount: { tone: 'warn', text: 'That assessment amount was not a valid figure. Nothing was approved.' },
   travel: { tone: 'warn', text: 'That travel fee was not a valid figure. Nothing was approved.' },
-  // No "mark it paid" is offered here, because there is no such action:
-  // `markPaid()` is BK-32's seam and nothing in `src/` implements it yet. The
-  // earlier wording sent the office looking for a button that does not exist,
-  // which is worse than saying nothing — this is the ROADMAP's standing
-  // email-exemption trap surfacing as an instruction that cannot be followed.
-  //
-  // What is offered instead is the only move that actually exists today: get an
-  // address onto the row, from the edit form directly above.
+  // Still no "mark it paid" here, even though BK-32 has now built that action.
+  // The Interac button lives on an APPROVED row, and this message is about a
+  // row that could not be approved at all — pointing at it would send the
+  // office to a button that is not on the page. The only move that exists at
+  // this moment is the same one as before: get an address onto the row, from
+  // the edit form directly above.
   noemail: {
     tone: 'warn',
     text: 'This booking has no email address, so there is nowhere to send a payment link and nothing was approved. Add one above — a phone booking still needs an address to be paid for. If the customer has none, call the office before promising a visit.',
@@ -274,17 +273,67 @@ const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
     tone: 'ok',
     text: 'This request had already been reviewed, so nothing changed and no second email went out.',
   },
+  // BK-32. Approved, but the card link could not be minted — Stripe is not
+  // configured, refused, or timed out. NOT a failure: the Interac route is a
+  // complete way to pay and the customer has been told about it.
+  'approved-interac': {
+    tone: 'ok',
+    text: 'Approved. The card link could not be created, so the customer was emailed the e-Transfer details and the amount. They can still pay.',
+  },
+  // BK-32. A $0.00 total: approved and confirmed in one step, with no payment
+  // page and no payment link, because there is nothing to pay.
+  'approved-free': {
+    tone: 'ok',
+    text: 'Approved at no charge and confirmed. The customer has their confirmation and calendar invite; no payment was asked for.',
+  },
+  // BK-32. A re-approval could not kill the previous Checkout Session, so
+  // nothing was changed rather than leaving two live links at two prices.
+  'stale-session': {
+    tone: 'warn',
+    text: 'The previous payment link could not be cancelled, so nothing was approved — approving would have left the customer holding two live links at two different prices. Try again; if it keeps failing, expire the session by hand in the Stripe dashboard.',
+  },
   invalid: { tone: 'warn', text: 'That request was not valid. Nothing changed.' },
   error: { tone: 'warn', text: 'The database rejected that decision. Nothing changed.' },
 };
 
+/** BK-32 — the outcomes of "Mark as paid — Interac". */
+const PAID_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  paid: {
+    tone: 'ok',
+    text: 'Marked as paid by e-Transfer. The customer has been sent their confirmation and calendar invite.',
+  },
+  // Not an error, and deliberately quiet: this is a second click, not a second
+  // payment. Saying "already done" beats a puzzling no-op.
+  already: {
+    tone: 'ok',
+    text: 'This payment was already recorded, so nothing changed and no second confirmation went out.',
+  },
+  // The real double-pay race. Never auto-refunded — see the row's attention note.
+  double: {
+    tone: 'warn',
+    text: 'This booking was ALREADY confirmed by a different payment. Nothing was changed and nothing was refunded — read the attention note below and sort the refund out by hand in Stripe.',
+  },
+  late: {
+    tone: 'warn',
+    text: 'The slot for this booking had already been released, so the payment was recorded but the booking was NOT confirmed. Nothing was refunded automatically — read the attention note below.',
+  },
+  notawaiting: {
+    tone: 'warn',
+    text: 'This booking is not awaiting payment, so there was nothing to mark. Nothing changed.',
+  },
+  missing: { tone: 'warn', text: 'That booking no longer exists. Nothing changed.' },
+  error: { tone: 'warn', text: 'The database rejected that. Nothing changed.' },
+};
+
 const reviewFlash = Astro.url.searchParams.get('review');
+const paidFlash = Astro.url.searchParams.get('paid');
 
 const flashes = [
   emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
   savedFlash ? SAVED_MESSAGES[savedFlash] : null,
   filesFlash ? FILE_MESSAGES[filesFlash] : null,
   reviewFlash ? REVIEW_MESSAGES[reviewFlash] : null,
+  paidFlash ? PAID_MESSAGES[paidFlash] : null,
 ].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
 /**
@@ -305,6 +354,8 @@ const suggestedQuote =
     : null;
 
 const isPendingReview = appointment?.status === 'pending_review';
+/** BK-32 — the only status the Interac action applies to. */
+const isAwaitingPayment = appointment?.status === 'approved_awaiting_payment';
 
 // ── The confirm step (BK-23 Task 7 guard rail) ─────────────────────────────
 //
@@ -386,6 +437,30 @@ function statusClasses(status: Appointment['status']) {
       {flash.text}
     </div>
   ))}
+
+  {/*
+    MONEY LANDED SOMEWHERE IT SHOULD NOT HAVE (BK-32).
+
+    Above everything, in red, and unmissable. `needs_attention` is written by
+    `markPaid()` and the webhook for the cases nobody can automate away: a
+    double payment, a payment that arrived after the slot was released, an
+    amount Stripe charged that disagrees with what was approved, a Checkout
+    Session that outlived its row. Every one of them is a customer with money
+    gone and a human decision to make.
+
+    NOTHING CLEARS IT, which is BK-32's scope decision rather than an
+    oversight: an acknowledge-and-clear action is separate admin UX. It appends,
+    so a second problem on the same row never overwrites the first.
+  */}
+  {appointment?.needs_attention && (
+    <div class="bg-red-950/60 border-2 border-red-700 rounded-lg px-4 py-3 mb-5">
+      <h2 class="text-red-300 font-semibold text-sm mb-1">Payment needs attention</h2>
+      <p class="text-red-200/90 text-sm whitespace-pre-line">{appointment.needs_attention}</p>
+      <p class="text-red-300/70 text-xs mt-2">
+        Nothing has been refunded automatically. Issue any refund by hand in the Stripe dashboard.
+      </p>
+    </div>
+  )}
 
   {dbError && (
     <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">{dbError}</div>
@@ -899,6 +974,91 @@ function statusClasses(status: Appointment['status']) {
             </p>
           )}
         </section>
+      )}
+
+      {/*
+        "MARK AS PAID — INTERAC" (BK-32).
+
+        The office reading their own inbox and asserting that an e-Transfer
+        arrived. There is no inbox parsing and no auto-matching anywhere in this
+        system, deliberately — which is exactly why this button records WHO said
+        so and WHEN: it is a human claim about money, so it needs an author.
+
+        THE AMOUNT IS NOT A FIELD. The office is asserting that the amount the
+        approval settled arrived, and giving them a box to type a different one
+        would make this screen a second place money is decided. BK-23's whole
+        approval design exists so that there is exactly one. A partial payment
+        is a conversation, not a form field.
+
+        Everything this does happens inside `markPaid()` — the same function the
+        Stripe webhook calls. One transition, one confirmation email, one ics,
+        so a booking paid by e-Transfer and one paid by card are
+        indistinguishable afterwards, and whichever payment arrives second
+        no-ops and flags rather than confirming twice.
+      */}
+      {isAwaitingPayment && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT}
+          class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+
+          <h2 class="text-white font-semibold mb-1">Payment</h2>
+          <p class="text-zinc-500 text-xs mb-4">
+            Waiting on {settled ? formatCents(settled.totalCents) : 'payment'}
+            {appointment.payment_due_at
+              ? ` by ${formatSlot(appointment.payment_due_at)} (${TIMEZONE_NOTE})`
+              : ' — pay-now booking, no deadline. Chase it by phone.'}.
+            {appointment.stripe_session_id
+              ? ' A card link has been sent.'
+              : ' No card link was created; the customer has the e-Transfer details.'}
+          </p>
+
+          <label class="block text-zinc-400 text-xs mb-1" for="interac-reference">
+            e-Transfer reference <span class="text-zinc-600">(optional)</span>
+          </label>
+          <input
+            id="interac-reference"
+            type="text"
+            name="reference"
+            maxlength="200"
+            placeholder="Reference number from the e-Transfer notice"
+            class="w-full max-w-sm bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 mb-1"
+          />
+          {/*
+            Optional, and that is deliberate. Requiring it would push somebody
+            into inventing one, and an invented reference is worse than none:
+            the reference is what tells a redelivered payment from a genuinely
+            second one, so a fabricated value turns a silent no-op into a false
+            "double payment — issue a refund" alert.
+          */}
+          <p class="text-zinc-600 text-xs mb-4">
+            Helps tell one payment arriving twice from two real payments. Leave it blank if you do
+            not have it.
+          </p>
+
+          <label class="block text-zinc-400 text-xs mb-1" for="interac-actor">Your name</label>
+          <input
+            id="interac-actor"
+            type="text"
+            name="actor"
+            maxlength="120"
+            placeholder="Who is confirming this"
+            class="w-full max-w-sm bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 mb-4"
+          />
+
+          <button
+            type="submit"
+            class="bg-green-600 hover:bg-green-500 text-white font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+          >
+            Mark as paid — Interac
+          </button>
+          <p class="text-zinc-600 text-xs mt-3">
+            This confirms the booking and sends the customer their confirmation and calendar
+            invite. If they have already paid the card link, this will say so and change nothing.
+          </p>
+        </form>
       )}
 
       {/*

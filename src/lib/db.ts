@@ -157,8 +157,65 @@ export type Appointment = {
     | 'partially_refunded'
     | 'failed';
 
+  // ── The payment block (BK-32, migration 010) ────────────────────────────
+
+  /**
+   * How the money arrived. NULL until it does.
+   *
+   * `'none'` is a $0.00 approval confirmed through the same `markPaid()` as
+   * every other payment — a booking with no payment STEP. It is not
+   * `payment_status = 'not_required'`, which means the older and different
+   * thing: a row predating prepay entirely.
+   */
+  payment_method: 'stripe' | 'interac' | 'onsite' | 'none' | null;
+  /**
+   * WHAT ACTUALLY ARRIVED — never `total_amount_cents`, which is the snapshot
+   * the approval settled and the approval email quoted. The two are separate
+   * columns precisely so a disagreement between them is a fact somebody can
+   * query rather than a number that quietly overwrote the other.
+   */
+  paid_amount_cents: number | null;
+  /**
+   * The reference for whatever kind of payment it was — an e-Transfer
+   * reference the office typed, or the Stripe reference on the card path.
+   * Separate from `stripe_payment_intent_id` below, which BK-33 refunds from.
+   */
+  payment_reference: string | null;
+  /** Who asserted the e-Transfer arrived, and when. The audit trail. */
+  interac_marked_by: string | null;
+  interac_marked_at: Date | null;
+  /**
+   * Money landed somewhere it should not have — a double pay, a payment after
+   * the slot was released, a session we minted but could not record. Read by
+   * the admin list and the detail page.
+   *
+   * **Appended to, never overwritten**, and nothing clears it (BK-32 scope).
+   */
+  needs_attention: string | null;
+  /** At most one live Checkout Session at a time; a re-approval expires the old one. */
+  stripe_session_id: string | null;
+  /** Card path only. BK-33 issues its refund from this. */
+  stripe_payment_intent_id: string | null;
+  paid_at: Date | null;
+
   created_at: Date;
   updated_at: Date;
+};
+
+/**
+ * One Stripe webhook delivery (BK-32, migration 010).
+ *
+ * `processed_at` is the load-bearing column: the insert CLAIMS an event, the
+ * stamp records that it was handled, and an unstamped event is claimed again on
+ * retry. Without it "already present" would mean "already handled", and a
+ * handler dying between the two would let the expiry cron release the slot of a
+ * booking the customer had paid for.
+ */
+export type StripeEvent = {
+  event_id: string;
+  type: string;
+  received_at: Date;
+  processed_at: Date | null;
 };
 
 export type AppointmentFile = {

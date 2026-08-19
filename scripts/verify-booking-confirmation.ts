@@ -10,9 +10,17 @@ import {
   planConversionReport,
   readConfirmation,
   serializeConfirmation,
+  isCheckoutSessionId,
+  paidLandingSessionId,
   shouldReportConversion,
   type Confirmation,
 } from '../src/lib/booking-confirmation';
+
+import { readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -106,30 +114,91 @@ console.log('\nReading the stored confirmation');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\nReporting once per booking');
+console.log('\nWhat counts as a payment landing');
+// ---------------------------------------------------------------------------
+//
+// BK-32 moved the conversion off the REQUEST and onto the PAYMENT, and made the
+// evidence a Stripe Checkout Session id in the URL. The shape check is a bar,
+// not a proof — nothing here contacts Stripe — but it is what stops a leftover
+// /book/received/ payload, a bookmark, or a hand-typed URL from being treated
+// as a payment at all.
+{
+  const PARAM = 'session_id';
+
+  check(isCheckoutSessionId('cs_test_a1b2c3d4e5f6g7h8') === true, 'a test-mode session id is one');
+  check(isCheckoutSessionId('cs_live_a1b2c3d4e5f6g7h8') === true, 'a live-mode session id is one');
+  for (const bad of [
+    null,
+    undefined,
+    '',
+    'cs_test_',
+    'cs_test_short',
+    'pi_test_a1b2c3d4e5f6g7h8',
+    'cs_prod_a1b2c3d4e5f6g7h8',
+    'cs_test_a1b2c3d4e5f6g7h8!',
+    '../../etc/passwd',
+    '481',
+  ]) {
+    check(isCheckoutSessionId(bad) === false, `${JSON.stringify(bad)} is not a session id`);
+  }
+
+  check(
+    paidLandingSessionId('?session_id=cs_test_a1b2c3d4e5f6g7h8', PARAM) ===
+      'cs_test_a1b2c3d4e5f6g7h8',
+    'the session id is read out of the query string',
+  );
+  check(
+    paidLandingSessionId('?session_id=cs_test_a1b2c3d4e5f6g7h8&utm_source=x', PARAM) ===
+      'cs_test_a1b2c3d4e5f6g7h8',
+    'and survives other parameters riding along',
+  );
+  check(paidLandingSessionId('', PARAM) === null, 'no query string is not a payment landing');
+  check(
+    paidLandingSessionId('?ref=481', PARAM) === null,
+    'and neither is some other parameter — the old ?ref= shape must not resurrect',
+  );
+  check(
+    paidLandingSessionId('?session_id=481', PARAM) === null,
+    'a booking id in the session slot is refused, not accepted as a marker',
+  );
+  check(
+    paidLandingSessionId('?session_id={CHECKOUT_SESSION_ID}', PARAM) === null,
+    "Stripe's own placeholder, unsubstituted, is refused rather than counted",
+  );
+
+  console.log('  only a well-formed Checkout Session id reads as a payment');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nReporting once per payment');
 // ---------------------------------------------------------------------------
 {
-  check(shouldReportConversion(null, 481) === true, 'an unreported booking reports');
+  const A = 'cs_test_a1b2c3d4e5f6g7h8';
+  const B = 'cs_test_z9y8x7w6v5u4t3s2';
+
+  check(shouldReportConversion(null, A) === true, 'an unreported payment reports');
   check(
-    shouldReportConversion('481', 481) === false,
-    'reloading the confirmed page does not report the same booking twice',
+    shouldReportConversion(A, A) === false,
+    'reloading the confirmed page does not report the same payment twice',
   );
   check(
-    shouldReportConversion('480', 481) === true,
-    'a second, different booking in the same tab reports again',
+    shouldReportConversion(B, A) === true,
+    'a second, different payment in the same tab reports again',
   );
-  check(shouldReportConversion('', 481) === true, 'an empty marker reports');
-  check(shouldReportConversion('0', 0) === false, 'the marker works for id 0 too');
-  console.log('  one report per booking id, not per page load');
+  check(shouldReportConversion('', A) === true, 'an empty marker reports');
+  console.log('  one report per Checkout Session, not per page load');
 }
 
 // ---------------------------------------------------------------------------
 console.log('\nConversion calls');
 // ---------------------------------------------------------------------------
 {
+  const SESSION = 'cs_test_a1b2c3d4e5f6g7h8';
+
   const configured = conversionCalls({
     awId: 'AW-1234567890',
     bookingLabel: 'BkNgLaBeL',
+    sessionId: SESSION,
     id: 481,
   });
   check(configured.length === 2, 'a configured tag fires both the Ads conversion and the GA4 event');
@@ -139,35 +208,63 @@ console.log('\nConversion calls');
     'send_to is the conversion id and the booking label',
   );
   check(
-    configured[0]?.params.transaction_id === '481',
-    'the Ads conversion carries transaction_id, so Google drops a duplicate the marker cannot see',
+    configured[0]?.params.transaction_id === SESSION,
+    'transaction_id is the CHECKOUT SESSION, so Google dedupes on the payment',
   );
   check(
     configured[1]?.event === 'booking_confirmed',
     'GA4 gets booking_confirmed, not generate_lead — bookings stay apart from contact-form leads',
   );
-  check(configured[1]?.params.booking_id === 481, 'the GA4 event carries the booking id');
+  check(configured[1]?.params.booking_id === 481, 'the GA4 event carries the booking id when there is one');
+
+  // THE CROSS-DEVICE PAYER — the case that made the session id the key.
+  //
+  // Request on a desktop, approval email read on a phone, paid there. The
+  // sessionStorage payload lives on the desktop, so this landing has no booking
+  // id at all. Keyed on the booking id the conversion would simply not fire,
+  // and that is most real payments rather than an edge case.
+  const crossDevice = conversionCalls({
+    awId: 'AW-1234567890',
+    bookingLabel: 'BkNgLaBeL',
+    sessionId: SESSION,
+    id: 0,
+  });
+  check(
+    crossDevice.length === 2,
+    'a payer with no stored payload STILL reports — the cross-device case is the common one',
+  );
+  check(
+    crossDevice[0]?.params.transaction_id === SESSION,
+    'with the same transaction_id it would have had on the original device',
+  );
+  check(
+    crossDevice[1]?.params.booking_id === undefined,
+    'and no booking_id, rather than a made-up one that would collide',
+  );
 
   // A send_to of "undefined/undefined" is a conversion Google silently drops,
   // which is worse than none: it looks like the funnel is tracked.
-  const noLabel = conversionCalls({ awId: 'AW-1234567890', bookingLabel: undefined, id: 481 });
+  const noLabel = conversionCalls({
+    awId: 'AW-1234567890',
+    bookingLabel: undefined,
+    sessionId: SESSION,
+    id: 481,
+  });
   check(noLabel.length === 1, 'no Ads conversion is emitted without a booking label');
   check(noLabel[0]?.event === 'booking_confirmed', 'GA4 still reports without an Ads label');
 
-  const noAw = conversionCalls({ awId: undefined, bookingLabel: 'BkNgLaBeL', id: 481 });
+  const noAw = conversionCalls({
+    awId: undefined,
+    bookingLabel: 'BkNgLaBeL',
+    sessionId: SESSION,
+    id: 481,
+  });
   check(noAw.length === 1, 'no Ads conversion is emitted without a conversion id');
 
-  const noneAtAll = conversionCalls({ awId: '', bookingLabel: '', id: 481 });
+  const noneAtAll = conversionCalls({ awId: '', bookingLabel: '', sessionId: SESSION, id: 481 });
   check(noneAtAll.length === 1, 'empty strings count as unset, matching how Analytics.astro reads them');
 
-  const noId = conversionCalls({ awId: 'AW-1234567890', bookingLabel: 'BkNgLaBeL', id: 0 });
-  check(
-    noId[0]?.params.transaction_id === undefined,
-    'a non-positive id sends no transaction_id — it is not an appointment number and would collide',
-  );
-  check(noId[1]?.params.booking_id === undefined, 'and no booking_id either');
-
-  console.log('  Ads only when configured; GA4 always; transaction_id on real bookings');
+  console.log('  Ads only when configured; GA4 always; transaction_id is the payment');
 }
 
 // ---------------------------------------------------------------------------
@@ -175,28 +272,51 @@ console.log('\nThe reporting sequence, end to end');
 // ---------------------------------------------------------------------------
 {
   const CONFIGURED = { awId: 'AW-1234567890', bookingLabel: 'BkNgLaBeL' };
+  const A = 'cs_test_a1b2c3d4e5f6g7h8';
+  const B = 'cs_test_z9y8x7w6v5u4t3s2';
 
-  // A tab that has never reported: fire, then remember this exact booking.
-  const first = planConversionReport({ marker: null, ...CONFIGURED, id: 481 });
-  check(first !== null, 'the first load of a confirmed booking reports');
+  // THE REQUEST PATH FIRES NOTHING, AND THIS IS THE N5 DECISION ITSELF.
+  //
+  // /book/received/ has a stored payload and NO session id. Under P9 a request
+  // is a lead the office may decline and nobody has paid for; counting it would
+  // have Google Ads bid against leads. Before BK-32 this exact input fired a
+  // conversion.
+  check(
+    planConversionReport({ marker: null, ...CONFIGURED, sessionId: null, id: 481 }) === null,
+    'a submitted REQUEST reports nothing — the conversion is the payment',
+  );
+  // The leftover payload, re-read on /book/confirmed/ without a session id.
+  check(
+    planConversionReport({ marker: null, ...CONFIGURED, sessionId: '', id: 481 }) === null,
+    'and a leftover request payload on the confirmed page reports nothing either',
+  );
+  check(
+    planConversionReport({ marker: null, ...CONFIGURED, sessionId: 'not-a-session', id: 481 }) ===
+      null,
+    'a malformed session id reports nothing rather than counting as a payment',
+  );
+
+  // A tab that has never reported: fire, then remember this exact payment.
+  const first = planConversionReport({ marker: null, ...CONFIGURED, sessionId: A, id: 481 });
+  check(first !== null, 'the first load after a payment reports');
   check(first?.calls.length === 2, 'it fires both calls');
   check(
-    first?.marker === '481',
-    'and the marker it writes afterwards is the booking id — not a boolean, or a second booking could never report',
+    first?.marker === A,
+    'and the marker it writes is the Checkout Session — not a boolean, or a second payment could never report',
   );
 
   // The reload. This is the whole reason the marker exists: the confirmed page
   // is a URL, and a refresh must not be a second conversion.
-  const reload = planConversionReport({ marker: first!.marker, ...CONFIGURED, id: 481 });
+  const reload = planConversionReport({ marker: first!.marker, ...CONFIGURED, sessionId: A, id: 481 });
   check(reload === null, 'reloading the confirmed page fires nothing at all');
 
-  // A genuinely different booking in the same tab, after the first one.
-  const second = planConversionReport({ marker: first!.marker, ...CONFIGURED, id: 482 });
-  check(second !== null, 'a second, different booking in the same tab does report');
-  check(second?.marker === '482', 'and it moves the marker on');
+  // A genuinely different payment in the same tab, after the first one.
+  const second = planConversionReport({ marker: first!.marker, ...CONFIGURED, sessionId: B, id: 482 });
+  check(second !== null, 'a second, different payment in the same tab does report');
+  check(second?.marker === B, 'and it moves the marker on');
   check(
-    second?.calls[0]?.params.transaction_id === '482',
-    'carrying its own transaction_id, not the previous booking’s',
+    second?.calls[0]?.params.transaction_id === B,
+    'carrying its own transaction_id, not the previous payment’s',
   );
 
   // Dormant tag: no Ads label configured. GA4 must still get its event, and
@@ -205,12 +325,55 @@ console.log('\nThe reporting sequence, end to end');
     marker: null,
     awId: 'AW-1234567890',
     bookingLabel: undefined,
+    sessionId: A,
     id: 481,
   });
   check(ga4Only?.calls.length === 1, 'an unconfigured Ads label still reports to GA4');
-  check(ga4Only?.marker === '481', 'and still marks the booking, so a reload stays quiet');
+  check(ga4Only?.marker === A, 'and still marks the payment, so a reload stays quiet');
 
-  console.log('  fire once, remember the id, move on for the next booking');
+  console.log('  fire once per payment, remember the session, ignore every request');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nWho is allowed to fire a conversion at all (BK-32 N5)');
+// ---------------------------------------------------------------------------
+//
+// SOURCE PINS, and their weakness is stated rather than glossed: they check
+// what the islands SAY, not what a browser does. There is no DOM harness in
+// this repo, and the alternative — trusting the pure layer above and hoping the
+// call sites match it — is how `/book/received/` came to fire a conversion for
+// an unapproved request in the first place. The pure decision is asserted
+// properly above; these three pin the two places that decision is invoked.
+{
+  const form = readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8');
+  const island = readFileSync(resolve(root, 'src/components/BookingConfirmation.svelte'), 'utf8');
+
+  // The form commits a REQUEST. Under P9 that is a lead the office may decline
+  // and nobody has paid for, so it must not report anything — including on its
+  // sessionStorage-write-failed fallback, which is where the old call lived.
+  check(
+    !/reportBookingConversion/.test(form),
+    'BookingForm.svelte does not report a conversion anywhere — a request is not a payment',
+  );
+
+  // The island serves both pages. Only the `confirmed` variant may report, and
+  // it may only do so with a session id it read from the URL.
+  const calls = island.match(/reportBookingConversion\([^)]*\)/g) ?? [];
+  check(calls.length === 1, `BookingConfirmation.svelte reports in exactly one place (found ${calls.length})`);
+  check(
+    calls[0]?.includes('sessionId') === true,
+    `and passes the session id it read from the URL, not a stored booking id (found ${calls[0]})`,
+  );
+  // The received branch returns before reaching it. Pinned on the ORDER rather
+  // than on the presence of an `isReceived` check, because a check that runs
+  // after the call would satisfy the latter and not the former.
+  check(
+    island.indexOf('if (isReceived)') !== -1 &&
+      island.indexOf('if (isReceived)') < island.indexOf('reportBookingConversion('),
+    'and the received branch returns BEFORE the call, so /book/received/ cannot reach it',
+  );
+
+  console.log('  one call site, on the confirmed variant, keyed on the URL');
 }
 
 if (failures > 0) {

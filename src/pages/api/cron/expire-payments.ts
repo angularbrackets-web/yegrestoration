@@ -3,8 +3,14 @@ import type { APIRoute } from 'astro';
 export const prerender = false;
 
 import { PAYMENT_DEADLINE_LEAD_HOURS, POST_COMMIT_BUDGET_MS } from '../../../lib/booking-config';
-import { expiredRequestMessage, type BookingNotificationInput } from '../../../lib/booking-email';
-import { sendCustomerMessage, withDeadline } from '../../../lib/booking-notify';
+import {
+  expiredRequestMessage,
+  paymentAttentionAlert,
+  paymentExpiredMessage,
+  type BookingNotificationInput,
+} from '../../../lib/booking-email';
+import { sendCustomerMessage, sendOfficeMessage, withDeadline } from '../../../lib/booking-notify';
+import { expireCheckoutSession } from '../../../lib/booking-payment';
 import { formatSlot } from '../../../lib/booking-time';
 import { getDb, SERVICE_LABELS, type Appointment } from '../../../lib/db';
 import { readEnv } from '../../../lib/env';
@@ -99,6 +105,8 @@ export const GET: APIRoute = async ({ request }) => {
 
   let paymentsExpired = 0;
   let requestsExpired = 0;
+  let sessionsCancelled = 0;
+  let sessionsUncancelled = 0;
   let mailed = 0;
   let mailFailed = 0;
 
@@ -107,8 +115,9 @@ export const GET: APIRoute = async ({ request }) => {
   // `payment_due_at < now()` and nothing more. NULL fails that comparison, so
   // the pay-now rows are excluded by the shape of the predicate rather than by
   // a clause someone has to maintain.
+  let unpaid: Appointment[] = [];
   try {
-    const expired = (await sql`
+    unpaid = (await sql`
       UPDATE appointments
       SET status     = 'payment_expired',
           updated_at = ${now.toISOString()}
@@ -120,12 +129,35 @@ export const GET: APIRoute = async ({ request }) => {
         LIMIT ${BATCH_SIZE}
       )
         AND status = 'approved_awaiting_payment'
-      RETURNING id
-    `) as { id: number }[];
-    paymentsExpired = expired.length;
+      RETURNING *
+    `) as Appointment[];
+    paymentsExpired = unpaid.length;
   } catch (err) {
     console.error('Payment expiry sweep failed:', err);
     return Response.json({ error: 'Expiry failed' }, { status: 500 });
+  }
+
+  // ── KILL THE LINK, OR THE SLOT IS SOLD TWICE (BK-32) ─────────────────────
+  //
+  // The row is `payment_expired` and the slot is back on the calendar the
+  // instant the statement above commits. The Checkout Session is NOT — it sits
+  // at Stripe, still payable, until its own `expires_at`. Between the two, the
+  // customer can open the link they were emailed and pay for a time somebody
+  // else may already have booked, and the webhook then lands on a released row:
+  // recoverable, because `markPaid` records the money and flags it rather than
+  // discarding it, but the customer has paid for a visit that is not happening
+  // and a human has to unpick it. This is the open dependency the ROADMAP
+  // records against BK-32, and closing it is one call per expired row.
+  //
+  // Failures are logged and counted, never fatal and never retried into a loop
+  // — the same posture the header states for mail. A row whose session could not
+  // be expired is still expired; what remains is a live link, which the webhook
+  // handles as a late payment.
+  for (const expiredRow of unpaid) {
+    if (!expiredRow.stripe_session_id) continue;
+    const killed = await expireCheckoutSession(expiredRow.stripe_session_id);
+    if (killed) sessionsCancelled++;
+    else sessionsUncancelled++;
   }
 
   // ── Sweep 2: stale requests (BK-23 Task 4) ───────────────────────────────
@@ -171,39 +203,63 @@ export const GET: APIRoute = async ({ request }) => {
     return Response.json({ error: 'Expiry failed' }, { status: 500 });
   }
 
-  // The apology, one per expired request. After the transition, never before:
-  // the slot must be released whether or not we can reach the customer, exactly
-  // as the manual decline decides it.
-  for (const row of stale) {
-    const input: BookingNotificationInput = {
-      id: row.id,
-      messageType: 'expired',
-      slotLabel: formatSlot(row.slot_start),
-      slotStart: row.slot_start,
-      now,
-      name: row.name,
-      phone: row.phone,
-      email: row.email,
-      serviceLabel: SERVICE_LABELS[row.service] ?? row.service,
-      service: row.service,
-      assessmentTier: row.assessment_tier,
-      description: row.description,
-      address: row.address,
-      city: row.city,
-      postalCode: row.postal_code,
-      paymentRoute: row.payment_route,
-      insurerName: row.insurer_name,
-      policyNumber: row.policy_number,
-      claimNumber: row.claim_number,
-      smsConsent: row.sms_consent_at !== null,
-      filesAttached: 0,
-    };
-
-    const message = expiredRequestMessage(input);
+  // ── The two customer messages, one per expired row ───────────────────────
+  //
+  // After the transitions, never before: a slot must be released whether or not
+  // we can reach the customer, exactly as the manual decline decides it.
+  //
+  // BOTH SWEEPS USE `messageType: 'expired'` AND THAT IS SAFE BY CONSTRUCTION,
+  // not by luck. A row reaches sweep 1 only from `approved_awaiting_payment`
+  // and sweep 2 only from `pending_review`, so one booking can never send both
+  // and the idempotency keys cannot collide. The MESSAGES are different
+  // builders, because the two events are different: one customer did not pay by
+  // a deadline they were given, the other was never looked at.
+  for (const row of unpaid) {
+    const message = paymentExpiredMessage(notificationInputFor(row, now));
     if (!message) continue;
-
     const sent = await withDeadline(
-      sendCustomerMessage(row.id, 'expired', message).then((o) => o === 'sent'),
+      sendCustomerMessage(row.id, 'expired', message, now).then((o) => o === 'sent'),
+      POST_COMMIT_BUDGET_MS,
+      false,
+    );
+    if (sent) mailed++;
+    else mailFailed++;
+  }
+
+  // The office hears about a link that outlived its row. Not about the ordinary
+  // expiry — that is visible in the admin list and a mail per lapsed booking is
+  // noise — but a session Stripe would still accept money against is a thing
+  // somebody has to go and close by hand.
+  if (sessionsUncancelled > 0) {
+    console.error(
+      `Expiry sweep: ${sessionsUncancelled} Checkout Session(s) could not be expired. ` +
+        'Those links are still payable against released slots.',
+    );
+    const first = unpaid.find((r) => r.stripe_session_id);
+    if (first) {
+      await withDeadline(
+        sendOfficeMessage(
+          first.id,
+          'payment-attention',
+          paymentAttentionAlert(
+            first,
+            `${sessionsUncancelled} Checkout Session(s) survived the expiry sweep and are still ` +
+              'payable against slots that have been released. Expire them by hand in the Stripe ' +
+              'dashboard.',
+            now,
+          ),
+        ).then(() => true),
+        POST_COMMIT_BUDGET_MS,
+        false,
+      );
+    }
+  }
+
+  for (const row of stale) {
+    const message = expiredRequestMessage(notificationInputFor(row, now));
+    if (!message) continue;
+    const sent = await withDeadline(
+      sendCustomerMessage(row.id, 'expired', message, now).then((o) => o === 'sent'),
       POST_COMMIT_BUDGET_MS,
       false,
     );
@@ -213,9 +269,44 @@ export const GET: APIRoute = async ({ request }) => {
 
   if (mailFailed > 0) {
     console.error(
-      `Expiry sweep: ${mailFailed} apology email(s) did not send. Those requests are declined and their slots released regardless.`,
+      `Expiry sweep: ${mailFailed} customer email(s) did not send. Those rows are expired and ` +
+        'their slots released regardless.',
     );
   }
 
-  return Response.json({ paymentsExpired, requestsExpired, mailed, mailFailed });
+  return Response.json({
+    paymentsExpired,
+    requestsExpired,
+    sessionsCancelled,
+    sessionsUncancelled,
+    mailed,
+    mailFailed,
+  });
 };
+
+/** One shape for both sweeps' messages. `filesAttached: 0` — neither mentions files. */
+function notificationInputFor(row: Appointment, now: Date): BookingNotificationInput {
+  return {
+    id: row.id,
+    messageType: 'expired',
+    slotLabel: formatSlot(row.slot_start),
+    slotStart: row.slot_start,
+    now,
+    name: row.name,
+    phone: row.phone,
+    email: row.email,
+    serviceLabel: SERVICE_LABELS[row.service] ?? row.service,
+    service: row.service,
+    assessmentTier: row.assessment_tier,
+    description: row.description,
+    address: row.address,
+    city: row.city,
+    postalCode: row.postal_code,
+    paymentRoute: row.payment_route,
+    insurerName: row.insurer_name,
+    policyNumber: row.policy_number,
+    claimNumber: row.claim_number,
+    smsConsent: row.sms_consent_at !== null,
+    filesAttached: 0,
+  };
+}

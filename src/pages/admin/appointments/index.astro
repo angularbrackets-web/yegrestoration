@@ -204,7 +204,25 @@ const savedMessage =
                           </div>
                         )}
                       </td>
-                      <td class="py-3.5 pr-6 text-white">{appointment.name}</td>
+                      <td class="py-3.5 pr-6 text-white">
+                        {appointment.name}
+                        {/*
+                          MONEY THAT NEEDS A HUMAN (BK-32). On the LIST, not
+                          only on the detail page, because the office works from
+                          this screen — a flag that requires opening a row first
+                          is a flag nobody sees until they were already looking.
+                          The text itself is on the detail page; this is the
+                          thing that gets them there.
+                        */}
+                        {appointment.needs_attention && (
+                          <span
+                            class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-red-950/60 text-red-300 border-red-700 align-middle"
+                            title="A payment landed somewhere it should not have. Open this booking."
+                          >
+                            Payment ⚠
+                          </span>
+                        )}
+                      </td>
                       <td class="py-3.5 pr-6 whitespace-nowrap">
                         <a href={`tel:${appointment.phone}`} class="hover:text-amber-400 transition-colors">
                           {appointment.phone}

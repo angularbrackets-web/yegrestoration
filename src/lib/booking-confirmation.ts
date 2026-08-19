@@ -17,7 +17,7 @@
 export const CONFIRMATION_KEY = 'yeg.booking.confirmation';
 
 /**
- * The id of the booking whose conversion has already been reported.
+ * The Checkout Session whose conversion has already been reported.
  *
  * Kept separate from the confirmation itself so that reading the confirmation
  * stays a pure parse: a marker written back into the same record would mean the
@@ -83,39 +83,100 @@ export function readConfirmation(raw: string | null): Confirmation | null {
 }
 
 /**
- * Whether this booking's conversion still needs reporting.
+ * Whether this PAYMENT's conversion still needs reporting.
  *
  * The confirmed page is a revisitable URL — a reload, a Back, a bookmark — and
- * every load would otherwise count another conversion. Comparing against the
- * *id* rather than a boolean is what lets a second, genuinely different booking
- * in the same tab report again.
+ * every load would otherwise count another conversion. Comparing against an
+ * identifier rather than a boolean is what lets a second, genuinely different
+ * payment in the same tab report again.
  */
-export function shouldReportConversion(marker: string | null, id: number): boolean {
-  return marker !== String(id);
+export function shouldReportConversion(marker: string | null, key: string): boolean {
+  return marker !== key;
+}
+
+/**
+ * The shape of a Stripe Checkout Session id.
+ *
+ * `cs_test_…` in test mode, `cs_live_…` in live mode, then a run of URL-safe
+ * characters. Checked before the value is treated as a payment landing at all.
+ *
+ * **THIS IS A BAR, NOT A PROOF, AND SAYING SO IS THE POINT.** Nothing here
+ * contacts Stripe — the page makes no network call — so a well-formed string
+ * somebody typed passes. What it buys is that the leftover REQUEST payload in
+ * `sessionStorage` cannot, on its own, turn `/book/confirmed/` into a
+ * conversion and a confident heading; an arrival has to at least look like it
+ * came back from a payment. The user's own framing when this was settled: the
+ * old `/book/received/` conversion was equally spoofable, so nothing gets
+ * worse, and a spoofed conversion pollutes only our own Ads data.
+ */
+const STRIPE_SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{8,255}$/;
+
+export function isCheckoutSessionId(value: string | null | undefined): value is string {
+  return typeof value === 'string' && STRIPE_SESSION_ID.test(value);
+}
+
+/**
+ * The Checkout Session id this page was reached with, or null.
+ *
+ * Takes the query string rather than reading `location`, so
+ * `verify-booking-confirmation.ts` can drive it without a browser — the same
+ * split the module header describes for `conversionCalls`.
+ */
+export function paidLandingSessionId(search: string, param: string): string | null {
+  let value: string | null;
+  try {
+    value = new URLSearchParams(search).get(param);
+  } catch {
+    return null;
+  }
+  return isCheckoutSessionId(value) ? value : null;
 }
 
 /** One `gtag('event', …)` call, described rather than made. */
 export type GtagCall = { event: string; params: Record<string, unknown> };
 
 /**
- * The conversion calls for a confirmed booking, in the order to fire them.
+ * The conversion calls for a PAID booking, in the order to fire them.
  *
- * Google Ads first and only when both halves of `send_to` are configured — a
+ * ── THE CONVERSION IS THE PAYMENT, NOT THE REQUEST (BK-32, N5) ─────────────
+ *
+ * Under P9 a submitted form is a REQUEST that the office may decline and nobody
+ * has paid for. Counting it as a conversion would bid Google Ads money against
+ * leads, half of which never become jobs — so `/book/received/` fires nothing
+ * at all, and this is reached only from the Stripe redirect.
+ *
+ * ── KEYED ON THE CHECKOUT SESSION, NOT ON THE BOOKING ID ───────────────────
+ *
+ * `sessionStorage` is EMPTY whenever the customer pays from the link in their
+ * approval email in another tab, another browser, or on their phone — which is
+ * the common case, not the edge one, because the email arrives after the office
+ * reviews. Keying on the booking id would therefore drop the conversion for
+ * most real payers. The session id is in the URL on every legitimate landing,
+ * is unique per payment, and is identical whether or not the stored payload
+ * survived — so one payment yields exactly one `transaction_id` either way.
+ *
+ * Google Ads fires only when both halves of `send_to` are configured — a
  * `send_to` of `undefined/undefined` is a silently discarded conversion, which
  * is worse than none because it looks like tracking. GA4's `booking_confirmed`
  * fires regardless: it needs no label, and GA4 is where the funnel is read.
  *
- * `transaction_id` is Google's own duplicate guard and covers what the
- * once-per-booking marker cannot see — a second tab, a cleared session, the
- * confirmed URL reopened tomorrow. It is omitted for a non-positive id, which
- * is not a real appointment number and would collide across bookings.
+ * `booking_id` rides along on the GA4 event ONLY when a stored payload supplied
+ * one. It is omitted rather than faked for the cross-device payer, on the same
+ * rule the previous version applied to a non-positive id: a made-up identifier
+ * collides across bookings and is worse than an absent one.
+ *
+ * **Accepted and not to be fixed:** a customer who pays and closes the tab
+ * never lands here, so their conversion never registers. That undercount is
+ * inherent to client-side conversion tracking. There is no server-side
+ * conversion path and one must not be invented.
  */
 export function conversionCalls(input: {
   awId: string | undefined;
   bookingLabel: string | undefined;
+  sessionId: string;
   id: number;
 }): GtagCall[] {
-  const { awId, bookingLabel, id } = input;
+  const { awId, bookingLabel, sessionId, id } = input;
   const calls: GtagCall[] = [];
 
   if (awId && bookingLabel) {
@@ -123,7 +184,7 @@ export function conversionCalls(input: {
       event: 'conversion',
       params: {
         send_to: `${awId}/${bookingLabel}`,
-        ...(id > 0 ? { transaction_id: String(id) } : {}),
+        transaction_id: sessionId,
       },
     });
   }
@@ -153,9 +214,15 @@ export function planConversionReport(input: {
   marker: string | null;
   awId: string | undefined;
   bookingLabel: string | undefined;
+  /** The Checkout Session id from the URL. Null means this is not a payment landing. */
+  sessionId: string | null;
+  /** From the stored payload, when there is one. 0 when there is not. */
   id: number;
 }): ConversionReport | null {
-  const { marker, awId, bookingLabel, id } = input;
-  if (!shouldReportConversion(marker, id)) return null;
-  return { calls: conversionCalls({ awId, bookingLabel, id }), marker: String(id) };
+  const { marker, awId, bookingLabel, sessionId, id } = input;
+  // NO SESSION, NO CONVERSION. This is what makes a leftover `/book/received/`
+  // payload, a bookmark, and a hand-typed URL all fire nothing.
+  if (!isCheckoutSessionId(sessionId)) return null;
+  if (!shouldReportConversion(marker, sessionId)) return null;
+  return { calls: conversionCalls({ awId, bookingLabel, sessionId, id }), marker: sessionId };
 }

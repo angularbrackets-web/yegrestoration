@@ -19,6 +19,7 @@ import {
   RECEIVED_HOLD_LINE,
   RECEIVED_NEXT_STEPS,
   EXPIRED_REQUEST_REBOOK_LINE,
+  PAYMENT_EXPIRED_REBOOK_LINE,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
@@ -31,6 +32,8 @@ import {
   declineMessage,
   escapeHtml,
   expiredRequestMessage,
+  paymentAttentionAlert,
+  paymentExpiredMessage,
   headerSafe,
   planBookingNotifications,
   type BookingNotificationInput,
@@ -45,6 +48,17 @@ import {
 } from '../src/lib/booking-notify';
 import { readFileSync } from 'node:fs';
 import type { BookingMessageType } from '../src/lib/booking-email';
+
+/**
+ * ONE FROZEN CLOCK FOR EVERY SEND IN THIS FILE (BK-32).
+ *
+ * The notification idempotency prefix now carries an attempt component, so
+ * `new Date()` at each call site would make every prefix in this file unique
+ * for a reason that has nothing to do with what is being asserted — and the
+ * distinctness checks would then pass with the message TYPE dropped from the
+ * key entirely. A fixed instant is what keeps those assertions able to fail.
+ */
+const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
 
 let failures = 0;
 function check(condition: boolean, message: string) {
@@ -510,7 +524,7 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
     throw new Error('socket hang up');
   };
 
-  const ok = await sendBookingNotifications(plan, { send: sent });
+  const ok = await sendBookingNotifications(plan, SEND_NOW, { send: sent });
   check(ok.customer === 'sent' && ok.internal === 'sent', 'both send → both sent');
 
   // The attachments survive the send path. Asserted here as well as on the plan
@@ -524,7 +538,7 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
   // ITS OWN recipient. A builder that attached the office ICS to both would
   // satisfy a bare "two messages carry attachments".
   const delivered: Message[] = [];
-  await sendBookingNotifications(plan, {
+  await sendBookingNotifications(plan, SEND_NOW, {
     send: async (m) => {
       delivered.push(m);
       return { ok: true };
@@ -553,19 +567,19 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
     'which is to say the two are not the same artifact sent twice',
   );
 
-  const bad = await sendBookingNotifications(plan, { send: failed });
+  const bad = await sendBookingNotifications(plan, SEND_NOW, { send: failed });
   check(
     bad.customer === 'failed' && bad.internal === 'failed',
     'a resolved error response is reported as failed, never as sent',
   );
 
-  const thrown = await sendBookingNotifications(plan, { send: threw });
+  const thrown = await sendBookingNotifications(plan, SEND_NOW, { send: threw });
   check(
     thrown.customer === 'failed' && thrown.internal === 'failed',
     'a throwing sender is caught rather than escaping into the route',
   );
 
-  const skipped = await sendBookingNotifications(noEmailPlan, { send: sent });
+  const skipped = await sendBookingNotifications(noEmailPlan, SEND_NOW, { send: sent });
   check(
     skipped.customer === 'skipped' && skipped.internal === 'sent',
     'no customer email → skipped, and the office is still notified',
@@ -585,7 +599,7 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
   ] as const) {
     process.env.BOOKING_NOTIFY_DISABLED = value;
     const attempts: Message[] = [];
-    const outcome = await sendBookingNotifications(plan, {
+    const outcome = await sendBookingNotifications(plan, SEND_NOW, {
       send: async (m) => {
         attempts.push(m);
         return { ok: true };
@@ -618,7 +632,7 @@ console.log('\nSend outcomes — the mapping the SDK makes easy to get wrong');
     check(internalFinished, 'the office notification does not wait behind a slow customer send');
     return { ok: true };
   };
-  await sendBookingNotifications(plan, { send: slowCustomer });
+  await sendBookingNotifications(plan, SEND_NOW, { send: slowCustomer });
 }
 
 // ---------------------------------------------------------------------------
@@ -634,14 +648,14 @@ console.log('\nSend then record — the stamp never revises the answer');
     seen.push(s);
   };
 
-  check(await notifyAndStamp(plan, { send: sent, stamp: record }), 'a sent confirmation reports true');
+  check(await notifyAndStamp(plan, SEND_NOW, { send: sent, stamp: record }), 'a sent confirmation reports true');
   check(
     seen.length === 1 && seen[0].customer === true && seen[0].internal === true,
     'and the stamp is told what actually sent',
   );
 
   check(
-    !(await notifyAndStamp(plan, { send: failed, stamp: record })),
+    !(await notifyAndStamp(plan, SEND_NOW, { send: failed, stamp: record })),
     'a failed send reports false',
   );
   check(
@@ -658,7 +672,7 @@ console.log('\nSend then record — the stamp never revises the answer');
     throw new Error('column "confirmation_sent_at" does not exist');
   };
   check(
-    await notifyAndStamp(plan, { send: sent, stamp: throwingStamp }),
+    await notifyAndStamp(plan, SEND_NOW, { send: sent, stamp: throwingStamp }),
     'a failed stamp does not turn a sent confirmation into an unsent one',
   );
 }
@@ -802,18 +816,44 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
     'expired',
   ];
 
-  // AC1 — every transition gets its own prefix, and the same one twice.
-  const prefixes = ALL_TYPES.map((t) => notifyIdempotencyPrefix(7, t));
+  // AC1 — every transition gets its own prefix.
+  //
+  // ── THE FROZEN CLOCK IS WHAT MAKES THIS ABLE TO FAIL (BK-32) ─────────────
+  //
+  // Since the prefix gained an attempt component, mapping these through
+  // `new Date()` would vary the epoch on every iteration — so
+  // `new Set(prefixes).size === 6` would pass **even with the message type
+  // dropped from the prefix entirely**, and this would join the seven
+  // assertions this repo has already caught for being unable to go red. One
+  // instant across the whole map is what leaves the TYPE as the only thing
+  // separating them.
+  const prefixes = ALL_TYPES.map((t) => notifyIdempotencyPrefix(7, t, SEND_NOW));
   check(
     new Set(prefixes).size === ALL_TYPES.length,
-    `all ${ALL_TYPES.length} message types produce distinct prefixes`,
+    `all ${ALL_TYPES.length} message types produce distinct prefixes at one instant`,
   );
   check(
-    notifyIdempotencyPrefix(7, 'payment-link') === notifyIdempotencyPrefix(7, 'payment-link'),
-    'the same (id, type) is stable — a retry still collapses',
+    prefixes.every((p) => /-\d{9,}$/.test(p)),
+    'and each carries an attempt component, so a re-issue is not collapsed',
   );
   check(
-    notifyIdempotencyPrefix(7, 'confirmed') !== notifyIdempotencyPrefix(8, 'confirmed'),
+    notifyIdempotencyPrefix(7, 'payment-link', SEND_NOW) ===
+      notifyIdempotencyPrefix(7, 'payment-link', SEND_NOW),
+    'one (id, type, attempt) is stable — a retry WITHIN one attempt still collapses',
+  );
+  // The property BK-32 deliberately gives up, asserted rather than left to be
+  // discovered. BK-43's version of this line claimed a retry collapses full
+  // stop; it now collapses only inside one attempt, which is exactly what
+  // `inviteIdempotencyPrefix` has always done and what makes a re-issued
+  // payment link and a second Resend click deliver at all.
+  check(
+    notifyIdempotencyPrefix(7, 'payment-link', SEND_NOW) !==
+      notifyIdempotencyPrefix(7, 'payment-link', new Date(SEND_NOW.getTime() + 1000)),
+    'and a LATER attempt at the same transition is a different key — the re-issue delivers',
+  );
+  check(
+    notifyIdempotencyPrefix(7, 'confirmed', SEND_NOW) !==
+      notifyIdempotencyPrefix(8, 'confirmed', SEND_NOW),
     'two bookings never share a prefix',
   );
 
@@ -829,13 +869,18 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
     return { ok: true } as SendResult;
   };
 
+  // ONE INSTANT FOR BOTH SENDS, so the only thing that can separate their keys
+  // is the message type. With two clocks this would pass whatever the prefix
+  // did with the type.
   const oneAddress = { ...INSURANCE, id: 991, email: 'same@example.com' };
   await sendBookingNotifications(
     planBookingNotifications({ ...oneAddress, messageType: 'request' }),
+    SEND_NOW,
     { send: recordingSend },
   );
   await sendBookingNotifications(
     planBookingNotifications({ ...oneAddress, messageType: 'payment-link' }),
+    SEND_NOW,
     { send: recordingSend },
   );
 
@@ -849,15 +894,33 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
     'and their idempotency keys differ, so Resend delivers both rather than collapsing the second',
   );
 
-  // AC3 — the dedupe the key exists for still works inside one transition.
+  // AC3 — the dedupe the key exists for, and the re-issue it must NOT eat.
+  //
+  // Two sends of one transition at ONE instant are a retry, and they share a
+  // key so Resend collapses them. Two sends at DIFFERENT instants are a
+  // deliberate re-issue — the office correcting an amount and re-approving, or
+  // clicking Resend because the customer never got the first one — and they must
+  // not collapse. That second case is BK-23's S2 and the ROADMAP's Resend trap,
+  // and before BK-32 it was silently swallowed with a "sent" flash.
   seen.length = 0;
   const retried = planBookingNotifications({ ...oneAddress, messageType: 'payment-link' });
-  await sendBookingNotifications(retried, { send: recordingSend });
-  await sendBookingNotifications(retried, { send: recordingSend });
+  await sendBookingNotifications(retried, SEND_NOW, { send: recordingSend });
+  await sendBookingNotifications(retried, SEND_NOW, { send: recordingSend });
   const retryKeys = seen.filter((k) => k.endsWith(':same@example.com'));
   check(
     retryKeys.length === 2 && new Set(retryKeys).size === 1,
-    'a retry of the SAME transition reuses one key — Resend still collapses it',
+    'a retry within one attempt reuses one key — Resend still collapses it',
+  );
+
+  seen.length = 0;
+  await sendBookingNotifications(retried, SEND_NOW, { send: recordingSend });
+  await sendBookingNotifications(retried, new Date(SEND_NOW.getTime() + 60_000), {
+    send: recordingSend,
+  });
+  const reissueKeys = seen.filter((k) => k.endsWith(':same@example.com'));
+  check(
+    reissueKeys.length === 2 && new Set(reissueKeys).size === 2,
+    'a RE-ISSUE of the same transition gets its own key — the corrected amount actually reaches the customer',
   );
 
   // AC4 — source pin. The defect is a template literal at a call site, and it
@@ -900,14 +963,35 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
   // have been deleted with it still green.
   // `= createResendSender(` rather than `createResendSender(`, so the exported
   // declaration on line 113 is not counted as a fifth call site.
+  //
+  // BK-32 ADDED A FIFTH SENDER, AND IT IS THE EXCEPTION THAT HAS TO BE NAMED.
+  // `sendOfficeMessage` passes `null` — no `Idempotency-Key` header at all —
+  // because its recipient is the fixed office address, so any key stable across
+  // sends would make Resend collapse the second payment alert into the first.
+  // That is the same decision the contact form and the lead reply already make.
+  //
+  // Counted separately rather than folded into a looser regex: "four take a
+  // keyPrefix and exactly one deliberately takes null" is the property, and a
+  // pin that merely allowed `null` anywhere would go green if somebody quietly
+  // dropped the prefix from the payment-link send.
   const senderCalls = notifySrc.match(/= createResendSender\([^)]*\)/g) ?? [];
   check(
-    senderCalls.length === 4,
-    `all four senders in this file construct through createResendSender (found ${senderCalls.length})`,
+    senderCalls.length === 5,
+    `all five senders in this file construct through createResendSender (found ${senderCalls.length})`,
+  );
+  const keyed = senderCalls.filter((call) => /createResendSender\(apiKey, keyPrefix\)/.test(call));
+  const unkeyed = senderCalls.filter((call) => /createResendSender\(apiKey, null\)/.test(call));
+  check(
+    keyed.length === 4,
+    `four senders pass the keyPrefix variable, never an inline expression (found ${keyed.length})`,
   );
   check(
-    senderCalls.every((call) => /createResendSender\(apiKey, keyPrefix\)/.test(call)),
-    'and every one of them passes the keyPrefix variable, never an inline expression',
+    unkeyed.length === 1,
+    `and exactly one — the office alert — deliberately passes null (found ${unkeyed.length})`,
+  );
+  check(
+    keyed.length + unkeyed.length === senderCalls.length,
+    'with nothing else in between: a sender takes a builder prefix or an explicit null',
   );
   const assignments = notifySrc.match(/const keyPrefix = .*/g) ?? [];
   check(
@@ -999,6 +1083,171 @@ console.log('\nThe stale-request expiry message (BK-23 Task 4)');
   check(
     expiredRequestMessage({ ...INSURANCE, messageType: 'expired', email: null }) === null,
     'a row with no email address yields no message rather than a broken send',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe PAYMENT expiry message (BK-32) — a third expiry, a third set of words');
+// ---------------------------------------------------------------------------
+//
+// Three ways a booking can end without a visit now, and each describes a
+// different event. The at-capacity decline is a claim about our schedule. The
+// stale-request expiry is our failure to look. This one is neither: the office
+// approved, quoted a price, gave a deadline, and the customer did not pay by it.
+//
+// The failure mode being guarded is a lazy reuse — sending one of the other two
+// because they are "near enough" — which would tell a customer we were at
+// capacity when we were not, or apologise for a miss that was theirs.
+{
+  const lapsed = paymentExpiredMessage({ ...INSURANCE, messageType: 'expired' });
+  check(lapsed !== null, 'an unpaid approval with an email address gets a message');
+  const bodies = [lapsed?.html ?? '', lapsed?.text ?? '', lapsed?.subject ?? ''];
+
+  for (const [i, body] of bodies.entries()) {
+    const where = ['html', 'text', 'subject'][i];
+    check(
+      !/at capacity/i.test(body),
+      `the payment expiry ${where} does not claim we were at capacity`,
+    );
+    check(
+      !/\byou'?re booked\b|\bconfirmed\b/i.test(body),
+      `the payment expiry ${where} claims no booking`,
+    );
+    // NO INVOICE LANGUAGE. Nothing was owed and nothing is outstanding —
+    // somebody who simply changed their mind must not be sent something that
+    // reads like a missed bill.
+    check(
+      !/\boverdue\b|\bowe\b|\boutstanding\b|\bunpaid balance\b|\binvoice\b/i.test(body),
+      `the payment expiry ${where} does not read as a missed bill`,
+    );
+  }
+
+  // It says nothing was charged. That is the single most reassuring fact
+  // available and the one a customer will scan for.
+  check(
+    /nothing has been charged/i.test(lapsed?.text ?? ''),
+    'it says plainly that nothing was charged',
+  );
+
+  // Same rule as the stale-request message: the offer must be in the REBOOK
+  // LINE, not merely in the footer every message carries. Asserted this way
+  // because the first version of the sibling assertion read the whole body and
+  // therefore could not fail.
+  check(
+    PAYMENT_EXPIRED_REBOOK_LINE.includes(SUPPORT_PHONE),
+    'the rebook line carries the phone number — not merely the footer, which every message has',
+  );
+  check(
+    /call or text/i.test(PAYMENT_EXPIRED_REBOOK_LINE),
+    'and offers it in words rather than only printing a number',
+  );
+  check(
+    (lapsed?.html ?? '').includes(PAYMENT_EXPIRED_REBOOK_LINE) &&
+      (lapsed?.text ?? '').includes(PAYMENT_EXPIRED_REBOOK_LINE),
+    'and that line reaches both bodies',
+  );
+
+  // THE THREE MESSAGES ARE THREE MESSAGES. This is the assertion that fails if
+  // somebody reuses one for another.
+  const stale = expiredRequestMessage({ ...INSURANCE, messageType: 'expired' });
+  const declined = declineMessage({ ...INSURANCE, messageType: 'declined' });
+  const htmls = [lapsed?.html ?? '', stale?.html ?? '', declined?.html ?? ''];
+  check(
+    new Set(htmls).size === 3,
+    'the payment expiry, the stale-request expiry and the decline are three distinct messages',
+  );
+  const headings = [lapsed?.subject ?? '', stale?.subject ?? '', declined?.subject ?? ''];
+  check(
+    new Set(headings).size === 3,
+    'and three distinct subjects — a customer skimming their inbox can tell them apart',
+  );
+  // It must not borrow the stale-request message's apology, which owns a
+  // failure that is ours. This one is nobody's fault and saying otherwise is
+  // its own small untruth.
+  check(
+    !/our fault/i.test(lapsed?.text ?? ''),
+    'the payment expiry does not apologise for a miss that did not happen',
+  );
+
+  check(
+    paymentExpiredMessage({ ...INSURANCE, messageType: 'expired', email: null }) === null,
+    'a row with no email address yields no message rather than a broken send',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nEach sweep sends ITS OWN message (BK-32)');
+// ---------------------------------------------------------------------------
+//
+// Everything above asserts that the three expiry messages are three different
+// messages. **That is not the same as the right one being sent**, and a
+// deliberate swap — sweep 1 calling `expiredRequestMessage` — left every one of
+// those assertions green, because they test builders and not callers. The
+// customer who did not pay would have been told nobody looked at their request.
+//
+// A SOURCE PIN, and its weakness is real: it reads the cron rather than running
+// it. Running it would not help — the harness mutes mail, and both sweeps use
+// `messageType: 'expired'` deliberately (the two lifecycles are mutually
+// exclusive), so the mute line cannot tell them apart either. What is pinned is
+// the pairing: which builder sits inside which loop.
+{
+  const cron = readFileSync('src/pages/api/cron/expire-payments.ts', 'utf8');
+
+  const unpaidLoop = cron.slice(cron.indexOf('for (const row of unpaid)'));
+  const staleLoop = cron.slice(cron.indexOf('for (const row of stale)'));
+  const unpaidBody = unpaidLoop.slice(0, unpaidLoop.indexOf('\n  }'));
+  const staleBody = staleLoop.slice(0, staleLoop.indexOf('\n  }'));
+
+  check(unpaidBody.length > 0 && staleBody.length > 0, 'both sweep loops were located in the source');
+  check(
+    unpaidBody.includes('paymentExpiredMessage(') && !unpaidBody.includes('expiredRequestMessage('),
+    'the PAYMENT sweep sends the payment-expiry copy, and only that',
+  );
+  check(
+    staleBody.includes('expiredRequestMessage(') && !staleBody.includes('paymentExpiredMessage('),
+    'the STALE-REQUEST sweep sends the stale-request copy, and only that',
+  );
+  // Neither may ever reach for the at-capacity decline — a claim about our
+  // schedule, false in both of these situations.
+  check(
+    !cron.includes('declineMessage('),
+    'and neither sweep sends the at-capacity decline, which is a claim about our schedule',
+  );
+
+  console.log('  the payment sweep and the request sweep do not share a message');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe office alert for money that needs a human (BK-32)');
+// ---------------------------------------------------------------------------
+{
+  const row = {
+    id: 4271,
+    name: 'Sam Probe',
+    status: 'confirmed' as const,
+    slot_start: new Date('2026-08-25T17:30:00.000Z'),
+  };
+  const alert = paymentAttentionAlert(row, 'DOUBLE PAYMENT: a stripe payment arrived.', new Date());
+
+  check(alert.to === BOOKING_INTERNAL_TO, 'it goes to the office, not the customer');
+  check(alert.subject.includes('4271'), 'the subject names the booking, so it is actionable from a phone');
+
+  // ALMOST NO PII, and that is a property rather than an accident: an alert has
+  // no use for a policy number, a claim number, a description or an address, and
+  // every field omitted is a field that cannot leak.
+  const whole = `${alert.html}${alert.text}${alert.subject}`;
+  check(!/POL-/.test(whole) && !/CLM-/.test(whole), 'it carries no policy or claim number');
+  check(
+    !whole.includes(INSURANCE.address),
+    'and no street address — an alert does not need one',
+  );
+
+  // It names what NOT to do. The office reads this with a customer possibly on
+  // the phone, and "refund it" is the obvious reflex.
+  check(
+    /NOT been refunded|not refunded/i.test(`${alert.html}${alert.text}`) ||
+      /refund/i.test(alert.text),
+    'it mentions the refund question rather than leaving the office to guess',
   );
 }
 

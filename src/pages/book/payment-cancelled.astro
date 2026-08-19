@@ -1,0 +1,70 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.svelte';
+import Footer from '../../components/Footer.astro';
+import {
+  PAYMENT_CANCELLED_HEADING,
+  PAYMENT_CANCELLED_HELP_LINE,
+  PAYMENT_CANCELLED_LEAD,
+} from '../../lib/booking-copy';
+import { SUPPORT_PHONE } from '../../lib/booking-config';
+
+/**
+ * The Checkout Session's `cancel_url` (BK-32).
+ *
+ * Where a customer lands when they back out of Stripe's payment page. **Nothing
+ * has gone wrong**, and that is the only thing this page has to establish: the
+ * request exists, the office has approved it, the slot is still held, and the
+ * link in their email works until its deadline.
+ *
+ * Sending them to `/book/` instead — the obvious "back to the site" choice —
+ * would put an empty booking form in front of somebody who has already booked,
+ * which is the one instruction that is actively wrong here and the way one job
+ * gets requested twice.
+ *
+ * ── STATIC, AND CARRYING NO SESSION AND NO ISLAND ──────────────────────────
+ *
+ * Unlike `/book/confirmed/` this page needs to know nothing about the visitor:
+ * every word of it is true for anyone who arrives, so there is nothing to look
+ * up, nothing to hydrate and nothing that can be wrong. It is also the reason
+ * it fires no analytics event — an abandoned checkout is not a conversion and
+ * not a funnel failure we can act on from here.
+ */
+const title = 'Payment cancelled | YEG Restoration Edmonton';
+const description = 'No payment was taken. Your assessment request is still with us.';
+---
+
+<!--
+  noindex, and excluded from the sitemap in astro.config.mjs alongside its two
+  siblings. A page about one visitor's abandoned payment has nothing to rank for.
+-->
+<Layout title={title} description={description} noindex={true}>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main class="pt-28 pb-20">
+    <div class="max-w-2xl mx-auto px-6">
+      <div
+        class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
+      >
+        <div class="text-center">
+          <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">
+            {PAYMENT_CANCELLED_HEADING}
+          </h1>
+          <p class="text-yeg-text-secondary mb-4">{PAYMENT_CANCELLED_LEAD}</p>
+          <p class="text-sm text-yeg-text-secondary">{PAYMENT_CANCELLED_HELP_LINE}</p>
+          <a
+            href="tel:+17804793285"
+            class="inline-block mt-6 bg-yeg-amber hover:bg-yeg-amber-deep text-white font-semibold rounded-lg px-6 py-3 transition-colors"
+          >
+            Call {SUPPORT_PHONE}
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

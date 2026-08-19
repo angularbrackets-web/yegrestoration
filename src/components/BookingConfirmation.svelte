@@ -29,10 +29,17 @@
     RECEIVED_HOLD_LINE,
     RECEIVED_LEAD,
     RECEIVED_NEXT_STEPS,
+    PAID_HEADING,
+    PAID_HELP_LINE,
+    PAID_LEAD,
     RECEIVED_TIMING_LINE,
     VISIT_LENGTH_LINE,
   } from '../lib/booking-copy';
-  import { loadConfirmation, reportBookingConversion } from '../lib/booking-handoff';
+  import {
+    loadConfirmation,
+    paidLandingSession,
+    reportBookingConversion,
+  } from '../lib/booking-handoff';
   import { SUPPORT_PHONE } from '../lib/booking-form';
 
   const PHONE_HREF = 'tel:+17804793285';
@@ -54,24 +61,54 @@
   const isReceived = $derived(variant === 'received');
 
   let confirmation = $state<Confirmation | null>(null);
+  /** True once this load has been established as a real payment landing. */
+  let paid = $state(false);
 
   onMount(() => {
-    const stored = loadConfirmation();
-    if (!stored) {
-      // replace, not assign: the confirmed URL should not sit in history as a
-      // Back target that redirects again.
+    // ── `received`: the REQUEST page. Renders from the stored payload, and
+    //    fires NO conversion. A request is a lead — the office may decline it
+    //    and nobody has paid for it — so counting it would have Google Ads bid
+    //    against leads. This is BK-32's N5 decision: the conversion is the
+    //    payment, not the request.
+    if (isReceived) {
+      const stored = loadConfirmation();
+      if (!stored) {
+        // replace, not assign: the page should not sit in history as a Back
+        // target that redirects again.
+        window.location.replace(BOOKING_PATH);
+        return;
+      }
+      confirmation = stored;
+      return;
+    }
+
+    // ── `confirmed`: the PAYMENT landing, reached from Stripe's redirect.
+    //
+    // The Checkout Session id in the URL is the only evidence this page has,
+    // and WITHOUT IT THERE IS NOTHING TO RENDER. Falling back to the stored
+    // payload would be worse than redirecting: that payload was written by
+    // /book/received/ for a REQUEST, so somebody who submitted twice in one tab
+    // and then paid for the first would be shown the second one's slot,
+    // address and reference under a heading saying they are booked.
+    const sessionId = paidLandingSession();
+    if (!sessionId) {
       window.location.replace(BOOKING_PATH);
       return;
     }
-    confirmation = stored;
-    reportBookingConversion(stored.id);
+    paid = true;
+
+    // Keyed on the session, not on the booking id: `sessionStorage` is empty
+    // whenever the customer paid from the emailed link on another device, which
+    // is the common case. `id` is 0 when there is no payload, and the GA4 event
+    // then simply omits `booking_id` rather than inventing one.
+    reportBookingConversion(sessionId, loadConfirmation()?.id ?? 0);
   });
 </script>
 
 <div
   class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
 >
-  {#if confirmation}
+  {#if isReceived && confirmation}
     <div class="text-center">
       <div
         class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6"
@@ -79,20 +116,16 @@
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
       </div>
       <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">
-        {isReceived ? RECEIVED_HEADING : "You're booked"}
+        {RECEIVED_HEADING}
       </h1>
-      {#if isReceived}
-        <p class="text-yeg-text-secondary mb-4">{RECEIVED_LEAD}</p>
-      {/if}
+      <p class="text-yeg-text-secondary mb-4">{RECEIVED_LEAD}</p>
       {#if confirmation.slotLabel}
         <p class="text-lg text-yeg-text">{confirmation.slotLabel}</p>
       {/if}
       {#if confirmation.address}
         <p class="text-yeg-text-secondary">{confirmation.address}</p>
       {/if}
-      {#if isReceived}
-        <p class="text-sm text-yeg-text-secondary mt-2">{RECEIVED_HOLD_LINE}</p>
-      {/if}
+      <p class="text-sm text-yeg-text-secondary mt-2">{RECEIVED_HOLD_LINE}</p>
       <p class="text-sm text-yeg-text-secondary mt-2">
         {VISIT_LENGTH_LINE}{#if confirmation.id > 0}
           Reference #{confirmation.id}.{/if}
@@ -104,22 +137,19 @@
           booking with no email address all render nothing here rather than
           promising a message that will not arrive.
         -->
-        <p class="text-sm text-yeg-text-secondary mt-2">
-          {isReceived ? RECEIVED_EMAILED_LINE : EMAILED_LINE}
-        </p>
+        <p class="text-sm text-yeg-text-secondary mt-2">{RECEIVED_EMAILED_LINE}</p>
       {/if}
     </div>
 
     <!--
-      What happens next, on the received page only. The confirmed page needs no
-      such list: nothing further happens there except the visit.
+      What happens next. The confirmed page needs no such list: by the time
+      anyone reaches it the only thing left is the visit.
 
       This block does the work the old "You're booked" heading was doing badly.
       It tells the customer where they actually stand, in order, including that
       the calendar invite arrives AFTER payment rather than now.
     -->
-    {#if isReceived}
-      <ol class="mt-8 rounded-lg p-5 text-left space-y-3" style="background-color:rgba(0,0,0,0.03)">
+    <ol class="mt-8 rounded-lg p-5 text-left space-y-3" style="background-color:rgba(0,0,0,0.03)">
         {#each RECEIVED_NEXT_STEPS as step, i (step)}
           <li class="flex items-start gap-3 text-sm text-yeg-text-secondary">
             <span
@@ -130,8 +160,7 @@
           </li>
         {/each}
       </ol>
-      <p class="mt-4 text-sm text-yeg-text-secondary text-center">{RECEIVED_TIMING_LINE}</p>
-    {/if}
+    <p class="mt-4 text-sm text-yeg-text-secondary text-center">{RECEIVED_TIMING_LINE}</p>
 
     <div class="mt-8 rounded-lg p-5 text-left" style="background-color:rgba(0,0,0,0.03)">
       <h2 class="font-display font-bold text-lg text-yeg-text mb-3">{HAVE_READY_HEADING}</h2>
@@ -149,10 +178,58 @@
       To cancel or reschedule, call or text
       <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{SUPPORT_PHONE}</a>.
     </p>
+  {:else if paid}
+    <!--
+      THE PAYMENT LANDING — A RECEIPT, NOT A STATE CLAIM.
+      ==================================================
+      This page verifies nothing. It makes no network call, it writes nothing,
+      and the session id in its URL is shape-checked rather than confirmed
+      against Stripe — so it must not assert what only the webhook knows. "Your
+      booking is confirmed" is a claim about state; "payment received" is a
+      claim about what the visitor just did, and only the second one is ours to
+      make.
+
+      IT ALSO RENDERS NO STORED PAYLOAD, DELIBERATELY. The `sessionStorage`
+      record on this origin was written by /book/received/ for a REQUEST and has
+      no relationship to any payment: someone who submitted two requests in one
+      tab and paid for the first would be shown the second one's slot, address
+      and reference. A wrong booking under a confident heading is worse than no
+      detail at all — and the real details are in the confirmation email, which
+      `markPaid()` sends and which is the artifact that actually knows.
+    -->
+    <div class="text-center">
+      <div
+        class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6"
+      >
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+      <h1 class="font-display font-bold text-3xl text-yeg-text mb-3">{PAID_HEADING}</h1>
+      <p class="text-yeg-text-secondary mb-4">{PAID_LEAD}</p>
+      <p class="text-sm text-yeg-text-secondary">{PAID_HELP_LINE}</p>
+    </div>
+
+    <div class="mt-8 rounded-lg p-5 text-left" style="background-color:rgba(0,0,0,0.03)">
+      <h2 class="font-display font-bold text-lg text-yeg-text mb-3">{HAVE_READY_HEADING}</h2>
+      <ul class="space-y-2">
+        {#each HAVE_READY_ITEMS as item (item)}
+          <li class="flex items-start gap-2 text-sm text-yeg-text-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep mt-0.5 shrink-0" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span>{item}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+
+    <p class="mt-6 text-sm text-yeg-text-secondary text-center">
+      To cancel or reschedule, call or text
+      <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{SUPPORT_PHONE}</a>.
+    </p>
+
   {:else}
     <!--
       The pre-hydration state, and the one that shows for the instant before a
-      payload-less visit redirects. Deliberately says nothing about a booking.
+      visit with nothing to show redirects. Deliberately says nothing about a
+      booking or a payment.
     -->
     <p class="text-sm text-yeg-text-secondary py-12 text-center" role="status">
       {isReceived ? 'Checking your request…' : 'Checking your booking…'}

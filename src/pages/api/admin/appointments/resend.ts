@@ -87,16 +87,21 @@ export const POST: APIRoute = async ({ request }) => {
       return redirect(`${detail}?email=refused`);
     }
 
+    // ONE CLOCK FOR BOTH USES, AND THE SECOND USE IS WHAT MAKES THIS BUTTON
+    // WORK AT ALL (BK-32). It reaches the ICS on `plan.internal`, which this
+    // route never delivers — and, since the idempotency prefix gained an
+    // attempt component, it is also what makes a SECOND click a different
+    // Resend key. Before that, clicking Resend inside Resend's 24-hour window
+    // delivered nothing, flashed "sent", and logged nothing — on the one button
+    // that exists to recover a message the customer never got.
+    const now = new Date();
     const plan = planForAppointment(
       appointment,
       SERVICE_LABELS[appointment.service] ?? appointment.service,
-      // Reaches only the ICS on `plan.internal`, which this route never
-      // delivers — see `planForAppointment`. A real clock rather than a
-      // placeholder for the same reason the file count is real.
-      new Date(),
+      now,
       appointment.file_count,
     );
-    const outcome = await sendConfirmationAndStamp(sql, plan);
+    const outcome = await sendConfirmationAndStamp(sql, plan, now);
     // 'skipped' here can only be the mute flag — the gate above already
     // established there is a customer message to send. Reported as "none sent"
     // rather than as a failure, so the office is not sent back to a button

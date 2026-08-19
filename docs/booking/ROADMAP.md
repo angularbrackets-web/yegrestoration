@@ -290,23 +290,36 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   not a guard.** It belongs in the tool everything goes through. Severity:
   **high** (live outage, manual recovery); owner: fixed here.
 
-- **The admin Resend button still collides with the booking-time confirmation,
-  and BK-43 did not close it.** Found in BK-43's implementation review,
-  2026-08-18. `api/admin/appointments/resend.ts:90` builds its plan through
-  `planForAppointment`, whose `messageType` defaults to `'confirmed'`
-  (`booking-admin-notify.ts:151`) — byte-identical to the key the payment-time
-  confirmation uses. So: customer says "I never got my confirmation", the office
-  clicks Resend inside Resend's 24-hour dedupe window, **nothing is delivered,
-  the flash reads "sent", and nothing logs**. BK-43 fixed the shape of the key,
-  not this collision — it is genuinely outside that ticket, whose scope was the
-  prefix and not the resend semantics. **Severity: medium, and rising with
-  P9** — under prepay this button is the office's only manual recovery for
-  exactly the silent-loss failure BK-43 exists to prevent, and it fails silently
-  in the same way. The fix is an attempt-varying component in the prefix, which
-  is what `inviteIdempotencyPrefix(id, kind, now)` already does on the calendar
-  side and what the mail path has no equivalent of. **Owner: BK-32**, which is
-  the ticket that adds the other manual send (`markPaid()`) and will need the
-  same property.
+- ~~**The admin Resend button still collides with the booking-time
+  confirmation.**~~ **CLOSED in BK-32 — and the diagnosis above was wrong, which
+  is the part worth keeping.** This entry claimed `resend.ts:90` collided with
+  "the payment-time confirmation" because `planForAppointment` defaults
+  `messageType` to `'confirmed'`. Checked at BK-32's plan review, against the
+  code rather than against this paragraph:
+
+  - `markPaid()` sends the payment-time confirmation through
+    `sendCalendarInvite` → `inviteIdempotencyPrefix(id, kind, now)`, which has
+    carried a clock since BK-16. It never produces `booking-<id>-confirmed`.
+  - Since BK-23 both create paths pass `messageType: 'request'` explicitly
+    (`api/booking/create.ts:223`, `api/admin/appointments/create.ts:132`).
+
+  So `resend.ts` was the **only** producer of that key in the whole codebase,
+  and there was nothing for it to collide *with*. The real defect was one step
+  simpler and just as bad: **clicked twice inside Resend's 24-hour window, the
+  button delivers once and reports "sent" both times** — on the office's only
+  manual recovery for a message that went missing.
+
+  Fixed by `notifyIdempotencyPrefix` gaining an attempt component
+  (`booking-<id>-<type>-<epoch s>`), mirroring `inviteIdempotencyPrefix`. The
+  same clause closes BK-23's S2, which was real as written.
+
+  **The transferable part is not the fix.** This entry was written from a
+  reading of the code and was wrong about which pair of things collided; it then
+  survived into two tickets' plans as a premise nobody re-derived, and BK-32's
+  first plan restated it verbatim. **A Known trap is a claim with a shelf life,
+  and one that names specific call sites should be re-checked against them
+  before it is inherited** — the codebase moved underneath this one twice
+  (BK-16, then BK-23) and the paragraph did not.
 
 - **`update.ts`'s ICS boundary is keyed on the literal `'cancelled'`, and P9
   gives it three exits instead of one.** `update.ts:209-213` computes
@@ -1220,7 +1233,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | ✅ **implemented 2026-08-18** — gates green, 4 red rows; awaiting review |
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
-| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft — also inherits BK-23's S2 (attempt-varying idempotency prefix, a prerequisite once cancel-and-re-approve exists) and N5 (double conversion on `success_url`) |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 38 red rows, migration 010 on dev only. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1247,7 +1260,7 @@ together or the site tells a lie between deploys.
 
    | | |
    | --- | --- |
-   | **BK-32** | not started, **except its expiry cron**, which shipped early because Task 4 had nowhere else to live (`/api/cron/expire-payments/`, both sweeps, gated). Until the rest exists `createCheckoutUrl` returns null, so the approval email offers Interac alone. **Open against it:** expiring a row must also cancel its Checkout Session |
+   | **BK-32** | ✅ **implemented 2026-08-19** — Checkout Session at approval (transition first, then Stripe), webhook with a three-layer claim, `markPaid()` with its two callers, the Interac admin action, migration 010, the conversion moved onto the payment, and `verify:stripe:webhook` simulating the generated route table. 23 gates green, 38 red rows. **The open item is closed:** the expiry sweep now cancels the Checkout Session of every row it expires. Awaiting implementation review, together with the Task 4 cron commit |
    | **BK-36** | not started, and it is a **release gate** — the terms box states the standard prices while the picker and both emails show the price that applies. A Saturday mould booking mails a customer a document that contradicts itself about the amount *and* about whether the choice binds |
    | **BK-23 Task 4** | ✅ **built 2026-08-19** — the stale-request expiry sweep, in BK-32's cron handler. Gated and red-observed; awaiting implementation review |
 

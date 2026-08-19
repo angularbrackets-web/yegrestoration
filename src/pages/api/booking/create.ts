@@ -259,8 +259,8 @@ async function notify(
       // inline, that post-response work is not guaranteed to run — and its
       // failure is swallowed inside `notifyAndStamp`, where it is asserted.
       // 'skipped' and 'failed' both leave NULL, which reads as "nobody was told".
-      notifyAndStamp(plan, {
-        stamp: (sent) =>
+      notifyAndStamp(plan, now, {
+        stamp: (sent: { customer: boolean; internal: boolean }) =>
           // Fresh clock, not the request's: this is when the send returned, and
           // BK-07/BK-08 read these columns as timestamps.
           stampNotifications(sql, id, sent, new Date()),

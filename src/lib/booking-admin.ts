@@ -49,6 +49,9 @@ export const ADMIN_APPOINTMENT_RESEND_ENDPOINT = '/api/admin/appointments/resend
 /** Approve or decline a request (BK-23). Separate from update for the reason in that route's header. */
 export const ADMIN_APPOINTMENT_REVIEW_ENDPOINT = '/api/admin/appointments/review/';
 
+/** "Mark as paid — Interac" (BK-32). The second caller of `markPaid()`. */
+export const ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT = '/api/admin/appointments/mark-paid/';
+
 /**
  * BK-40's soft delete.
  *

@@ -36,7 +36,10 @@ export default defineConfig({
         !page.includes('/admin') &&
         !page.includes('/upload/') &&
         !page.endsWith('/book/confirmed/') &&
-        !page.endsWith('/book/received/'),
+        !page.endsWith('/book/received/') &&
+        // BK-32's cancel_url. Same rule as its two siblings: one visitor's
+        // abandoned payment has nothing to rank for.
+        !page.endsWith('/book/payment-cancelled/'),
     }),
     mdx(),
   ],

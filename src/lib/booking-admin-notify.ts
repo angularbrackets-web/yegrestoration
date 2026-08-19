@@ -449,12 +449,19 @@ export function planRestoreEmail(event: IcsEvent, email: string, now: Date): Mes
 export async function sendConfirmationAndStamp(
   sql: Sql,
   plan: NotificationPlan,
+  /**
+   * The attempt, for the idempotency prefix (BK-32). Required rather than a
+   * fresh `new Date()` here: the resend button's whole job is that a SECOND
+   * click delivers, and a clock this function owned would be a clock a verify
+   * script could not drive.
+   */
+  now: Date,
   deps: NotifyDeps = {},
 ): Promise<SendOutcome> {
   try {
     return await withDeadline(
       (async (): Promise<SendOutcome> => {
-        const outcome = await sendCustomerConfirmation(plan, deps);
+        const outcome = await sendCustomerConfirmation(plan, now, deps);
         if (outcome === 'sent') {
           try {
             // Fresh clock: this is when the send returned, not when the request

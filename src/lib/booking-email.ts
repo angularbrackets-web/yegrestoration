@@ -59,10 +59,15 @@ import {
   EXPIRED_REQUEST_HEADING,
   EXPIRED_REQUEST_LEAD,
   EXPIRED_REQUEST_REBOOK_LINE,
+  PAYMENT_ATTENTION_RULE,
+  PAYMENT_EXPIRED_HEADING,
+  PAYMENT_EXPIRED_LEAD,
+  PAYMENT_EXPIRED_REBOOK_LINE,
   DECLINED_LEAD,
   DECLINED_REBOOK_LINE,
 } from './booking-copy';
 import { assessmentQuote, formatCents, type AssessmentTier } from './booking-pricing';
+import type { Appointment } from './db';
 import { formatSlot } from './booking-time';
 
 /**
@@ -663,6 +668,130 @@ export function expiredRequestMessage(input: BookingNotificationInput): Message 
     from: BOOKING_EMAIL_FROM,
     replyTo: BOOKING_EMAIL_REPLY_TO,
     subject: `${EXPIRED_REQUEST_HEADING} — ${input.slotLabel}`,
+    html,
+    text,
+  };
+}
+
+/**
+ * The PAYMENT expiry (BK-32) — the office approved, the customer did not pay by
+ * the deadline, and the slot has been released.
+ *
+ * Its own builder rather than a flag on `expiredRequestMessage`, for the reason
+ * that one gives for not being a flag on `declineMessage`: a boolean parameter
+ * on a customer-facing message is how the wrong branch gets sent. Three
+ * expiries now exist and each describes a different event — see
+ * `PAYMENT_EXPIRED_HEADING` for what makes this one distinct.
+ *
+ * Returns null with no email address. There is nobody to tell, and the slot is
+ * released either way.
+ */
+export function paymentExpiredMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(PAYMENT_EXPIRED_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(PAYMENT_EXPIRED_LEAD)}</p>`,
+    table(
+      [
+        rawRow('Was held for', `<strong>${escapeHtml(when)}</strong>`),
+        row('Service', input.serviceLabel),
+        input.id > 0 ? row('Reference', `#${input.id}`) : '',
+      ].filter(Boolean),
+    ),
+    `<p style="margin:16px 0;">${escapeHtml(PAYMENT_EXPIRED_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    PAYMENT_ATTENTION_RULE,
+  PAYMENT_EXPIRED_HEADING,
+    '',
+    PAYMENT_EXPIRED_LEAD,
+    '',
+    `Was held for: ${when}`,
+    `Service:      ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference:    #${input.id}`] : []),
+    '',
+    PAYMENT_EXPIRED_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    to: input.email,
+    from: BOOKING_EMAIL_FROM,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(`${PAYMENT_EXPIRED_HEADING} — ${input.slotLabel}`),
+    html,
+    text,
+  };
+}
+
+/**
+ * The office alert for money that landed somewhere it should not have (BK-32).
+ *
+ * **Internal only, and it carries no PII rules of its own because it carries
+ * almost no PII**: a name, a reference and the sentence describing what
+ * happened. No policy or claim number, no description, no address — an alert
+ * has no use for them and every field omitted is a field that cannot leak.
+ *
+ * It exists because `needs_attention` on a row nobody is looking at is not an
+ * alert. The two cases that reach it — a double payment, and a payment landing
+ * after the slot was released — both need a human within hours, and both are
+ * cases where the wrong reaction (an automatic refund) is worse than the right
+ * one being slow.
+ *
+ * **It names what NOT to do.** The office reads this while a customer is
+ * possibly on the phone, and "refund it" is the obvious reflex; the ticket's
+ * rule is that a human issues any refund deliberately, in the Stripe dashboard.
+ */
+export function paymentAttentionAlert(
+  appointment: Pick<Appointment, 'id' | 'name' | 'status' | 'slot_start'>,
+  line: string,
+  now: Date,
+): Message {
+  const heading = `Payment needs attention — booking #${appointment.id}`;
+  const when = `${formatSlot(appointment.slot_start)} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:20px;margin:0 0 16px;">${escapeHtml(heading)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(line)}</p>`,
+    `<p style="margin:0 0 16px;"><strong>${escapeHtml(PAYMENT_ATTENTION_RULE)}</strong></p>`,
+    table([
+      row('Customer', appointment.name),
+      row('Slot', when),
+      row('Status', appointment.status),
+      row('Noticed', formatSlot(now)),
+    ]),
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    heading,
+    '',
+    line,
+    '',
+    PAYMENT_ATTENTION_RULE,
+    '',
+    `Customer: ${appointment.name}`,
+    `Slot:     ${when}`,
+    `Status:   ${appointment.status}`,
+    `Noticed:  ${formatSlot(now)}`,
+  ].join('\n');
+
+  return {
+    to: BOOKING_INTERNAL_TO,
+    from: BOOKING_EMAIL_FROM,
+    // The office writing to itself. Present rather than omitted: omitting it
+    // sends a reply to the `noreply@` From, which bounces 550 (BK-21).
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(heading),
     html,
     text,
   };

@@ -43,7 +43,6 @@
     QUOTE_TIMING_NOTE,
   } from '../lib/booking-copy';
   import {
-    reportBookingConversion,
     reportBookingFunnelEvent,
     storeConfirmation,
   } from '../lib/booking-handoff';
@@ -540,20 +539,22 @@
 
           if (storeConfirmation(confirmation)) {
             leaving = true;
-            // The conversion is reported on the confirmed page, keyed on the
-            // booking id — not here as well, or one booking counts twice.
-            // `replace`, not `assign`: Back from the confirmation must not land
+            // `replace`, not `assign`: Back from the request page must not land
             // on a fresh empty form, which is how one job gets booked twice.
             window.location.replace(BOOKING_RECEIVED_PATH);
             break;
           }
 
-          // sessionStorage refused the write. The booking is committed either
+          // sessionStorage refused the write. The request is committed either
           // way, so navigating would send them to a page with nothing to show
-          // that bounces straight back to an empty form. Keep the BK-03 card,
-          // and report from here — nothing else is going to.
+          // that bounces straight back to an empty form. Keep the BK-03 card.
+          //
+          // NO CONVERSION IS REPORTED HERE, and its absence is the decision
+          // rather than an omission (BK-32, N5). This branch is on the REQUEST
+          // path — the office has not reviewed it and nobody has paid for it —
+          // and under P9 the conversion is the payment. It fires once, on
+          // /book/confirmed/, keyed on the Stripe Checkout Session.
           result = confirmation;
-          reportBookingConversion(confirmation.id);
           break;
         }
         case 'fields':

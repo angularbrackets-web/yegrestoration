@@ -399,6 +399,53 @@ export const DECLINED_LEAD =
  * No apology for "the delay" — the delay is the whole event, not a detail of
  * it.
  */
+/**
+ * `/book/confirmed/` — the post-payment landing (BK-32).
+ *
+ * ── A RECEIPT, NOT A STATE CLAIM, AND THE DISTINCTION IS THE WHOLE POINT ───
+ *
+ * This page is reached from Stripe's redirect and it **verifies nothing**: it
+ * makes no network call, it writes nothing, and the session id in its URL is
+ * shape-checked rather than confirmed against Stripe. Anyone can type the URL.
+ * So it must not assert what only the webhook knows — "You're booked" is a
+ * claim about state that this page is in no position to make, and P9 exists to
+ * stop exactly that kind of claim being made on exactly this kind of surface.
+ *
+ * What it can honestly say is what the customer just did: they paid. The
+ * booking details reach them in the confirmation email that `markPaid()` sends,
+ * which is the artifact that actually knows.
+ *
+ * ── AND IT DOES NOT RENDER THE STORED REQUEST PAYLOAD ──────────────────────
+ *
+ * The `sessionStorage` payload on this origin was written by `/book/received/`
+ * for a REQUEST and has no relationship to any payment. Someone who submits two
+ * requests in one tab and then pays for the first would be shown the second
+ * one's slot, address and reference number. That is a wrong booking under a
+ * confident heading, which is worse than no detail at all.
+ */
+export const PAID_HEADING = 'Thanks — payment received';
+
+export const PAID_LEAD =
+  'Your confirmation email and calendar invite are on their way. They carry the time, the address and your booking reference.';
+
+export const PAID_HELP_LINE = `If it has not arrived within a few minutes, check your junk folder or call or text us on ${SUPPORT_PHONE}.`;
+
+/**
+ * `/book/payment-cancelled/` — the `cancel_url`.
+ *
+ * The customer backed out of Stripe's page. **Nothing has gone wrong and
+ * nothing is lost**, which is the only thing this page needs to establish: the
+ * request still exists, the office has already approved it, and the link in
+ * their email still works until the deadline. Sending them back to an empty
+ * `/book/` form would be the one instruction that is actively wrong.
+ */
+export const PAYMENT_CANCELLED_HEADING = 'No payment was taken';
+
+export const PAYMENT_CANCELLED_LEAD =
+  'Your assessment request is still here and we are still holding your time. The payment link in your approval email works until the deadline it gives — open it again whenever you are ready.';
+
+export const PAYMENT_CANCELLED_HELP_LINE = `If something went wrong with the payment, or you would rather pay another way, call or text us on ${SUPPORT_PHONE}.`;
+
 export const EXPIRED_REQUEST_HEADING = 'We did not get to your request in time';
 
 export const EXPIRED_REQUEST_LEAD =
@@ -408,3 +455,44 @@ export const EXPIRED_REQUEST_REBOOK_LINE = `Please call or text us on ${SUPPORT_
 
 export const DECLINED_REBOOK_LINE =
   'You are welcome to pick another time, and if the damage is urgent please call or text us — we will do what we can.';
+
+/**
+ * The PAYMENT expiry (BK-32), and it is neither of the two above.
+ *
+ * Three expiries now exist and each is a different event, so each gets its own
+ * words. The at-capacity decline is a claim about our schedule. The stale
+ * request is our failure to look. This one is neither: the office approved,
+ * quoted a price, gave a deadline, and the customer did not pay by it — so the
+ * only honest framing is that the reservation lapsed, without implying they did
+ * something wrong. People miss a payment window because they were at work, or
+ * because the email went to spam, or because they decided against it, and the
+ * copy has to be true for all three.
+ *
+ * **No "unfortunately", and no invoice language.** Nothing was owed and nothing
+ * is outstanding — a message that reads like a missed bill would be false and
+ * would frighten somebody who simply changed their mind.
+ *
+ * The phone is offered for the same reason it is offered on the stale-request
+ * message: the damage that made them book has not gone away.
+ */
+/**
+ * The line every payment-attention alert carries, whatever the alert is about.
+ *
+ * **IN THE BUILDER, NOT IN THE CALLER'S SENTENCE**, and the difference is the
+ * whole reason it is a constant. Each caller describes a different problem — a
+ * double payment, a payment after the slot went, an amount that did not match —
+ * and if the instruction rode along in those sentences then the fourth caller
+ * would be the one that forgot it. The office reads these with a customer
+ * possibly on the phone, and "just refund it" is the obvious reflex; a refund
+ * issued in a hurry against a payment that was never doubled is the mistake
+ * this line exists to slow down.
+ */
+export const PAYMENT_ATTENTION_RULE =
+  'Nothing has been refunded automatically. Check what actually happened before moving any money, then issue any refund by hand in the Stripe dashboard.';
+
+export const PAYMENT_EXPIRED_HEADING = 'Your assessment time has been released';
+
+export const PAYMENT_EXPIRED_LEAD =
+  'The time we were holding for your assessment was not paid for by the deadline, so we have released it for someone else. Nothing has been charged, and there is nothing to settle.';
+
+export const PAYMENT_EXPIRED_REBOOK_LINE = `If you still want the assessment, please call or text us on ${SUPPORT_PHONE} and we will find you another time — if the damage is urgent, say so and we will treat it that way. You can also pick a new time on the website.`;

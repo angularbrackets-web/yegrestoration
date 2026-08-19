@@ -295,6 +295,77 @@ export const BOOKING_RECEIVED_PATH = '/book/received/';
  */
 export const BOOKING_CONFIRMED_PATH = '/book/confirmed/';
 
+/**
+ * Where a customer lands after ABANDONING the Stripe Checkout page (BK-32).
+ *
+ * Its own page rather than sending them back to `/book/`: the form would be
+ * empty and the request already exists, so "start again" is the one instruction
+ * that is actively wrong. The row is still `approved_awaiting_payment` and the
+ * link in their email still works until the deadline, which is what this page
+ * says.
+ */
+export const BOOKING_PAYMENT_CANCELLED_PATH = '/book/payment-cancelled/';
+
+/**
+ * The query parameter Stripe puts the Checkout Session id in on the way back.
+ *
+ * `{CHECKOUT_SESSION_ID}` in a `success_url` is substituted by Stripe. The name
+ * is spelled once, here, because THREE things read it and they must agree: the
+ * `success_url` builder below, the confirmation island deciding whether this is
+ * a payment landing at all, and the conversion keyed on its value.
+ */
+export const STRIPE_SESSION_QUERY_PARAM = 'session_id';
+
+/**
+ * Stripe's own substitution token. A literal, unencoded, and it must stay that
+ * way — `encodeURIComponent` would turn the braces into `%7B…%7D` and Stripe
+ * would hand the customer back a URL containing the literal text rather than
+ * their session id.
+ */
+const STRIPE_SESSION_PLACEHOLDER = '{CHECKOUT_SESSION_ID}';
+
+/**
+ * The absolute URLs a Checkout Session redirects to.
+ *
+ * ABSOLUTE, because Stripe redirects a browser from its own domain — a relative
+ * path is not a destination. There is no site-origin constant in this codebase:
+ * every absolute URL is built at its call site from `Astro.site`, so the origin
+ * is a parameter here rather than a fourth place the domain is written down.
+ *
+ * SLASHED, because `astro.config.mjs` sets `trailingSlash: 'always'` and the
+ * unslashed form answers 308. A browser follows that, so the customer would
+ * still arrive — but the query string survives a 308 and the extra hop is
+ * pointless, and the same rule applied to the WEBHOOK is not survivable at all
+ * (Stripe does not follow redirects). Both are asserted against the generated
+ * route table in `scripts/verify-stripe-webhook.ts`.
+ */
+export function checkoutSuccessUrl(origin: string | URL): string {
+  const url = new URL(BOOKING_CONFIRMED_PATH, origin);
+  return `${url.toString()}?${STRIPE_SESSION_QUERY_PARAM}=${STRIPE_SESSION_PLACEHOLDER}`;
+}
+
+export function checkoutCancelUrl(origin: string | URL): string {
+  return new URL(BOOKING_PAYMENT_CANCELLED_PATH, origin).toString();
+}
+
+/** Where Stripe posts payment events. Slashed — see `checkoutSuccessUrl`. */
+export const STRIPE_WEBHOOK_PATH = '/api/stripe/webhook/';
+
+/**
+ * The URL to paste into the Stripe dashboard, built from the same constant the
+ * route resolves to so the rollout note and the route cannot drift.
+ *
+ * **THE TRAILING SLASH IS THE WHOLE REASON THIS IS A FUNCTION.** Registered
+ * without it, Vercel answers 308 — and **Stripe does not follow redirects**, so
+ * every event fails, silently, in production only. A webhook is unsmokable
+ * under `astro dev` by definition, which puts this in the same family as
+ * BK-34a's upload links: the dev server resolves it, the route table decides
+ * it. See `/CLAUDE.md`'s Known trap.
+ */
+export function stripeWebhookUrl(origin: string | URL): string {
+  return new URL(STRIPE_WEBHOOK_PATH, origin).toString();
+}
+
 export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
 export const BOOKING_DRAFT_ENDPOINT = '/api/booking/draft/';
@@ -425,3 +496,23 @@ export const ICS_ORGANIZER = 'noreply@yegrestoration.ca';
  * documented Vercel default (10s); BK-11 confirms the plan's real limit.
  */
 export const POST_COMMIT_BUDGET_MS = 5000;
+
+/**
+ * Wall-clock ceiling on the one Stripe call the approval path makes.
+ *
+ * **DELIBERATELY SMALLER THAN `POST_COMMIT_BUDGET_MS`, AND THE ARITHMETIC IS
+ * THE REASON.** Since BK-32 the approve route creates the Checkout Session
+ * AFTER the guarded UPDATE, so a hung Stripe call sits in front of a mail send
+ * that already has its own 5000ms race. Two 5s races stack to 10s on top of the
+ * row read and the UPDATE, and nothing in this repo raises the function limit
+ * (`vercel.json` has no `functions` block, `astro.config.mjs` sets no adapter
+ * `maxDuration`) — so the platform default applies and the office gets a
+ * platform 504 for an approval that committed. 3000 + 5000 leaves headroom
+ * against the lowest documented Vercel default of 10s.
+ *
+ * Timing out is not an error state: it resolves to `null`, which is the same
+ * answer "no card processor is configured" gives, and the approval degrades to
+ * the Interac route. A late-arriving session is the one window BK-32 cannot
+ * close — it is live and unrecorded — so that path flags `needs_attention`.
+ */
+export const CHECKOUT_BUDGET_MS = 3000;

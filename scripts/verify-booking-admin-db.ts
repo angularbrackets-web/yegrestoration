@@ -100,6 +100,7 @@ const { GET: availability } = await import('../src/pages/api/booking/availabilit
 // before the module is imported — same swap-then-import ordering as the DB URL.
 process.env.CRON_SECRET = process.env.CRON_SECRET ?? 'verify-cron-secret';
 const { GET: expiryCron } = await import('../src/pages/api/cron/expire-payments');
+const { markPaid } = await import('../src/lib/booking-payment');
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { UNTICKED_NOTE } = await import('../src/lib/booking-admin-entry');
@@ -153,6 +154,17 @@ const createdFileIds: number[] = [];
 const LEAD_MARKER = 'BK-10 reply verification';
 const createdLeadIds: number[] = [];
 
+/**
+ * ONE FROZEN CLOCK FOR EVERY SEND IN THIS FILE (BK-32).
+ *
+ * The notification idempotency prefix now carries an attempt component, so
+ * `new Date()` at each call site would make every prefix in this file unique
+ * for a reason that has nothing to do with what is being asserted — and the
+ * distinctness checks would then pass with the message TYPE dropped from the
+ * key entirely. A fixed instant is what keeps those assertions able to fail.
+ */
+const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
+
 let failures = 0;
 function check(condition: boolean, message: string) {
   if (!condition) {
@@ -177,6 +189,36 @@ async function call(
   const res = await route({ request: post(fields) } as never);
   check(res.status === 302, `expected a 302 redirect, got ${res.status}`);
   return res.headers.get('Location') ?? '';
+}
+
+/**
+ * A slot instant no live row is holding (BK-32's arms).
+ *
+ * These arms insert directly rather than booking through the public route —
+ * they need rows already sitting in `approved_awaiting_payment`, which no door
+ * produces in one step. Direct inserts still meet the partial unique index, so
+ * two probes sharing one `slot_start` is a 23505 rather than a test failure.
+ *
+ * Deliberately far past the 14-day public window: nothing here goes through
+ * availability, and staying clear of it means these arms cannot consume the
+ * bookable slots `verify:booking:commit` is already at the ceiling of (ROADMAP,
+ * Known traps).
+ */
+let probeSlotCursor = 0;
+async function freeProbeSlot(): Promise<Date> {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    // 30 days out, then one hour per probe. On the grid's :30 to match the
+    // duration CHECK's expectations even though nothing here reads the grid.
+    const candidate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000 + probeSlotCursor * 60 * 60 * 1000);
+    candidate.setUTCMinutes(30, 0, 0);
+    probeSlotCursor++;
+    const held = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${candidate.toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    if (held.length === 0) return candidate;
+  }
+  throw new Error('freeProbeSlot: no free slot found in 400 attempts');
 }
 
 function idFromLocation(location: string): number | null {
@@ -641,7 +683,7 @@ try {
       // calendar attachment" unassertable at exactly the seam where a shared
       // builder makes attaching it to both a one-line edit.
       const delivered: Message[] = [];
-      const sentOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const sentOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async (m) => {
           delivered.push(m);
           return { ok: true };
@@ -672,7 +714,7 @@ try {
       //    show a timestamp for mail that never left, and the office would
       //    never think to resend.
       await reset();
-      const failedOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const failedOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => ({ ok: false, error: 'validation_error: API key is invalid' }),
       });
       check(failedOutcome === 'failed', `a resolved error reports failed, got ${failedOutcome}`);
@@ -683,7 +725,7 @@ try {
       // 3. A throwing sender is caught rather than escaping into the route —
       //    the appointment already exists by the time this runs.
       await reset();
-      const threwOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const threwOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => {
           throw new Error('socket hang up');
         },
@@ -695,7 +737,7 @@ try {
       //    stamp either, or a muted test run would leave a false timestamp.
       process.env.BOOKING_NOTIFY_DISABLED = '1';
       await reset();
-      const mutedOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const mutedOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => ({ ok: true }),
       });
       check(mutedOutcome === 'skipped', `the mute reports skipped, got ${mutedOutcome}`);
@@ -1907,6 +1949,30 @@ try {
     const payNow = await seed('approved_awaiting_payment', hours(1), { paymentDueAt: null });
     const confirmedRow = await seed('confirmed', hours(1));
 
+    // THE ROW WITH A LIVE CHECKOUT SESSION (BK-32).
+    //
+    // Expiring the row releases the slot, but the Stripe link stays payable
+    // until its own `expires_at` — so a customer can pay for a time somebody
+    // else may already have booked. This is the open dependency the ROADMAP
+    // records against this ticket, and one call per expired row closes it.
+    //
+    // Observable WITHOUT a Stripe key, which is what makes it assertable here:
+    // `expireCheckoutSession` returns false when nothing is configured, so the
+    // handler counts it under `sessionsUncancelled`. A non-zero count proves the
+    // sweep REACHED Stripe for that row; deleting the loop takes it to zero.
+    await sql`
+      UPDATE appointments SET stripe_session_id = ${'cs_test_cronprobe0001'}
+      WHERE id = ${awaitingOverdue}
+    `;
+    // A SECOND overdue row with NO session — an approval that fell back to the
+    // Interac route. Without it the sweep expires exactly one row and "call
+    // Stripe for the row that has a session" is indistinguishable from "call
+    // Stripe for every row"; a deliberate break to the latter stayed green on
+    // one row, which is how this fixture earned its place.
+    const overdueNoSession = await seed('approved_awaiting_payment', hours(2), {
+      paymentDueAt: hours(-1),
+    });
+
     const res = await expiryCron({
       request: new Request('https://example.com/api/cron/expire-payments/', {
         headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
@@ -1938,7 +2004,28 @@ try {
       counts.requestsExpired >= 2,
       `at least the two seeded stale requests expired, got ${counts.requestsExpired}`,
     );
-    check(counts.paymentsExpired === 1, `one payment expired, got ${counts.paymentsExpired}`);
+    check(counts.paymentsExpired === 2, `both overdue payments expired, got ${counts.paymentsExpired}`);
+    check(
+      await statusOf(overdueNoSession) === 'payment_expired',
+      'including the one that never had a card link',
+    );
+
+    // The sweep tried to kill the link. It cannot succeed without a Stripe key,
+    // and that is exactly why the ATTEMPT is what gets asserted — the count is
+    // zero if the loop is not there at all.
+    check(
+      (counts.sessionsCancelled ?? 0) + (counts.sessionsUncancelled ?? 0) === 1,
+      `the sweep reached Stripe ONCE — for the row holding a session and not for the one without, got ${JSON.stringify({
+        cancelled: counts.sessionsCancelled,
+        uncancelled: counts.sessionsUncancelled,
+      })}`,
+    );
+    // And it did NOT try for the rows with no session — a call per expired row
+    // regardless would be a call per row for nothing, every fifteen minutes.
+    check(
+      (counts.sessionsCancelled ?? 0) === 0,
+      'with nothing reported cancelled, since no key is configured in this harness',
+    );
 
     // The system actor is RECORDED, not inferred, and does not eat the office's
     // note. BK-40's repair of this exact idiom is why both halves are asserted.
@@ -2016,6 +2103,363 @@ try {
     check(unauthorized.status === 401, `an unauthenticated call is refused, got ${unauthorized.status}`);
 
     console.log('  both sweeps, the pay-now exemption, the audit line, and the released slot');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — markPaid, the one confirmation path, and its three no-ops');
+  // -------------------------------------------------------------------------
+  //
+  // Every one of these goes through `markPaid` rather than through SQL, because
+  // the property under test is that ONE function decides every payment outcome.
+  // Mail is muted by BOOKING_NOTIFY_DISABLED, which is what the log lines the
+  // route emits are read for elsewhere in this file.
+  {
+    /** An `approved_awaiting_payment` row with an amount settled on it. */
+    async function seedAwaitingPayment(
+      totalCents: number,
+      sessionId: string | null = null,
+    ): Promise<number> {
+      const slot = await freeProbeSlot();
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, assessment_tier, payment_status,
+                                  approved_at, assessment_amount_cents, travel_fee_cents,
+                                  gst_cents, total_amount_cents, payment_due_at,
+                                  stripe_session_id)
+        VALUES ('MarkPaid Probe', '780-555-0142', 'markpaid@example.com', 'water', '9 Paid Ave',
+                'private', ${slot.toISOString()}, 'approved_awaiting_payment', 'standard',
+                'pending', ${new Date().toISOString()}, 39900, 0, 1995, ${totalCents},
+                ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${sessionId})
+        RETURNING id
+      `) as { id: number }[];
+      createdIds.push(inserted[0].id);
+      return inserted[0].id;
+    }
+
+    const NOW = new Date();
+
+    // ── The happy path ─────────────────────────────────────────────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      const outcome = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_happy',
+        paymentIntentId: 'pi_test_happy',
+        sessionId: 'cs_test_happy0001',
+        now: NOW,
+      });
+      check(outcome === 'confirmed', `a paid session confirms, got "${outcome}"`);
+
+      const row = (await sql`
+        SELECT status, payment_status, payment_method, paid_amount_cents, payment_reference,
+               stripe_payment_intent_id, total_amount_cents, paid_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.status === 'confirmed', 'the status becomes confirmed');
+      check(row[0]?.payment_status === 'paid', 'payment_status becomes paid');
+      check(row[0]?.payment_method === 'stripe', 'the method is recorded');
+      check(row[0]?.paid_at !== null, 'paid_at is stamped');
+      // THE SNAPSHOT SURVIVES THE PAYMENT. What arrived goes in its own column;
+      // `total_amount_cents` is what the approval settled and the email quoted,
+      // and overwriting it would leave nothing to compare a receipt against.
+      check(row[0]?.paid_amount_cents === 41895, 'what arrived is recorded in paid_amount_cents');
+      check(
+        row[0]?.total_amount_cents === 41895,
+        'and total_amount_cents is UNTOUCHED — it is the approval snapshot, not the receipt',
+      );
+      check(
+        row[0]?.stripe_payment_intent_id === 'pi_test_happy',
+        'the payment intent lands in the column BK-33 refunds from',
+      );
+    }
+
+    // ── THE APPROVAL SNAPSHOT SURVIVES A PAYMENT THAT DISAGREES WITH IT ────
+    //
+    // A SEPARATE ARM WITH A DIFFERENT AMOUNT, because the happy path above
+    // cannot test this: there the arriving amount equals the settled total, so
+    // writing one over the other is invisible and the check stayed green
+    // through a deliberate break. The amounts have to differ for the property
+    // to be observable at all.
+    //
+    // They differ here by construction rather than by accident — `markPaid`
+    // takes what arrived as a parameter, and a partial payment, a Terminal
+    // handler, or an office member marking an e-Transfer that came up short all
+    // supply something other than the quote. `total_amount_cents` is what the
+    // approval email told the customer, so it has to survive any of them or
+    // there is nothing left to compare a receipt against.
+    {
+      const id = await seedAwaitingPayment(41895);
+      const outcome = await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 40000,
+        reference: 'ETR-SHORT',
+        actor: 'Dana',
+        now: NOW,
+      });
+      check(outcome === 'confirmed', `a short payment still confirms, got "${outcome}"`);
+      const row = (await sql`
+        SELECT paid_amount_cents, total_amount_cents FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.paid_amount_cents === 40000, 'what actually arrived is recorded');
+      check(
+        row[0]?.total_amount_cents === 41895,
+        'and the approval snapshot is UNCHANGED — the two are different columns for this reason',
+      );
+    }
+
+    // ── ONE PAYMENT DELIVERED TWICE IS NOT A DOUBLE PAYMENT ────────────────
+    //
+    // Stripe redelivers by design, and `checkout.session.completed` plus
+    // `async_payment_succeeded` can both reach here for one session. Reporting
+    // those as a double payment would tell the office to refund a single charge
+    // — and the ticket's rule is that a human acts on that alert.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_twice',
+        paymentIntentId: 'pi_test_twice',
+        sessionId: 'cs_test_twice0001',
+        now: NOW,
+      });
+      const again = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_twice',
+        paymentIntentId: 'pi_test_twice',
+        sessionId: 'cs_test_twice0001',
+        now: NOW,
+      });
+      check(again === 'already-recorded', `a redelivery is silent, got "${again}"`);
+      const row = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${id}
+      `) as { needs_attention: string | null }[];
+      check(
+        row[0]?.needs_attention === null,
+        'and it flags NOTHING — the office is not told to refund a single charge',
+      );
+    }
+
+    // ── TWO PAYMENTS IS A DOUBLE PAYMENT, AND IT NEVER REFUNDS ─────────────
+    //
+    // The real race: the office marks an e-Transfer, then the customer pays the
+    // Stripe link too. The second arrival must no-op and flag.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-8891',
+        actor: 'Dana',
+        now: NOW,
+      });
+      const clash = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_clash',
+        paymentIntentId: 'pi_test_clash',
+        sessionId: 'cs_test_clash0001',
+        now: NOW,
+      });
+      check(clash === 'double-pay', `a DIFFERENT payment on a confirmed row is a double pay, got "${clash}"`);
+
+      const row = (await sql`
+        SELECT payment_method, payment_reference, interac_marked_by, needs_attention, status
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.status === 'confirmed', 'the row stays confirmed');
+      check(
+        row[0]?.payment_method === 'interac' && row[0]?.payment_reference === 'ETR-8891',
+        'the FIRST payment keeps the columns — the loser overwrites nothing',
+      );
+      check(row[0]?.interac_marked_by === 'Dana', 'including who asserted it');
+      check(
+        typeof row[0]?.needs_attention === 'string' &&
+          (row[0].needs_attention as string).includes('DOUBLE PAYMENT'),
+        'and the row is flagged for a human',
+      );
+      check(
+        (row[0].needs_attention as string).includes('NOT refunded automatically'),
+        'with the instruction that nothing was refunded — never move money without a person',
+      );
+    }
+
+    // ── PAID AFTER THE SLOT WAS RELEASED ───────────────────────────────────
+    //
+    // The cron/webhook race the ticket calls out. The money is real: record it,
+    // flag it, and DO NOT put the status back — the slot may already be rebooked.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'payment_expired' WHERE id = ${id}`;
+      const late = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_late',
+        paymentIntentId: 'pi_test_late',
+        sessionId: 'cs_test_late00001',
+        now: NOW,
+      });
+      check(late === 'paid-after-release', `a payment on a released row records, got "${late}"`);
+
+      const row = (await sql`
+        SELECT status, payment_status, paid_amount_cents, needs_attention
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(
+        row[0]?.status === 'payment_expired',
+        'the STATUS IS NOT PUT BACK — the slot may already belong to somebody else',
+      );
+      check(row[0]?.payment_status === 'paid', 'but the money is recorded');
+      check(row[0]?.paid_amount_cents === 41895, 'with the amount that arrived');
+      check(
+        typeof row[0]?.needs_attention === 'string' &&
+          (row[0].needs_attention as string).includes('PAID AFTER THE SLOT WAS RELEASED'),
+        'and flagged for a human',
+      );
+    }
+
+    // ── AN INTERAC REFERENCE NEVER LANDS IN THE STRIPE COLUMN ──────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-4410',
+        actor: 'Sam',
+        now: NOW,
+      });
+      const row = (await sql`
+        SELECT payment_reference, stripe_payment_intent_id, interac_marked_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.payment_reference === 'ETR-4410', 'the e-Transfer reference is recorded');
+      check(
+        row[0]?.stripe_payment_intent_id === null,
+        'and NOT in stripe_payment_intent_id, which BK-33 would aim a refund at',
+      );
+      check(row[0]?.interac_marked_at !== null, 'interac_marked_at is stamped');
+    }
+
+    // ── A ROW IN NO PAYABLE STATE ──────────────────────────────────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'pending_review' WHERE id = ${id}`;
+      const nope = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_nope',
+        now: NOW,
+      });
+      check(nope === 'not-applicable', `an unapproved row is not payable, got "${nope}"`);
+    }
+
+    console.log('  one path, four outcomes, and nothing is ever refunded automatically');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — the approve route transitions BEFORE it talks to Stripe');
+  // -------------------------------------------------------------------------
+  //
+  // With no STRIPE_SECRET_KEY set — which is the state of this environment —
+  // `createCheckoutSession` returns null and the approval degrades to the
+  // Interac route. That is the supported state, and it is enough to observe the
+  // ORDER: the columns are stamped and the flash says the card link was not
+  // created, rather than the whole approval being refused.
+  {
+    {
+      const slot = await freeProbeSlot();
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, assessment_tier)
+        VALUES ('Order Probe', '780-555-0177', 'order@example.com', 'water', '2 Order Rd',
+                'private', ${slot.toISOString()}, 'pending_review', 'standard')
+        RETURNING id
+      `) as { id: number }[];
+      const orderId = inserted[0].id;
+      createdIds.push(orderId);
+
+      const location = await call(reviewRoute, { id: String(orderId), action: 'approve' });
+      // `review=approved` covers all three success variants — `approved`,
+      // `approved-interac` and `approved-nomail`. Which one comes back depends
+      // on whether mail went, and mail cannot go in this harness (no valid
+      // Resend key), so pinning the exact string would be pinning the
+      // environment. What the arm is actually about is below: the row
+      // transitioned, `approved_at` is stamped, and no session was minted.
+      check(
+        location.includes('review=approved'),
+        `the approval COMPLETES rather than being refused, got "${location}"`,
+      );
+
+      const row = (await sql`
+        SELECT status, approved_at, total_amount_cents, stripe_session_id
+        FROM appointments WHERE id = ${orderId}
+      `) as Record<string, unknown>[];
+      // THE TRANSITION RAN. Under the old order the Checkout Session was created
+      // first and `approved_at` did not exist when its idempotency key needed it.
+      check(row[0]?.status === 'approved_awaiting_payment', 'the row transitioned');
+      check(row[0]?.approved_at !== null, 'and approved_at IS STAMPED — the key names it');
+      check(row[0]?.total_amount_cents === 41895, 'with the settled total');
+      check(
+        row[0]?.stripe_session_id === null,
+        'and no session id, because no session was created — not a half-written one',
+      );
+
+      // A SECOND CLICK REACHES NOTHING. This is what the inversion buys: the
+      // guarded UPDATE returns zero rows, so Stripe is never called a second
+      // time and there is no orphan session to clean up.
+      const twice = await call(reviewRoute, { id: String(orderId), action: 'approve' });
+      check(twice.includes('review=stale'), `a second approve is a no-op, got "${twice}"`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — a $0.00 approval confirms without a payment step');
+  // -------------------------------------------------------------------------
+  {
+    const slot = await freeProbeSlot();
+    const inserted = (await sql`
+      INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                slot_start, status, assessment_tier)
+      VALUES ('Goodwill Probe', '780-555-0188', 'goodwill@example.com', 'water', '3 Free Ln',
+              'private', ${slot.toISOString()}, 'pending_review', 'standard')
+      RETURNING id
+    `) as { id: number }[];
+    const freeId = inserted[0].id;
+    createdIds.push(freeId);
+
+    const location = await call(reviewRoute, {
+      id: String(freeId),
+      action: 'approve',
+      assessment_amount: '0.00',
+      travel_fee: '0.00',
+    });
+    check(
+      location.includes('review=approved-free'),
+      `a $0 approval confirms in one step, got "${location}"`,
+    );
+
+    const row = (await sql`
+      SELECT status, payment_status, payment_method, total_amount_cents, payment_due_at,
+             stripe_session_id
+      FROM appointments WHERE id = ${freeId}
+    `) as Record<string, unknown>[];
+    check(row[0]?.status === 'confirmed', 'it reaches confirmed');
+    check(row[0]?.payment_status === 'paid', 'payment_status is paid');
+    // NOT 'not_required'. Migration 008 reserves that value for rows predating
+    // prepay, and reusing it would mix a live booking into the historical ones.
+    check(
+      row[0]?.payment_method === 'none',
+      "the method is 'none' — not payment_status 'not_required', which means something older",
+    );
+    check(row[0]?.total_amount_cents === 0, 'the total is zero');
+    check(
+      row[0]?.stripe_session_id === null,
+      'AND NO CHECKOUT SESSION WAS OPENED — a $0 session is a booking with a broken step, not one without a step',
+    );
+
+    console.log('  approved and confirmed through the same markPaid, with no link and no charge');
   }
 
 } finally {
