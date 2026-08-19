@@ -280,13 +280,20 @@ export function planCalendarInvite(event: IcsEvent, kind: IcsKind, now: Date): M
 // did receive the booking confirmation email but not the cancelled
 // notification email". These two are that email, plus the restore direction —
 // which is not a flourish. The resend button cannot restore a customer's
-// calendar: `sendCustomerConfirmation` keys idempotency on `booking-<id>`,
-// byte-identical to the booking-time confirmation, so within Resend's dedupe
-// window the restore is silently collapsed into a send from days ago and the
-// customer's calendar shows "cancelled" forever, with the flash reading
-// "sent". So un-cancel mails the restore itself, through the per-transition
-// key. (The resend button's fixed key is recorded in the ticket's Mechanism
-// and deliberately NOT changed here.)
+// calendar: `sendCustomerConfirmation` keys idempotency on the CONFIRMATION
+// transition, byte-identical to the booking-time confirmation, so within
+// Resend's dedupe window the restore is silently collapsed into a send from
+// days ago and the customer's calendar shows "cancelled" forever, with the
+// flash reading "sent". So un-cancel mails the restore itself, through its own
+// transition key.
+//
+// BK-43 changed the shape of that key (`booking-<id>-confirmed`, not
+// `booking-<id>`) but NOT this hazard: `planForAppointment` defaults
+// `messageType` to 'confirmed', so the resend button still collides with the
+// booking-time confirmation. Under P9 that button is the office's only manual
+// recovery for exactly the silent-loss failure BK-43 exists to prevent.
+// Recorded in ROADMAP's Known traps with a severity and an owner rather than
+// left in this comment; deliberately NOT changed here.
 //
 // CANCELLATION IS STILL PHONE-IN (locked). Neither message carries a URL, a
 // cancel link, or a token — they are the WRITTEN CONFIRMATION of something a

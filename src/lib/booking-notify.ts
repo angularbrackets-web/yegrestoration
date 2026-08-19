@@ -342,8 +342,12 @@ export async function sendCustomerMessage(
  * A separate exported function rather than a `NotificationPlan` wrapped around
  * the invite message, and the difference is not cosmetic — it is the
  * plan-review blocker. `sendBookingNotifications` and `sendCustomerConfirmation`
- * both key idempotency on `booking-<id>`, which is exactly right for a
- * notification: a retried booking must not mail the customer twice. Every
+ * used to key idempotency on a fixed `booking-<id>` — correct for a
+ * notification only while a booking sent the customer exactly one message, and
+ * **no longer true**: BK-43 made both key on `booking-<id>-<type>` for the same
+ * reason this function has always carried its kind. What follows is the
+ * original argument, and it now reads as the precedent rather than the
+ * exception. A retried booking must not mail the customer twice. Every
  * invite in one booking's lifecycle goes to the SAME office address, so that
  * fixed prefix would make the create, the cancel and the restore
  * byte-identical keys — Resend would collapse the CANCEL into a duplicate of

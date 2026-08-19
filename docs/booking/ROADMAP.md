@@ -210,6 +210,24 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   side; `inviteIdempotencyPrefix` (`booking-ics.ts:156`) exists precisely
   because a fixed prefix collapsed CANCEL into REQUEST. **Owner: BK-23, and it
   is the first task of Deploy 2** — the prefix must carry the transition.
+- **The admin Resend button still collides with the booking-time confirmation,
+  and BK-43 did not close it.** Found in BK-43's implementation review,
+  2026-08-18. `api/admin/appointments/resend.ts:90` builds its plan through
+  `planForAppointment`, whose `messageType` defaults to `'confirmed'`
+  (`booking-admin-notify.ts:151`) — byte-identical to the key the payment-time
+  confirmation uses. So: customer says "I never got my confirmation", the office
+  clicks Resend inside Resend's 24-hour dedupe window, **nothing is delivered,
+  the flash reads "sent", and nothing logs**. BK-43 fixed the shape of the key,
+  not this collision — it is genuinely outside that ticket, whose scope was the
+  prefix and not the resend semantics. **Severity: medium, and rising with
+  P9** — under prepay this button is the office's only manual recovery for
+  exactly the silent-loss failure BK-43 exists to prevent, and it fails silently
+  in the same way. The fix is an attempt-varying component in the prefix, which
+  is what `inviteIdempotencyPrefix(id, kind, now)` already does on the calendar
+  side and what the mail path has no equivalent of. **Owner: BK-32**, which is
+  the ticket that adds the other manual send (`markPaid()`) and will need the
+  same property.
+
 - **`update.ts`'s ICS boundary is keyed on the literal `'cancelled'`, and P9
   gives it three exits instead of one.** `update.ts:209-213` computes
   `wasCancelled` / `isCancelled` and derives the ICS kind from them. With

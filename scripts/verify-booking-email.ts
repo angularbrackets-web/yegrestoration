@@ -863,13 +863,56 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
   // attachment whitelist, and for the same reason: the fake sender cannot see
   // what the real one would have done.
   const notifySrc = readFileSync('src/lib/booking-notify.ts', 'utf8');
+
+  // The FIRST version of this pin did not implement AC4, and the review proved
+  // it: the regex below used to be
+  //
+  //     /createResendSender\([^)]*`booking-\$\{/
+  //
+  // which only matches a template literal sitting INSIDE the argument list,
+  // with no intervening `)`. But every sender here was restructured to
+  //
+  //     const keyPrefix = notifyIdempotencyPrefix(...);
+  //     send = createResendSender(apiKey, keyPrefix);
+  //
+  // so the natural regression — editing the `const keyPrefix =` line — never
+  // appears between those parens. Restoring `sendCustomerConfirmation` to the
+  // exact pre-BK-43 defect left this whole script GREEN. The pin credited with
+  // catching "the failure mode that matters most" caught one spelling of one
+  // of four senders.
+  //
+  // Pinned by COUNT instead: the prefix shape may be spelled exactly once in
+  // this file, in `notifyIdempotencyPrefix`'s own return. Any second occurrence
+  // is a site building its own, wherever it sits.
+  const prefixLiterals = (notifySrc.match(/`booking-\$\{/g) ?? []).length;
   check(
-    !/createResendSender\([^)]*`booking-\$\{/.test(notifySrc),
-    'no send site builds a prefix from a template literal — notifyIdempotencyPrefix is the only source',
+    prefixLiterals === 1,
+    `the prefix shape is spelled exactly once — in notifyIdempotencyPrefix's return (found ${prefixLiterals})`,
+  );
+
+  // And every sender must take its prefix from a builder rather than from
+  // anything else. Checked per call site, not by a total: the old `>= 3`
+  // threshold counted a doc-comment mention and the declaration itself, so it
+  // stood at 5 against a floor of 3 — two of the three real call sites could
+  // have been deleted with it still green.
+  // `= createResendSender(` rather than `createResendSender(`, so the exported
+  // declaration on line 113 is not counted as a fifth call site.
+  const senderCalls = notifySrc.match(/= createResendSender\([^)]*\)/g) ?? [];
+  check(
+    senderCalls.length === 4,
+    `all four senders in this file construct through createResendSender (found ${senderCalls.length})`,
   );
   check(
-    (notifySrc.match(/notifyIdempotencyPrefix\(/g) ?? []).length >= 3,
-    'both notification senders and the declaration all go through notifyIdempotencyPrefix',
+    senderCalls.every((call) => /createResendSender\(apiKey, keyPrefix\)/.test(call)),
+    'and every one of them passes the keyPrefix variable, never an inline expression',
+  );
+  const assignments = notifySrc.match(/const keyPrefix = .*/g) ?? [];
+  check(
+    assignments.length === 4 &&
+      assignments.every((line) =>
+        /(notifyIdempotencyPrefix|inviteIdempotencyPrefix)\(/.test(line),
+      ),
+    `every keyPrefix is assigned from a prefix builder (${assignments.length} assignments)`,
   );
 
   // AC5 — the contact form and lead reply pass null and must keep sending no
