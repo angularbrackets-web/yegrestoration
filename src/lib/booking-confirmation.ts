@@ -132,6 +132,47 @@ export function paidLandingSessionId(search: string, param: string): string | nu
   return isCheckoutSessionId(value) ? value : null;
 }
 
+/**
+ * WHAT A CONFIRMATION PAGE LOAD SHOULD DO, AS A VALUE.
+ *
+ * The two pages share one island, and which of them may report a conversion —
+ * and which may render at all — used to be control flow inside `onMount`,
+ * pinned by a verify check on the textual ORDER of an `if` and a call. That is
+ * an assertion about how the code looks rather than about what it decides:
+ * changing the `received` branch's `return` to a fall-through would keep it
+ * green while the request path started reporting conversions again. Same family
+ * as the `default:` pin the webhook shed, and the same remedy — the decision
+ * becomes a pure function and gets driven.
+ *
+ *   `redirect`  nothing to show. /book/ is where they go.
+ *   `request`   /book/received/ with a stored request. Renders it, reports NOTHING.
+ *   `paid`      /book/confirmed/ reached from Stripe. Receipt panel, and the
+ *               conversion fires — keyed on the session, not on any payload.
+ */
+export type ConfirmationRender = 'redirect' | 'request' | 'paid';
+
+export function planConfirmationRender(input: {
+  variant: 'received' | 'confirmed';
+  /** The raw `?session_id=` value, unvalidated. */
+  sessionId: string | null;
+  /** Whether a stored request payload was found in this tab. */
+  hasStoredRequest: boolean;
+}): ConfirmationRender {
+  const { variant, sessionId, hasStoredRequest } = input;
+
+  if (variant === 'received') {
+    // A REQUEST NEVER REPORTS. The office may decline it and nobody has paid
+    // for it, so counting it would have Google Ads bidding against leads.
+    return hasStoredRequest ? 'request' : 'redirect';
+  }
+
+  // The payment page. The session id is the ONLY evidence it has, and a stored
+  // payload is not evidence of anything: it was written by /book/received/ for
+  // a REQUEST, so somebody who submitted twice in one tab and paid for the
+  // first would be shown the second one's details under a confident heading.
+  return isCheckoutSessionId(sessionId) ? 'paid' : 'redirect';
+}
+
 /** One `gtag('event', …)` call, described rather than made. */
 export type GtagCall = { event: string; params: Record<string, unknown> };
 

@@ -40,6 +40,7 @@
     paidLandingSession,
     reportBookingConversion,
   } from '../lib/booking-handoff';
+  import { planConfirmationRender } from '../lib/booking-confirmation';
   import { SUPPORT_PHONE } from '../lib/booking-form';
 
   const PHONE_HREF = 'tel:+17804793285';
@@ -65,43 +66,38 @@
   let paid = $state(false);
 
   onMount(() => {
-    // ── `received`: the REQUEST page. Renders from the stored payload, and
-    //    fires NO conversion. A request is a lead — the office may decline it
-    //    and nobody has paid for it — so counting it would have Google Ads bid
-    //    against leads. This is BK-32's N5 decision: the conversion is the
-    //    payment, not the request.
-    if (isReceived) {
-      const stored = loadConfirmation();
-      if (!stored) {
-        // replace, not assign: the page should not sit in history as a Back
-        // target that redirects again.
-        window.location.replace(BOOKING_PATH);
-        return;
-      }
+    // THE DECISION IS NOT MADE HERE. `planConfirmationRender` is a pure
+    // function in `booking-confirmation.ts` and every arm of it is driven by
+    // `verify:booking:confirmation` — this block only carries out what it says.
+    // It used to be an `if` chain, pinned by a verify check on the textual order
+    // of an `if` and a call, which is an assertion about how code looks rather
+    // than about what it decides.
+    const stored = loadConfirmation();
+    const sessionId = paidLandingSession();
+    const plan = planConfirmationRender({
+      variant,
+      sessionId,
+      hasStoredRequest: stored !== null,
+    });
+
+    if (plan === 'redirect') {
+      // replace, not assign: the page should not sit in history as a Back
+      // target that redirects again.
+      window.location.replace(BOOKING_PATH);
+      return;
+    }
+
+    if (plan === 'request') {
       confirmation = stored;
       return;
     }
 
-    // ── `confirmed`: the PAYMENT landing, reached from Stripe's redirect.
-    //
-    // The Checkout Session id in the URL is the only evidence this page has,
-    // and WITHOUT IT THERE IS NOTHING TO RENDER. Falling back to the stored
-    // payload would be worse than redirecting: that payload was written by
-    // /book/received/ for a REQUEST, so somebody who submitted twice in one tab
-    // and then paid for the first would be shown the second one's slot,
-    // address and reference under a heading saying they are booked.
-    const sessionId = paidLandingSession();
-    if (!sessionId) {
-      window.location.replace(BOOKING_PATH);
-      return;
-    }
     paid = true;
-
     // Keyed on the session, not on the booking id: `sessionStorage` is empty
     // whenever the customer paid from the emailed link on another device, which
-    // is the common case. `id` is 0 when there is no payload, and the GA4 event
-    // then simply omits `booking_id` rather than inventing one.
-    reportBookingConversion(sessionId, loadConfirmation()?.id ?? 0);
+    // is the common case. `id` is 0 with no payload, and the GA4 event then
+    // omits `booking_id` rather than inventing one.
+    reportBookingConversion(sessionId, stored?.id ?? 0);
   });
 </script>
 

@@ -70,6 +70,8 @@ export type StripeGateway = {
     idempotencyKey: string,
   ) => Promise<{ id: string; url: string | null; amount_total: number | null }>;
   expireSession: (sessionId: string) => Promise<void>;
+  /** `open` | `complete` | `expired`, or null when the session cannot be read. */
+  sessionStatus: (sessionId: string) => Promise<string | null>;
 };
 
 export type StripeDeps = {
@@ -118,6 +120,10 @@ async function realGateway(secretKey: string): Promise<StripeGateway> {
     },
     expireSession: async (sessionId) => {
       await stripe.checkout.sessions.expire(sessionId);
+    },
+    sessionStatus: async (sessionId) => {
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      return session.status ?? null;
     },
   };
 }
@@ -330,30 +336,66 @@ export async function createCheckoutSession(
 }
 
 /**
+ * What happened when we tried to stop a link working.
+ *
+ * THREE VALUES, NOT A BOOLEAN, and the middle one is the whole reason.
+ * `sessions.expire` errors on any session that is not `open` — including one
+ * Stripe already expired at its own `expires_at`, which is the ORDINARY case
+ * for the payment sweep: `expires_at` equals `payment_due_at` exactly on the
+ * deferred branch, so by the time the cron sees an overdue row Stripe has
+ * already closed its session. Collapsing that into `false` made the cron email
+ * the office "these links are still payable" about essentially every lapsed
+ * booking, and made the approve route abort a re-approval on the normal path.
+ * Both are the crying-wolf failure this ticket refuses elsewhere.
+ */
+export type ExpireOutcome =
+  /** It was open, and now it is not. */
+  | 'expired'
+  /** It was already closed — expired, completed, or expired by us before. Fine. */
+  | 'already-inactive'
+  /** Stripe could not be reached, or said something we do not understand. */
+  | 'failed';
+
+/**
  * Expire a Checkout Session so its link stops working.
  *
  * Two callers, one reason each: the expiry cron, so a customer cannot pay for a
  * slot it has just released; and a re-approval, so a corrected amount does not
  * leave the old price payable.
  *
- * Returns whether it worked. **Never throws** — a Stripe outage must not turn a
- * cron sweep into a 500 or stop a row being expired, and the caller decides
- * what a false means. Already-expired sessions answer with an error from Stripe
- * and are reported as a failure rather than special-cased: the distinction
- * needs a round trip to establish and changes nothing either caller does.
+ * **Never throws** — a Stripe outage must not turn a cron sweep into a 500 or
+ * stop a row being expired. The caller decides what `'failed'` means.
+ *
+ * The `retrieve` on the error path is what tells the two failure shapes apart,
+ * and it costs a round trip only when something already went wrong.
  */
 export async function expireCheckoutSession(
   sessionId: string,
   deps: StripeDeps = {},
-): Promise<boolean> {
+): Promise<ExpireOutcome> {
+  let gateway: StripeGateway | null;
   try {
-    const gateway = await gatewayFor(deps);
-    if (!gateway) return false;
-    await gateway.expireSession(sessionId);
-    return true;
+    gateway = await gatewayFor(deps);
   } catch (err) {
-    console.error(`Could not expire Checkout Session ${sessionId}:`, err);
-    return false;
+    console.error(`Could not reach Stripe to expire ${sessionId}:`, err);
+    return 'failed';
+  }
+  if (!gateway) return 'failed';
+
+  try {
+    await gateway.expireSession(sessionId);
+    return 'expired';
+  } catch (expireErr) {
+    // Was it already closed? That is not a failure, and telling the office it
+    // is would train them to ignore the alert that matters.
+    try {
+      const status = await gateway.sessionStatus(sessionId);
+      if (status !== null && status !== 'open') return 'already-inactive';
+    } catch (statusErr) {
+      console.error(`Could not read the status of Checkout Session ${sessionId}:`, statusErr);
+    }
+    console.error(`Could not expire Checkout Session ${sessionId}:`, expireErr);
+    return 'failed';
   }
 }
 
@@ -570,6 +612,11 @@ export async function markPaid(
             paid_amount_cents        = ${input.amountCents},
             payment_reference        = ${input.reference},
             stripe_payment_intent_id = COALESCE(${isStripe ? (input.paymentIntentId ?? null) : null}, stripe_payment_intent_id),
+            -- The audit trail matters MORE here, not less: this is an office
+            -- member asserting money arrived for a booking that is not
+            -- happening, which is the row somebody will ask about months later.
+            interac_marked_by        = ${isInterac ? (input.actor ?? null) : null},
+            interac_marked_at        = ${isInterac ? nowIso : null},
             needs_attention          = CASE
               WHEN needs_attention IS NULL OR needs_attention = '' THEN ${line}
               ELSE needs_attention || ${`\n\n${line}`}

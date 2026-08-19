@@ -12,6 +12,7 @@ import {
   serializeConfirmation,
   isCheckoutSessionId,
   paidLandingSessionId,
+  planConfirmationRender,
   shouldReportConversion,
   type Confirmation,
 } from '../src/lib/booking-confirmation';
@@ -338,46 +339,112 @@ console.log('\nThe reporting sequence, end to end');
 console.log('\nWho is allowed to fire a conversion at all (BK-32 N5)');
 // ---------------------------------------------------------------------------
 //
-// SOURCE PINS, and their weakness is stated rather than glossed: they check
-// what the islands SAY, not what a browser does. There is no DOM harness in
-// this repo, and the alternative — trusting the pure layer above and hoping the
-// call sites match it — is how `/book/received/` came to fire a conversion for
-// an unapproved request in the first place. The pure decision is asserted
-// properly above; these three pin the two places that decision is invoked.
+// Driven through the real decision, not pinned by the textual order of an `if`
+// and a call — which is what the first version did, and which would have stayed
+// green if the received branch's `return` became a fall-through and the request
+// path started reporting conversions again. That is an assertion about how the
+// code looks rather than about what it decides.
+{
+  const SESSION = 'cs_test_a1b2c3d4e5f6g7h8';
+
+  // ── /book/received/ — the REQUEST page ────────────────────────────────
+  check(
+    planConfirmationRender({ variant: 'received', sessionId: null, hasStoredRequest: true }) ===
+      'request',
+    'a submitted request renders from its stored payload',
+  );
+  check(
+    planConfirmationRender({ variant: 'received', sessionId: null, hasStoredRequest: false }) ===
+      'redirect',
+    'and a visit carrying nothing goes back to the form',
+  );
+  // NEVER `paid`, whatever is in the URL. A request page cannot become a
+  // payment page because somebody appended a query parameter.
+  check(
+    planConfirmationRender({ variant: 'received', sessionId: SESSION, hasStoredRequest: true }) !==
+      'paid',
+    'and a session id in the URL does NOT turn the request page into a payment',
+  );
+
+  // ── /book/confirmed/ — the PAYMENT page ───────────────────────────────
+  check(
+    planConfirmationRender({ variant: 'confirmed', sessionId: SESSION, hasStoredRequest: false }) ===
+      'paid',
+    'a payment landing renders even with no stored payload — the cross-device payer',
+  );
+  check(
+    planConfirmationRender({ variant: 'confirmed', sessionId: SESSION, hasStoredRequest: true }) ===
+      'paid',
+    'and renders the same way when a payload happens to be present',
+  );
+  // THE LEFTOVER REQUEST PAYLOAD. This is the false claim the receipt panel
+  // exists to prevent: without a session id there is no evidence of a payment,
+  // and the stored payload describes a REQUEST that may never have been paid.
+  check(
+    planConfirmationRender({ variant: 'confirmed', sessionId: null, hasStoredRequest: true }) ===
+      'redirect',
+    'but a leftover REQUEST payload with no session id renders nothing at all',
+  );
+  check(
+    planConfirmationRender({
+      variant: 'confirmed',
+      sessionId: 'not-a-session',
+      hasStoredRequest: true,
+    }) === 'redirect',
+    'and neither does a malformed session id',
+  );
+
+  // The one arm that ties the two functions together: whatever renders as
+  // `request` must be unable to produce a conversion report.
+  check(
+    planConversionReport({
+      marker: null,
+      awId: 'AW-1234567890',
+      bookingLabel: 'BkNgLaBeL',
+      sessionId: null,
+      id: 481,
+    }) === null,
+    'and the request page has nothing a conversion could even be keyed on',
+  );
+
+  console.log('  the request page cannot report; the payment page cannot render on a payload');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe two islands invoke that decision and nothing else');
+// ---------------------------------------------------------------------------
+//
+// Source pins, and narrow ones on purpose. The DECISION is asserted above,
+// properly; these only check that the call sites reach it rather than
+// re-implementing it, which is the drift a pure function cannot prevent by
+// itself. There is no DOM harness in this repo, and the alternative — trusting
+// the pure layer and hoping the islands match — is how /book/received/ came to
+// fire a conversion for an unapproved request in the first place.
 {
   const form = readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8');
   const island = readFileSync(resolve(root, 'src/components/BookingConfirmation.svelte'), 'utf8');
 
-  // The form commits a REQUEST. Under P9 that is a lead the office may decline
-  // and nobody has paid for, so it must not report anything — including on its
-  // sessionStorage-write-failed fallback, which is where the old call lived.
   check(
     !/reportBookingConversion/.test(form),
     'BookingForm.svelte does not report a conversion anywhere — a request is not a payment',
   );
-
-  // The island serves both pages. Only the `confirmed` variant may report, and
-  // it may only do so with a session id it read from the URL.
+  check(
+    /planConfirmationRender\(/.test(island),
+    'BookingConfirmation.svelte asks planConfirmationRender rather than deciding for itself',
+  );
   const calls = island.match(/reportBookingConversion\([^)]*\)/g) ?? [];
-  check(calls.length === 1, `BookingConfirmation.svelte reports in exactly one place (found ${calls.length})`);
+  check(calls.length === 1, `it reports in exactly one place (found ${calls.length})`);
   check(
     calls[0]?.includes('sessionId') === true,
-    `and passes the session id it read from the URL, not a stored booking id (found ${calls[0]})`,
-  );
-  // The received branch returns before reaching it. Pinned on the ORDER rather
-  // than on the presence of an `isReceived` check, because a check that runs
-  // after the call would satisfy the latter and not the former.
-  check(
-    island.indexOf('if (isReceived)') !== -1 &&
-      island.indexOf('if (isReceived)') < island.indexOf('reportBookingConversion('),
-    'and the received branch returns BEFORE the call, so /book/received/ cannot reach it',
+    `passing the session id from the URL, not a stored booking id (found ${calls[0]})`,
   );
 
-  console.log('  one call site, on the confirmed variant, keyed on the URL');
+  console.log('  one call site, reached only through the asserted decision');
 }
 
 if (failures > 0) {
-  console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.`);
+  console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.\n`);
   process.exit(1);
 }
-console.log('\n✓ All booking confirmation checks passed.');
+
+console.log('\n✓ All booking confirmation checks passed.\n');

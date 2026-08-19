@@ -367,17 +367,40 @@ async function approve(
 
   // ── THE PREVIOUS SESSION DIES BEFORE A NEW ONE IS BORN ───────────────────
   //
-  // Fatal if it fails, deliberately. The alternative is minting a second live
-  // link while the first is still payable at the OLD amount, which is exactly
-  // the state BK-23's approval screen promises cannot exist ("once a Checkout
-  // Session exists the amount is frozen; changing it means cancelling and
-  // re-approving"). Rolling the transition back is recoverable; two live prices
-  // for one booking is not.
+  // A re-approval at a corrected amount must not leave the old price payable.
+  // Three outcomes, and the first version of this collapsed them into two and
+  // was wrong twice over:
+  //
+  //   * `expired` / `already-inactive` — the link is dead. **The column is
+  //     NULLed**, which matters beyond tidiness: `rollBack` below refuses to
+  //     walk back a row that still names a session, and without this NULL that
+  //     guard would be false for every re-approved row, making every rollback
+  //     on this route a silent no-op.
+  //   * `failed` — Stripe could not be reached, so the old link MAY still be
+  //     live. The approval **continues** rather than aborting. Aborting was the
+  //     first design and it is worse in every direction: the transition has
+  //     already committed, a rollback would leave a possibly-live link pointing
+  //     at a `pending_review` row (where `markPaid` refuses, so a payment on it
+  //     is money we record nowhere), and the office would be told the approval
+  //     was refused when it was not. What actually protects the customer here
+  //     is the webhook's amount check: a payment on the stale link either
+  //     matches the stored total — in which case confirming is correct — or
+  //     does not, and is refused and flagged. So the row is flagged, the new
+  //     link is minted, and the customer is emailed.
   if (settled.stripe_session_id) {
-    const expired = await expireCheckoutSession(settled.stripe_session_id);
-    if (!expired) {
-      await rollBack(sql, row.id, now);
-      return back(detail, { review: 'stale-session' });
+    const outcome = await expireCheckoutSession(settled.stripe_session_id);
+    if (outcome === 'failed') {
+      await flagStaleSession(sql, settled.id, settled.stripe_session_id, now);
+    } else {
+      try {
+        await sql`
+          UPDATE appointments
+          SET stripe_session_id = NULL, updated_at = ${now.toISOString()}
+          WHERE id = ${settled.id} AND stripe_session_id = ${settled.stripe_session_id}
+        `;
+      } catch (err) {
+        console.error(`Booking ${row.id}: could not clear the dead session id:`, err);
+      }
     }
   }
 
@@ -390,8 +413,10 @@ async function approve(
   // answer "Stripe is not configured" gives, so the approval degrades to Interac
   // rather than failing.
   let session: Awaited<ReturnType<typeof createCheckoutSession>> = null;
+  const TIMED_OUT = Symbol('timed-out');
+  let timedOut = false;
   try {
-    session = await withDeadline(
+    const raced = await withDeadline<Awaited<ReturnType<typeof createCheckoutSession>> | typeof TIMED_OUT>(
       createCheckoutSession({
         appointmentId: settled.id,
         tier: row.assessment_tier,
@@ -408,12 +433,32 @@ async function approve(
         origin,
       }),
       CHECKOUT_BUDGET_MS,
-      null,
+      TIMED_OUT,
     );
+    timedOut = raced === TIMED_OUT;
+    session = raced === TIMED_OUT ? null : raced;
   } catch (err) {
     // An amount mismatch, or Stripe refusing. The session, if one was made, has
     // already been expired by `createCheckoutSession` itself.
     console.error(`Booking ${row.id}: could not create a Checkout Session:`, err);
+  }
+
+  // A TIMEOUT IS NOT THE SAME AS A REFUSAL, and both arrive here as `null`.
+  // `withDeadline` abandons the promise rather than cancelling it — nothing can
+  // cancel it, the SDK takes no AbortSignal — so a create that was merely SLOW
+  // may still land at Stripe after this returns, producing a live session no row
+  // names. Same condition `flagUnrecordedSession` exists for on the write-failure
+  // path, and it gets the same treatment rather than being left as the one
+  // unflagged way to strand a session.
+  if (session === null && timedOut) {
+    console.error(`Booking ${row.id}: the Checkout Session call timed out; one may exist at Stripe.`);
+    await appendAttentionNote(
+      sql,
+      settled.id,
+      'A Checkout Session request timed out during approval. If one was created, it is live at ' +
+        'Stripe and nothing here can expire it — check the dashboard before re-approving.',
+      now,
+    );
   }
 
   // ── RECORD IT, AND SAY SO IF THAT FAILS ──────────────────────────────────
@@ -515,6 +560,29 @@ async function rollBack(sql: ReturnType<typeof getDb>, id: number, now: Date): P
   }
 }
 
+/**
+ * A previous Checkout Session we could not close, on a booking that has just
+ * been re-approved. The link may still be payable at the OLD amount.
+ *
+ * Not fatal to the approval — see the call site — because the webhook's amount
+ * check is what actually stops a stale link confirming at a stale price. This
+ * exists so a human knows to close it, and so the office is not surprised by a
+ * payment against a session they thought was gone.
+ */
+async function flagStaleSession(
+  sql: ReturnType<typeof getDb>,
+  id: number,
+  sessionId: string,
+  now: Date,
+): Promise<void> {
+  const line =
+    `STALE CHECKOUT SESSION: ${sessionId} could not be expired while this booking was ` +
+    `re-approved, so it may still be payable at the PREVIOUS amount. Expire it by hand in the ` +
+    `Stripe dashboard. A payment against it will be refused and flagged rather than confirmed if ` +
+    `the amount no longer matches.`;
+  await appendAttentionNote(sql, id, line, now);
+}
+
 /** A live Checkout Session that no row points at. A human has to close it. */
 async function flagUnrecordedSession(
   sql: ReturnType<typeof getDb>,
@@ -526,6 +594,20 @@ async function flagUnrecordedSession(
     `UNRECORDED CHECKOUT SESSION: ${sessionId} is live at Stripe but could not be written to ` +
     `this row, so nothing here can expire it. Expire it by hand in the Stripe dashboard if this ` +
     `booking is not paid.`;
+  await appendAttentionNote(sql, id, line, now);
+}
+
+/**
+ * Append to `needs_attention`. One appender for both flags above, because
+ * BK-40's rule — never overwrite what is already there — is the kind of thing
+ * that gets got right in the first copy and wrong in the second.
+ */
+async function appendAttentionNote(
+  sql: ReturnType<typeof getDb>,
+  id: number,
+  line: string,
+  now: Date,
+): Promise<void> {
   try {
     await sql`
       UPDATE appointments
@@ -537,7 +619,7 @@ async function flagUnrecordedSession(
       WHERE id = ${id}
     `;
   } catch (err) {
-    console.error(`Booking ${id}: could not flag the unrecorded session:`, err);
+    console.error(`Booking ${id}: could not flag needs_attention:`, err);
   }
 }
 
@@ -568,7 +650,7 @@ async function approveFree(
   now: Date,
   detail: string,
 ): Promise<Response> {
-  let updated: { id: number }[];
+  let updated: { id: number; stripe_session_id: string | null }[];
   try {
     updated = (await sql`
       UPDATE appointments
@@ -582,13 +664,35 @@ async function approveFree(
           payment_due_at          = NULL,
           updated_at              = ${now.toISOString()}
       WHERE id = ${row.id} AND status = 'pending_review'
-      RETURNING id
-    `) as { id: number }[];
+      RETURNING id, stripe_session_id
+    `) as { id: number; stripe_session_id: string | null }[];
   } catch (err) {
     console.error(`Approving booking ${row.id} at no charge failed:`, err);
     return back(detail, { review: 'error' });
   }
   if (updated.length === 0) return back(detail, { review: 'stale' });
+
+  // THE OLD LINK DIES HERE TOO. A booking previously approved at a real price,
+  // sent back to `pending_review` and now approved at no charge, still names the
+  // session that was minted the first time — and confirming it at $0 while that
+  // link stays payable would leave a customer able to pay for a booking already
+  // marked as needing no payment. The paid path treats this as important enough
+  // to flag; the two must not disagree about it.
+  if (updated[0].stripe_session_id) {
+    const outcome = await expireCheckoutSession(updated[0].stripe_session_id);
+    if (outcome === 'failed') {
+      await flagStaleSession(sql, row.id, updated[0].stripe_session_id, now);
+    } else {
+      try {
+        await sql`
+          UPDATE appointments SET stripe_session_id = NULL, updated_at = ${now.toISOString()}
+          WHERE id = ${row.id} AND stripe_session_id = ${updated[0].stripe_session_id}
+        `;
+      } catch (err) {
+        console.error(`Booking ${row.id}: could not clear the dead session id:`, err);
+      }
+    }
+  }
 
   const outcome = await markPaid(sql, row.id, {
     method: 'none',

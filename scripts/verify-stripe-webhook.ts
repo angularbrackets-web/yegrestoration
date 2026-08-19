@@ -36,6 +36,7 @@ import {
   checkoutExpiresAt,
   checkoutIdempotencyKey,
   createCheckoutSession,
+  expireCheckoutSession,
   type CheckoutRequest,
   type StripeGateway,
 } from '../src/lib/booking-payment';
@@ -77,6 +78,8 @@ function fakeGateway(options: {
   url?: string | null;
   createThrows?: Error;
   expireThrows?: Error;
+  /** What `retrieve` reports when `expire` errored — how 'already-inactive' is reached. */
+  statusAfterExpireError?: string;
 } = {}) {
   const created: { params: any; idempotencyKey: string }[] = [];
   const expired: string[] = [];
@@ -98,6 +101,7 @@ function fakeGateway(options: {
       expired.push(id);
       if (options.expireThrows) throw options.expireThrows;
     },
+    sessionStatus: async () => options.statusAfterExpireError ?? null,
   };
   return { gateway, created, expired };
 }
@@ -209,6 +213,66 @@ console.log('\nThe amount check that can actually fail');
   check(urlless, 'a session with no URL is an error, not a link the customer cannot open');
 
   console.log("  Stripe's echo is the check; the arithmetic identity is not");
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nExpiring a session: three answers, not two');
+// ---------------------------------------------------------------------------
+//
+// The first version returned a boolean, and collapsing "already closed" into
+// "failed" was wrong on the ORDINARY path rather than on an edge. On the
+// deferred branch `expires_at` equals `payment_due_at` exactly, so by the time
+// the payment sweep sees an overdue row Stripe has already closed its session
+// and `/expire` errors — which made the cron email the office about links
+// "still payable" on essentially every lapsed booking, and made the approve
+// route abort a re-approval on the normal path. Both are the crying-wolf
+// failure this ticket refuses everywhere else.
+{
+  const clean = fakeGateway();
+  check(
+    (await expireCheckoutSession('cs_test_open00000001', { gateway: clean.gateway })) === 'expired',
+    'a session that was open reports expired',
+  );
+  check(clean.expired.includes('cs_test_open00000001'), 'and Stripe was actually asked');
+
+  // Stripe refuses, and the session turns out to have been closed already.
+  const closed = fakeGateway({
+    expireThrows: new Error('You may only expire a session that is in the open state'),
+    statusAfterExpireError: 'expired',
+  });
+  check(
+    (await expireCheckoutSession('cs_test_closed0000001', { gateway: closed.gateway })) ===
+      'already-inactive',
+    'a session Stripe had already closed is NOT a failure — this is the sweep’s ordinary case',
+  );
+  const completed = fakeGateway({
+    expireThrows: new Error('nope'),
+    statusAfterExpireError: 'complete',
+  });
+  check(
+    (await expireCheckoutSession('cs_test_paid00000001', { gateway: completed.gateway })) ===
+      'already-inactive',
+    'and neither is one that was already paid',
+  );
+
+  // Stripe refuses AND the session is still open, or cannot be read at all.
+  const stillOpen = fakeGateway({
+    expireThrows: new Error('service unavailable'),
+    statusAfterExpireError: 'open',
+  });
+  check(
+    (await expireCheckoutSession('cs_test_live00000001', { gateway: stillOpen.gateway })) ===
+      'failed',
+    'a session that is STILL OPEN after a refused expire is a real failure',
+  );
+  const unreadable = fakeGateway({ expireThrows: new Error('down') });
+  check(
+    (await expireCheckoutSession('cs_test_unknown00001', { gateway: unreadable.gateway })) ===
+      'failed',
+    'and so is one whose status cannot be read — the safe answer when we do not know',
+  );
+
+  console.log('  already-closed is not a failure; still-open is');
 }
 
 // ---------------------------------------------------------------------------

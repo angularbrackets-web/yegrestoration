@@ -3,7 +3,7 @@ import type { APIRoute } from 'astro';
 export const prerender = false;
 
 import { markPaid } from '../../../lib/booking-payment';
-import { getDb, type Appointment } from '../../../lib/db';
+import { getDb, type Appointment, type StripeEvent } from '../../../lib/db';
 import { readEnv } from '../../../lib/env';
 
 /**
@@ -49,7 +49,8 @@ import { readEnv } from '../../../lib/env';
 /** Stripe's own prefix on the header it signs with. */
 const SIGNATURE_HEADER = 'stripe-signature';
 
-type Claim = { event_id: string };
+/** What the claim returns: the id, or nothing if somebody else finished it. */
+type Claim = Pick<StripeEvent, 'event_id'>;
 
 export const POST: APIRoute = async ({ request }) => {
   const secret = readEnv('STRIPE_WEBHOOK_SECRET');
@@ -250,10 +251,12 @@ function appointmentIdOf(session: import('stripe').Stripe.Checkout.Session): num
   // creation and either alone is enough, so a session missing one still lands.
   const raw = session.client_reference_id ?? session.metadata?.appointment_id ?? null;
   if (raw === null) return null;
-  // As strict as the admin detail route's own id parse: a value that is not a
-  // positive integer is a logged error, never a crash and never a 500 that
-  // makes Stripe retry something unparseable for days.
-  if (!/^[1-9][0-9]{0,9}$/.test(raw)) {
+  // As strict as the admin detail route's own id parse, PLUS the int4 ceiling
+  // that parse also applies. `[0-9]{0,9}` alone admits 4294967295, which is a
+  // valid ten-digit integer and an out-of-range value for a SERIAL column — the
+  // SELECT would then raise 22003, this handler would answer 500, and Stripe
+  // would retry an unusable event for days.
+  if (!/^[1-9][0-9]{0,9}$/.test(raw) || Number(raw) > 2147483647) {
     console.error(`Stripe session ${session.id} carries an unusable appointment id: ${raw}`);
     return null;
   }
@@ -292,7 +295,18 @@ async function confirm(
   `) as Pick<Appointment, 'total_amount_cents'>[];
   const expected = rows[0]?.total_amount_cents ?? null;
   if (expected === null) {
+    // The row exists but was never approved — there is no settled total to
+    // check a charge against. Terminal rather than retryable: nothing about
+    // waiting makes an unapproved booking acquire an amount, and the row is
+    // flagged so a human sees the payment.
     console.error(`Stripe session ${session.id} names booking ${id}, which has no settled total.`);
+    await flag(
+      sql,
+      id,
+      `A Stripe payment arrived for session ${session.id} against a booking with no settled ` +
+        'amount, so it could not be checked or confirmed. NOT refunded automatically.',
+      null,
+    );
     return;
   }
 
@@ -317,7 +331,7 @@ async function confirm(
       ? session.payment_intent
       : (session.payment_intent?.id ?? null);
 
-  await markPaid(sql, id, {
+  const outcome = await markPaid(sql, id, {
     method: 'stripe',
     amountCents: session.amount_total,
     reference: paymentIntentId,
@@ -325,6 +339,43 @@ async function confirm(
     sessionId: session.id,
     now,
   });
+
+  // ── THE OUTCOME IS NOT DECORATION, AND IGNORING IT REOPENED THE HOLE ──────
+  //
+  // `markPaid` never throws — that is its contract — so a failed confirm UPDATE
+  // comes back as the VALUE `'error'`. The first version of this function
+  // discarded the return, which meant a transient database blip produced:
+  // event claimed, `markPaid` fails, handler returns normally, `processed_at`
+  // stamped, Stripe gets a 200 and never retries. The row stays
+  // `approved_awaiting_payment`, the cron expires it, and the customer is
+  // emailed an apology for a booking they paid for.
+  //
+  // That is the exact "money taken, booking cancelled, nothing flagged" outcome
+  // `processed_at` was introduced to prevent — reopened one layer up, on the
+  // MOST likely failure rather than the most dramatic one: not a process death,
+  // but a database error, which is precisely what a retry exists for.
+  //
+  // Throwing leaves the event unstamped, so Stripe's retry claims it again.
+  // Re-running is safe: the guarded UPDATE is the real dedupe and the payment
+  // reference tells a redelivery from a second payment.
+  if (outcome === 'error') {
+    throw new Error(
+      `markPaid failed for booking ${id} on session ${session.id}. Leaving the event unstamped ` +
+        'so Stripe retries it.',
+    );
+  }
+
+  // `'missing'` is deliberately NOT retried. It means the appointment named by
+  // the session does not exist, which no amount of retrying changes — and a
+  // 500 here would put Stripe into a multi-day retry loop over an event nothing
+  // can ever act on. There is no row to flag, so the log is the whole record,
+  // and it is written at error level for that reason.
+  if (outcome === 'missing') {
+    console.error(
+      `Stripe session ${session.id} paid against booking ${id}, WHICH DOES NOT EXIST. ` +
+        'The money is with Stripe and nothing here can record it — resolve by hand.',
+    );
+  }
 }
 
 /** Append to `needs_attention`, and optionally move `payment_status`. */

@@ -23,6 +23,27 @@ import { readEnv } from '../../../lib/env';
 const BATCH_SIZE = 25;
 
 /**
+ * Wall-clock ceiling on all the outbound work in one run — the session cancels
+ * and both sweeps' customer emails together.
+ *
+ * **A BOUND, NOT AN OPTIMISATION.** `BATCH_SIZE` rows can mean up to 25 Stripe
+ * calls plus 50 sends, each mail under its own `POST_COMMIT_BUDGET_MS`; run
+ * serially that is minutes, and nothing in this repo raises the platform's
+ * function limit (`vercel.json` has no `functions` block, `astro.config.mjs`
+ * sets no adapter `maxDuration`). Blowing it times the function out MID-LOOP —
+ * and the transitions have already committed, so the customers not yet reached
+ * are never told and no later run retries them, because the status no longer
+ * matches. A backlog is most likely on the very first production run, when
+ * sweep 2 first walks historical `pending_review` rows.
+ *
+ * So the loops stop when the budget is spent and **say what they skipped**.
+ * A silent cap reads as "everybody was emailed"; the count in the response and
+ * the error log are what make it legible. The rows are still expired either
+ * way, and the office sees them in the admin list.
+ */
+const SWEEP_BUDGET_MS = 20_000;
+
+/**
  * The audit line a human reads when they ask why a request was declined and
  * nobody remembers doing it.
  *
@@ -109,6 +130,9 @@ export const GET: APIRoute = async ({ request }) => {
   let sessionsUncancelled = 0;
   let mailed = 0;
   let mailFailed = 0;
+  /** Rows the budget ran out before reaching. Reported, never silent. */
+  let skipped = 0;
+  const uncancelledIds: string[] = [];
 
   // ── Sweep 1: payment expiry (BK-32) ──────────────────────────────────────
   //
@@ -153,11 +177,29 @@ export const GET: APIRoute = async ({ request }) => {
   // — the same posture the header states for mail. A row whose session could not
   // be expired is still expired; what remains is a live link, which the webhook
   // handles as a late payment.
+  const startedAt = Date.now();
+  const spent = () => Date.now() - startedAt >= SWEEP_BUDGET_MS;
+
   for (const expiredRow of unpaid) {
     if (!expiredRow.stripe_session_id) continue;
-    const killed = await expireCheckoutSession(expiredRow.stripe_session_id);
-    if (killed) sessionsCancelled++;
-    else sessionsUncancelled++;
+    if (spent()) {
+      skipped++;
+      continue;
+    }
+    const outcome = await expireCheckoutSession(expiredRow.stripe_session_id);
+    // `already-inactive` is the ORDINARY case, not a failure: on the deferred
+    // branch a session's `expires_at` equals `payment_due_at` exactly, so by the
+    // time this sweep sees an overdue row Stripe has already closed its session.
+    // Counting that as uncancelled made this handler email the office about
+    // "links still payable" on essentially every lapsed booking — the
+    // crying-wolf failure this ticket refuses everywhere else.
+    if (outcome === 'expired' || outcome === 'already-inactive') sessionsCancelled++;
+    else {
+      sessionsUncancelled++;
+      // The IDs, not a count. The office is being asked to go and close these
+      // by hand, and "3 sessions survived" is not an instruction.
+      uncancelledIds.push(expiredRow.stripe_session_id);
+    }
   }
 
   // ── Sweep 2: stale requests (BK-23 Task 4) ───────────────────────────────
@@ -217,6 +259,10 @@ export const GET: APIRoute = async ({ request }) => {
   for (const row of unpaid) {
     const message = paymentExpiredMessage(notificationInputFor(row, now));
     if (!message) continue;
+    if (spent()) {
+      skipped++;
+      continue;
+    }
     const sent = await withDeadline(
       sendCustomerMessage(row.id, 'expired', message, now).then((o) => o === 'sent'),
       POST_COMMIT_BUDGET_MS,
@@ -230,22 +276,25 @@ export const GET: APIRoute = async ({ request }) => {
   // expiry — that is visible in the admin list and a mail per lapsed booking is
   // noise — but a session Stripe would still accept money against is a thing
   // somebody has to go and close by hand.
-  if (sessionsUncancelled > 0) {
+  if (uncancelledIds.length > 0) {
     console.error(
-      `Expiry sweep: ${sessionsUncancelled} Checkout Session(s) could not be expired. ` +
-        'Those links are still payable against released slots.',
+      `Expiry sweep: ${uncancelledIds.length} Checkout Session(s) could not be expired — ` +
+        `${uncancelledIds.join(', ')}. Those links may still be payable against released slots.`,
     );
-    const first = unpaid.find((r) => r.stripe_session_id);
-    if (first) {
+    // Attached to the booking whose session actually failed, not to whichever
+    // row happened to come first — the office is being sent to close a specific
+    // link, and an alert on an unrelated booking is an alert they cannot act on.
+    const owner = unpaid.find((r) => r.stripe_session_id === uncancelledIds[0]);
+    if (owner) {
       await withDeadline(
         sendOfficeMessage(
-          first.id,
+          owner.id,
           'payment-attention',
           paymentAttentionAlert(
-            first,
-            `${sessionsUncancelled} Checkout Session(s) survived the expiry sweep and are still ` +
-              'payable against slots that have been released. Expire them by hand in the Stripe ' +
-              'dashboard.',
+            owner,
+            `${uncancelledIds.length} Checkout Session(s) survived the expiry sweep and may still ` +
+              `be payable against slots that have been released: ${uncancelledIds.join(', ')}. ` +
+              'Expire them by hand in the Stripe dashboard.',
             now,
           ),
         ).then(() => true),
@@ -258,6 +307,10 @@ export const GET: APIRoute = async ({ request }) => {
   for (const row of stale) {
     const message = expiredRequestMessage(notificationInputFor(row, now));
     if (!message) continue;
+    if (spent()) {
+      skipped++;
+      continue;
+    }
     const sent = await withDeadline(
       sendCustomerMessage(row.id, 'expired', message, now).then((o) => o === 'sent'),
       POST_COMMIT_BUDGET_MS,
@@ -274,6 +327,14 @@ export const GET: APIRoute = async ({ request }) => {
     );
   }
 
+  if (skipped > 0) {
+    console.error(
+      `Expiry sweep: the ${SWEEP_BUDGET_MS}ms budget ran out with ${skipped} row(s) unreached. ` +
+        'Those rows ARE expired and their slots released; they were simply not emailed, and no ' +
+        'later run will retry them because the status no longer matches.',
+    );
+  }
+
   return Response.json({
     paymentsExpired,
     requestsExpired,
@@ -281,6 +342,7 @@ export const GET: APIRoute = async ({ request }) => {
     sessionsUncancelled,
     mailed,
     mailFailed,
+    skipped,
   });
 };
 

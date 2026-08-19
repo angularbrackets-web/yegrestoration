@@ -206,12 +206,20 @@ async function call(
  */
 let probeSlotCursor = 0;
 async function freeProbeSlot(): Promise<Date> {
-  for (let attempt = 0; attempt < 400; attempt++) {
+  for (let attempt = 0; attempt < 1200; attempt++) {
     // 30 days out, then one hour per probe. On the grid's :30 to match the
     // duration CHECK's expectations even though nothing here reads the grid.
     const candidate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000 + probeSlotCursor * 60 * 60 * 1000);
     candidate.setUTCMinutes(30, 0, 0);
     probeSlotCursor++;
+    // MIDWEEK ONLY. Saturday and Sunday carry the 1.5x after-hours multiplier
+    // (BK-31), so a probe that drifted onto a weekend changed the price out
+    // from under arms that assert a settled total — which is exactly what
+    // happened once the cursor advanced far enough. Tuesday to Thursday is
+    // clear of the weekend under either UTC or America/Edmonton reading, and
+    // clear of the Friday closure.
+    const weekday = candidate.getUTCDay();
+    if (weekday < 2 || weekday > 4) continue;
     const held = (await sql`
       SELECT id FROM appointments
       WHERE slot_start = ${candidate.toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
@@ -219,6 +227,34 @@ async function freeProbeSlot(): Promise<Date> {
     if (held.length === 0) return candidate;
   }
   throw new Error('freeProbeSlot: no free slot found in 400 attempts');
+}
+
+/** An `approved_awaiting_payment` row with an amount settled on it. */
+/** The current status of one row. Used by every arm that drives a transition. */
+async function statusOf(id: number): Promise<string | undefined> {
+  return ((await sql`SELECT status FROM appointments WHERE id = ${id}`) as { status: string }[])[0]
+    ?.status;
+}
+
+async function seedAwaitingPayment(
+  totalCents: number,
+  sessionId: string | null = null,
+): Promise<number> {
+  const slot = await freeProbeSlot();
+  const inserted = (await sql`
+    INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                              slot_start, status, assessment_tier, payment_status,
+                              approved_at, assessment_amount_cents, travel_fee_cents,
+                              gst_cents, total_amount_cents, payment_due_at,
+                              stripe_session_id)
+    VALUES ('MarkPaid Probe', '780-555-0142', 'markpaid@example.com', 'water', '9 Paid Ave',
+            'private', ${slot.toISOString()}, 'approved_awaiting_payment', 'standard',
+            'pending', ${new Date().toISOString()}, 39900, 0, 1995, ${totalCents},
+            ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${sessionId})
+    RETURNING id
+  `) as { id: number }[];
+  createdIds.push(inserted[0].id);
+  return inserted[0].id;
 }
 
 function idFromLocation(location: string): number | null {
@@ -1927,10 +1963,6 @@ try {
       return rows[0].id;
     };
 
-    const statusOf = async (id: number) =>
-      ((await sql`SELECT status FROM appointments WHERE id = ${id}`) as { status: string }[])[0]
-        ?.status;
-
     // INSIDE the window — must expire.
     const staleId = await seed('pending_review', hours(1));
     // OUTSIDE it by an hour — must be left alone. This is the arm that would
@@ -2106,6 +2138,85 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  console.log('\nBK-32 — layer 1 CLAIMS an event, and this is executed, not read');
+  // -------------------------------------------------------------------------
+  //
+  // THE IMPLEMENTATION REVIEW CAUGHT THIS AS THE NINTH CANNOT-FAIL ASSERTION.
+  // Layer 1 was pinned only by two regexes over `webhook.ts` — nothing anywhere
+  // created, inserted into or queried `stripe_events`, so the claim SQL had
+  // never once been executed. Those pins pass unchanged if the statement is
+  // syntactically broken, if `RETURNING` is dropped, or if the zero-row branch
+  // is inverted. They pinned the SHAPE of the code they were asserting about,
+  // which is the family this repo has now caught nine times.
+  //
+  // The property is the one plan-review blocker B1 existed to install, and it
+  // is worth spelling out because "idempotent" is not it: **a claimed but
+  // UNSTAMPED event must be claimable again**, or a handler that dies between
+  // recording and confirming makes Stripe's retry a no-op — and the cron then
+  // releases the slot of a booking that was paid for.
+  //
+  // The statement below is a byte-for-byte copy of the route's, which would
+  // normally be the shared-helper smell. It is not: `webhook.ts` runs it inside
+  // a signature-verified POST that cannot be reached from here, so the choice
+  // is between executing the same SQL or executing none. A source pin that the
+  // two agree is what keeps them honest, and it lives beside them below.
+  {
+    const eventId = `evt_probe_${Date.now()}`;
+    const claim = async () =>
+      (await sql`
+        INSERT INTO stripe_events (event_id, type, received_at)
+        VALUES (${eventId}, ${'checkout.session.completed'}, ${new Date().toISOString()})
+        ON CONFLICT (event_id) DO UPDATE SET event_id = EXCLUDED.event_id
+          WHERE stripe_events.processed_at IS NULL
+        RETURNING event_id
+      `) as { event_id: string }[];
+
+    try {
+      const first = await claim();
+      check(first.length === 1, 'a brand-new event is claimed');
+
+      // THE CRASH WINDOW. The handler died here: the row exists, nothing is
+      // stamped, and Stripe retries.
+      const retry = await claim();
+      check(
+        retry.length === 1,
+        'AN UNSTAMPED EVENT IS CLAIMED AGAIN — this is the payment that would otherwise be lost',
+      );
+
+      await sql`
+        UPDATE stripe_events SET processed_at = ${new Date().toISOString()}
+        WHERE event_id = ${eventId}
+      `;
+
+      const afterStamp = await claim();
+      check(
+        afterStamp.length === 0,
+        'and once it is stamped, a redelivery claims nothing — the handler does no work twice',
+      );
+
+      const stored = (await sql`
+        SELECT type, received_at, processed_at FROM stripe_events WHERE event_id = ${eventId}
+      `) as Record<string, unknown>[];
+      check(stored.length === 1, 'exactly one row exists for the event, however many deliveries');
+      check(stored[0]?.type === 'checkout.session.completed', 'with the type recorded');
+      check(stored[0]?.processed_at !== null, 'and processed_at stamped');
+    } finally {
+      await sql`DELETE FROM stripe_events WHERE event_id = ${eventId}`;
+    }
+
+    // The route must be running THIS statement. Without this the block above
+    // proves Postgres works, not that the webhook uses it.
+    const webhookSrc = readFileSync('src/pages/api/stripe/webhook.ts', 'utf8');
+    check(
+      webhookSrc.includes('ON CONFLICT (event_id) DO UPDATE SET event_id = EXCLUDED.event_id') &&
+        webhookSrc.includes('WHERE stripe_events.processed_at IS NULL'),
+      'and the webhook runs the same claim this arm just executed',
+    );
+
+    console.log('  claim, crash, re-claim, stamp, ignore — against the real database');
+  }
+
+  // -------------------------------------------------------------------------
   console.log('\nBK-32 — markPaid, the one confirmation path, and its three no-ops');
   // -------------------------------------------------------------------------
   //
@@ -2114,28 +2225,6 @@ try {
   // Mail is muted by BOOKING_NOTIFY_DISABLED, which is what the log lines the
   // route emits are read for elsewhere in this file.
   {
-    /** An `approved_awaiting_payment` row with an amount settled on it. */
-    async function seedAwaitingPayment(
-      totalCents: number,
-      sessionId: string | null = null,
-    ): Promise<number> {
-      const slot = await freeProbeSlot();
-      const inserted = (await sql`
-        INSERT INTO appointments (name, phone, email, service, address, payment_route,
-                                  slot_start, status, assessment_tier, payment_status,
-                                  approved_at, assessment_amount_cents, travel_fee_cents,
-                                  gst_cents, total_amount_cents, payment_due_at,
-                                  stripe_session_id)
-        VALUES ('MarkPaid Probe', '780-555-0142', 'markpaid@example.com', 'water', '9 Paid Ave',
-                'private', ${slot.toISOString()}, 'approved_awaiting_payment', 'standard',
-                'pending', ${new Date().toISOString()}, 39900, 0, 1995, ${totalCents},
-                ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${sessionId})
-        RETURNING id
-      `) as { id: number }[];
-      createdIds.push(inserted[0].id);
-      return inserted[0].id;
-    }
-
     const NOW = new Date();
 
     // ── The happy path ─────────────────────────────────────────────────────
@@ -2342,6 +2431,82 @@ try {
       check(row[0]?.interac_marked_at !== null, 'interac_marked_at is stamped');
     }
 
+    // ── THE LATE-PAYMENT UPDATE RESTATES ITS OWN EXPECTATIONS ──────────────
+    //
+    // `review.ts:46` forbids SELECT-then-act categorically. The narrow UPDATE
+    // on the released-row branch reads the row first to decide WHICH branch it
+    // is, so it has to re-state `status IN (...) AND payment_status <> 'paid'`
+    // in its own WHERE — or a payment that lands between the read and the write
+    // overwrites the method, stamp and reference of one that got there first.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'payment_expired' WHERE id = ${id}`;
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-FIRST',
+        actor: 'Dana',
+        now: NOW,
+      });
+      // A second, different payment onto the same released row. The first one
+      // is already recorded, so this must not overwrite it.
+      const second = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_second',
+        paymentIntentId: 'pi_test_second',
+        now: NOW,
+      });
+      check(
+        second === 'not-applicable',
+        `a second payment onto an already-recorded released row no-ops, got "${second}"`,
+      );
+      const row = (await sql`
+        SELECT payment_method, payment_reference, interac_marked_by
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(
+        row[0]?.payment_method === 'interac' && row[0]?.payment_reference === 'ETR-FIRST',
+        'and the FIRST payment keeps the columns — the loser overwrites nothing',
+      );
+      check(row[0]?.interac_marked_by === 'Dana', 'including who asserted it');
+    }
+
+    // ── TWO REFERENCE-LESS MARKS ON ONE METHOD ARE ONE ASSERTION ───────────
+    //
+    // Deliberate, and the trade is stated rather than left to be discovered: an
+    // office member clicking "Mark as paid" twice with nothing typed is ONE
+    // claim made twice, so it must not read as a refundable double payment. The
+    // cost is that a genuinely second e-Transfer with no reference either is
+    // silently unflagged — which is why the form asks for a reference and says
+    // what it is for.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, { method: 'interac', amountCents: 41895, reference: null, now: NOW });
+      const again = await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: null,
+        now: NOW,
+      });
+      check(again === 'already-recorded', `a second reference-less mark is silent, got "${again}"`);
+      const row = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${id}
+      `) as { needs_attention: string | null }[];
+      check(row[0]?.needs_attention === null, 'and flags nothing');
+
+      // But a DIFFERENT METHOD is always a different payment, reference or not.
+      // This is the real double-pay race: Interac marked, then the card link paid.
+      const clash = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_after_interac',
+        paymentIntentId: 'pi_test_after_interac',
+        now: NOW,
+      });
+      check(clash === 'double-pay', `a different METHOD is always a double pay, got "${clash}"`);
+    }
+
     // ── A ROW IN NO PAYABLE STATE ──────────────────────────────────────────
     {
       const id = await seedAwaitingPayment(41895);
@@ -2412,6 +2577,264 @@ try {
       const twice = await call(reviewRoute, { id: String(orderId), action: 'approve' });
       check(twice.includes('review=stale'), `a second approve is a no-op, got "${twice}"`);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — the webhook, driven end to end over a real signature');
+  // -------------------------------------------------------------------------
+  //
+  // `stripe.webhooks.generateTestHeaderString` signs a body with any secret, so
+  // the route can be driven for real — signature verification, the claim, the
+  // amount check and the confirm transition — with no Stripe account, no
+  // network and no live key. Everything before this was pinned at the source
+  // level, which is what let the implementation review find that layer 1 had
+  // never once been executed.
+  {
+    const secret = 'whsec_verify_only_not_a_real_secret';
+    const priorSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const priorKey = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_WEBHOOK_SECRET = secret;
+    // The route constructs a client from this to VERIFY. Verification is local
+    // (HMAC over the body), so a syntactically valid key that is not a real one
+    // is enough and nothing here ever reaches Stripe.
+    process.env.STRIPE_SECRET_KEY = 'sk_test_verify_only_not_a_real_key';
+
+    const { default: StripeSdk } = await import('stripe');
+    const signer = new StripeSdk('sk_test_verify_only_not_a_real_key');
+    const { POST: webhookRoute } = await import('../src/pages/api/stripe/webhook');
+
+    const sessionEvent = (id: number, opts: { amount: number; eventId: string; sessionId: string }) =>
+      JSON.stringify({
+        id: opts.eventId,
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: opts.sessionId,
+            object: 'checkout.session',
+            payment_status: 'paid',
+            amount_total: opts.amount,
+            client_reference_id: String(id),
+            metadata: { appointment_id: String(id), tier: 'standard' },
+            payment_intent: `pi_${opts.sessionId}`,
+          },
+        },
+      });
+
+    const post = async (body: string) => {
+      const header = signer.webhooks.generateTestHeaderString({ payload: body, secret });
+      return webhookRoute({
+        request: new Request('https://example.com/api/stripe/webhook/', {
+          method: 'POST',
+          headers: { 'stripe-signature': header },
+          body,
+        }),
+      } as never);
+    };
+
+    const eventIds: string[] = [];
+    try {
+      // ── A FORGED BODY IS 400, NOT 200 ────────────────────────────────────
+      const forged = await webhookRoute({
+        request: new Request('https://example.com/api/stripe/webhook/', {
+          method: 'POST',
+          headers: { 'stripe-signature': 't=1,v1=deadbeef' },
+          body: '{"id":"evt_forged","type":"checkout.session.completed"}',
+        }),
+      } as never);
+      check(forged.status === 400, `a bad signature is refused with 400, got ${forged.status}`);
+
+      // ── AN UNKNOWN EVENT TYPE IS 200 ─────────────────────────────────────
+      const unknownId = `evt_unknown_${Date.now()}`;
+      eventIds.push(unknownId);
+      const unknown = await post(
+        JSON.stringify({ id: unknownId, type: 'customer.created', data: { object: {} } }),
+      );
+      check(unknown.status === 200, `an unhandled event type answers 200, got ${unknown.status}`);
+
+      // ── A REAL PAYMENT CONFIRMS ──────────────────────────────────────────
+      const payId = await seedAwaitingPayment(41895, 'cs_test_webhook00001');
+      const payEvent = `evt_pay_${Date.now()}`;
+      eventIds.push(payEvent);
+      const paid = await post(
+        sessionEvent(payId, {
+          amount: 41895,
+          eventId: payEvent,
+          sessionId: 'cs_test_webhook00001',
+        }),
+      );
+      check(paid.status === 200, `a paid session answers 200, got ${paid.status}`);
+      check(await statusOf(payId) === 'confirmed', 'and the booking is confirmed');
+
+      // ── A REDELIVERY DOES NOTHING ────────────────────────────────────────
+      const replay = await post(
+        sessionEvent(payId, {
+          amount: 41895,
+          eventId: payEvent,
+          sessionId: 'cs_test_webhook00001',
+        }),
+      );
+      check(replay.status === 200, 'a redelivery answers 200');
+      const replayBody = (await replay.json()) as { duplicate?: boolean };
+      check(
+        replayBody.duplicate === true,
+        'and is recognised as already processed rather than run again',
+      );
+
+      // ── AN AMOUNT STRIPE DISAGREES WITH CONFIRMS NOTHING ─────────────────
+      //
+      // The stale-link case: a session minted by an earlier approval at a
+      // different price. This is the only place it becomes visible.
+      const wrongId = await seedAwaitingPayment(41895, 'cs_test_webhook00002');
+      const wrongEvent = `evt_wrong_${Date.now()}`;
+      eventIds.push(wrongEvent);
+      const wrong = await post(
+        sessionEvent(wrongId, {
+          amount: 39900,
+          eventId: wrongEvent,
+          sessionId: 'cs_test_webhook00002',
+        }),
+      );
+      check(wrong.status === 200, 'a mismatched amount still answers 200 — nothing to retry');
+      check(
+        await statusOf(wrongId) === 'approved_awaiting_payment',
+        'but the booking is NOT confirmed at a price it was never quoted',
+      );
+      const wrongRow = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${wrongId}
+      `) as { needs_attention: string | null }[];
+      check(
+        wrongRow[0]?.needs_attention?.includes('AMOUNT MISMATCH') === true,
+        'and it is flagged for a human',
+      );
+
+      // ── A TRANSITION THAT FAILS LEAVES THE EVENT UNSTAMPED ───────────────
+      //
+      // THE SECOND IMPLEMENTATION-REVIEW BLOCKER. `markPaid` never throws — a
+      // failed UPDATE comes back as the VALUE 'error' — so discarding that
+      // return meant a transient database blip produced: event claimed, nothing
+      // written, event stamped, Stripe told 200 and never retrying. The row
+      // then expired on the cron and the customer was emailed an apology for a
+      // booking they had paid for. Exactly what `processed_at` exists to
+      // prevent, reopened one layer up.
+      //
+      // Driven by pointing the event at a row that exists and is payable, then
+      // making the confirm UPDATE fail — the amount column is dropped from
+      // under it for the length of this arm.
+      const failId = await seedAwaitingPayment(41895, 'cs_test_webhook00003');
+      const failEvent = `evt_fail_${Date.now()}`;
+      eventIds.push(failEvent);
+      await sql`ALTER TABLE appointments RENAME COLUMN paid_amount_cents TO paid_amount_cents_tmp`;
+      let failStatus = 0;
+      try {
+        const failed = await post(
+          sessionEvent(failId, {
+            amount: 41895,
+            eventId: failEvent,
+            sessionId: 'cs_test_webhook00003',
+          }),
+        );
+        failStatus = failed.status;
+      } finally {
+        await sql`ALTER TABLE appointments RENAME COLUMN paid_amount_cents_tmp TO paid_amount_cents`;
+      }
+      check(failStatus === 500, `a failed transition answers 500 so Stripe retries, got ${failStatus}`);
+      const stamp = (await sql`
+        SELECT processed_at FROM stripe_events WHERE event_id = ${failEvent}
+      `) as { processed_at: Date | null }[];
+      check(
+        stamp[0]?.processed_at === null,
+        'and the event is left UNSTAMPED — the retry is what recovers the payment',
+      );
+      check(
+        await statusOf(failId) === 'approved_awaiting_payment',
+        'with the booking still awaiting payment rather than silently lost',
+      );
+
+      // The retry now succeeds, which is the whole point of leaving it unstamped.
+      const recovered = await post(
+        sessionEvent(failId, {
+          amount: 41895,
+          eventId: failEvent,
+          sessionId: 'cs_test_webhook00003',
+        }),
+      );
+      check(recovered.status === 200, "Stripe's retry answers 200");
+      check(await statusOf(failId) === 'confirmed', 'AND THE PAYMENT LANDS — the booking confirms');
+    } finally {
+      for (const id of eventIds) {
+        await sql`DELETE FROM stripe_events WHERE event_id = ${id}`.catch(() => {});
+      }
+      if (priorSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+      else process.env.STRIPE_WEBHOOK_SECRET = priorSecret;
+      if (priorKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = priorKey;
+    }
+
+    console.log('  signature, claim, confirm, replay, mismatch, and a failure that retries');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — re-approving a booking that already holds a Checkout Session');
+  // -------------------------------------------------------------------------
+  //
+  // THE PATH THE IMPLEMENTATION REVIEW FOUND B1 ON, and the ticket had claimed
+  // an arm for it that did not exist.
+  //
+  // The flow is real and documented on BK-23's approval screen: "once a
+  // Checkout Session exists the amount is frozen; changing it means cancelling
+  // and re-approving." The office puts an expired or mistaken booking back to
+  // `pending_review` and approves it again — and that row still names the
+  // session minted the first time.
+  //
+  // With no STRIPE_SECRET_KEY in this harness `expireCheckoutSession` returns
+  // `'failed'` without a network call, which is exactly the branch that
+  // mattered: the first version ABORTED here and rolled back, except the
+  // rollback was guarded `AND stripe_session_id IS NULL` and so could never
+  // run — leaving the row approved, a deadline ticking, NO email sent, and the
+  // office told the approval was refused.
+  {
+    const slot = await freeProbeSlot();
+    const inserted = (await sql`
+      INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                slot_start, status, assessment_tier, stripe_session_id)
+      VALUES ('Reapprove Probe', '780-555-0166', 'reapprove@example.com', 'water', '4 Again St',
+              'private', ${slot.toISOString()}, 'pending_review', 'standard',
+              ${'cs_test_stale000000001'})
+      RETURNING id
+    `) as { id: number }[];
+    const againId = inserted[0].id;
+    createdIds.push(againId);
+
+    const location = await call(reviewRoute, { id: String(againId), action: 'approve' });
+
+    // THE APPROVAL STANDS. Aborting would be worse in every direction: the
+    // transition has already committed, and a rollback would leave a
+    // possibly-live link pointing at a `pending_review` row — where `markPaid`
+    // refuses, so a payment on it is money recorded nowhere.
+    check(
+      location.includes('review=approved'),
+      `the approval COMPLETES rather than reporting a refusal, got "${location}"`,
+    );
+
+    const row = (await sql`
+      SELECT status, approved_at, payment_status, needs_attention
+      FROM appointments WHERE id = ${againId}
+    `) as Record<string, unknown>[];
+    check(row[0]?.status === 'approved_awaiting_payment', 'the row is approved');
+    check(row[0]?.approved_at !== null, 'and stamped — not left half-transitioned');
+    check(row[0]?.payment_status === 'pending', 'with payment_status moved on');
+    // The old link may still be live at the OLD price. A human has to close it,
+    // and the webhook's amount check is what stops it confirming at a stale
+    // price in the meantime.
+    check(
+      typeof row[0]?.needs_attention === 'string' &&
+        (row[0].needs_attention as string).includes('STALE CHECKOUT SESSION'),
+      'and the un-expirable session is FLAGGED rather than silently left behind',
+    );
+    check(
+      (row[0].needs_attention as string).includes('cs_test_stale000000001'),
+      'naming the session id, so the office can actually go and close it',
+    );
   }
 
   // -------------------------------------------------------------------------
