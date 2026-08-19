@@ -1,9 +1,5 @@
 import type { Migration } from './types';
-import {
-  APPOINTMENT_STATUSES,
-  SLOT_HOLD_PREDICATE,
-  SLOT_UNIQUE_INDEX,
-} from '../../src/lib/booking-status';
+import { APPOINTMENT_STATUSES } from '../../src/lib/booking-status';
 
 /**
  * The review-and-prepay lifecycle (BK-23).
@@ -47,12 +43,46 @@ import {
  * because this is the kind of thing a later tidy-up reverses on the grounds
  * that an allow-list reads better.
  *
- * ── ORDER ──────────────────────────────────────────────────────────────────
+ * ── ORDER: THIS IS THE EXPAND HALF. 009 IS THE CONTRACT HALF. ──────────────
  *
- * Apply to production BEFORE the deploy, like 005 and 007. `insertBooking` and
- * the availability query both name the new statuses, so new code against the
- * old schema fails on every booking; old code against the new schema writes
- * `pending_review` into a CHECK that already permits it.
+ * **An earlier version of this migration rebuilt the index here, and the header
+ * claimed the deploy window was safe. It was not, and the claim was the defect.**
+ * Found in BK-23's implementation review, 2026-08-18, and proved with `EXPLAIN`
+ * against a real database rather than by reasoning:
+ *
+ *     OK        status NOT IN ('cancelled','declined','payment_expired')   ← new code
+ *     FAIL 42P10  status <> 'cancelled'                                    ← code live on production
+ *
+ * Postgres proves the ON CONFLICT predicate IMPLIES the index predicate, and
+ * that relation is **directional**. Production's arbiter is `status <>
+ * 'cancelled'`, which does not imply the three-status deny-list. So from the
+ * moment the index was rebuilt until the new deployment went live — minutes,
+ * longer if the build failed — EVERY booking, public and admin, would have
+ * raised 42P10. The whole funnel, which is the exact failure this file's own
+ * index section warns about, arriving through the rollout order it prescribed.
+ * A Vercel instant-rollback would have re-opened it with no obvious cause.
+ *
+ * The asymmetry is also the fix: the NEW arbiter is strictly narrower, so it
+ * implies the OLD index's predicate and works fine against it. Verified the
+ * same way, and now pinned permanently by `verify-booking-commit.ts`'s
+ * both-arbiter probe so the next predicate change cannot re-learn this from an
+ * outage.
+ *
+ * Therefore the work is split:
+ *
+ *   1. **009 does NOT run yet.** This file (expand) runs against production
+ *      while the OLD code is still live. Everything it does is additive or
+ *      widening: new columns, a CHECK that permits the old value AND the new
+ *      ones, the rename. **It does not touch the unique index and does not
+ *      move the column default** — both are what the old code depends on.
+ *   2. **Deploy the code.** Its arbiter works against the index still standing.
+ *   3. **Then 009 (contract)** rebuilds the index, moves the default, and
+ *      tightens the CHECK.
+ *
+ * `insertBooking` now writes `status` EXPLICITLY rather than leaning on the
+ * column default, which is what lets step 2 sit between the two halves at all:
+ * a lifecycle value that crosses a migration boundary must not be decided by a
+ * default that one half of the boundary has not moved yet.
  */
 export const migration: Migration = {
   name: '008-review-lifecycle',
@@ -64,9 +94,23 @@ export const migration: Migration = {
     //    at commit, so 'confirmed' is what they were, not a guess about them.
     await sql`UPDATE appointments SET status = 'confirmed' WHERE status = 'booked'`;
 
-    // 3. The new closed set, generated from the same list the application reads.
+    // 3. The new closed set — PLUS 'booked', for the length of the deploy
+    //    window only.
+    //
+    //    The old code is still live while this runs, and its INSERT leans on
+    //    the column default, which step 4 deliberately does not move. So it
+    //    keeps writing 'booked' until the new deployment replaces it, and a
+    //    CHECK without 'booked' would reject every booking it makes — the same
+    //    outage this split exists to avoid, arriving through the constraint
+    //    instead of the arbiter.
+    //
+    //    009 drops 'booked' from the set once nothing can write it. Until then
+    //    the extra value is permitted but unreachable by new code, which names
+    //    its status explicitly.
     const statusList = sql.unsafe(
-      APPOINTMENT_STATUSES.map((s) => `'${s.replace(/'/g, "''")}'`).join(', '),
+      [...APPOINTMENT_STATUSES, 'booked' as const]
+        .map((s) => `'${s.replace(/'/g, "''")}'`)
+        .join(', '),
     );
     await sql`
       ALTER TABLE appointments
@@ -74,22 +118,12 @@ export const migration: Migration = {
         CHECK (status IN (${statusList}))
     `;
 
-    // 4. The default moves with the flow: a row inserted without a status is a
-    //    web request now, not a booking.
-    await sql`ALTER TABLE appointments ALTER COLUMN status SET DEFAULT 'pending_review'`;
+    // 4. THE DEFAULT DOES NOT MOVE HERE, and neither does the unique index.
+    //    Both belong to 009, after the code is live. See the ORDER note above:
+    //    the old code's arbiter cannot resolve against the new index, and its
+    //    INSERT still relies on this default.
 
-    // 5. Rebuild the partial unique index on the new predicate. Dropped and
-    //    recreated rather than altered — a predicate is not alterable in place.
-    const holdPredicate = sql.unsafe(SLOT_HOLD_PREDICATE);
-    const indexName = sql.unsafe(SLOT_UNIQUE_INDEX);
-    await sql`DROP INDEX IF EXISTS ${indexName}`;
-    await sql`
-      CREATE UNIQUE INDEX ${indexName}
-        ON appointments (slot_start)
-        WHERE ${holdPredicate}
-    `;
-
-    // 6. Lifecycle timestamps. All nullable; NULL means the transition has not
+    // 5. Lifecycle timestamps. All nullable; NULL means the transition has not
     //    happened, which is the only honest value for every existing row.
     await sql`
       ALTER TABLE appointments
@@ -99,7 +133,7 @@ export const migration: Migration = {
         ADD COLUMN IF NOT EXISTS files_reviewed_at TIMESTAMPTZ
     `;
 
-    // 7. The amount the office settled at approval, snapshotted rather than
+    // 6. The amount the office settled at approval, snapshotted rather than
     //    derived.
     //
     //    SNAPSHOT IS THE WHOLE POINT. `assessmentQuote` computes from the
@@ -121,7 +155,7 @@ export const migration: Migration = {
         ADD COLUMN IF NOT EXISTS payment_due_at          TIMESTAMPTZ
     `;
 
-    // 8. Payment state, coarse. BK-32 adds the Stripe identifiers beside it.
+    // 7. Payment state, coarse. BK-32 adds the Stripe identifiers beside it.
     //
     //    'not_required' is the correct permanent value for every row that
     //    predates prepay: they were confirmed under a flow that took no money
@@ -146,7 +180,7 @@ export const migration: Migration = {
       END $$
     `;
 
-    // 9. The office's review queue is read by status and ordered by slot. One
+    // 8. The office's review queue is read by status and ordered by slot. One
     //    index, because "what is waiting on me" is the query this whole ticket
     //    creates and it runs on every admin page load.
     await sql`

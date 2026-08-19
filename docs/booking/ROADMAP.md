@@ -210,6 +210,37 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   side; `inviteIdempotencyPrefix` (`booking-ics.ts:156`) exists precisely
   because a fixed prefix collapsed CANCEL into REQUEST. **Owner: BK-23, and it
   is the first task of Deploy 2** — the prefix must carry the transition.
+- **A bare `npm run migrate` meant PRODUCTION, and on 2026-08-18 it took the
+  booking funnel down.** `scripts/migrate.ts` read `DATABASE_URL` with no
+  argument; `DATABASE_URL_DEV` was only ever reached by scripts that opted into
+  it. A migration intended for the dev branch was applied to production, which
+  renamed 10 live rows and rebuilt `appointments_slot_unique` on the new
+  deny-list predicate while the deployed code still arbitrated on
+  `status <> 'cancelled'`. **Postgres resolves an `ON CONFLICT ... WHERE`
+  arbiter by proving it implies the index predicate, and that relation is
+  directional** — the wider old arbiter does not imply the narrower new
+  predicate, so every booking, public and admin, raised 42P10. Restored by hand:
+  index predicate reverted, `confirmed` → `booked` on 10 rows, default and CHECK
+  restored, the three `schema_migrations` rows deleted. The added columns were
+  deliberately left in place — `main` never names them, they all default, and
+  `ADD COLUMN IF NOT EXISTS` re-adds them cleanly.
+
+  **Three fixes, all landed:** `migrate.ts` now requires `--target dev|prod`
+  with no default, proves the dev host differs from production before touching
+  anything, and prints the resolved host on every run including `--status`; the
+  rollout instruction in the build order above was rewritten (it prescribed the
+  order that caused this); and `verify:booking:commit` carries a permanent
+  both-arbiter probe so the directional rule is an assertion rather than
+  something relearned from an outage.
+
+  **The lesson worth keeping is about the guard, not the command.** The
+  comparison that would have caught this already existed — `verify-booking-smoke.ts`
+  has always proved dev ≠ prod before writing a row, and the ad-hoc reset script
+  written minutes earlier that day made the same check and refused correctly.
+  **A guard that lives on the paths someone was already being careful about is
+  not a guard.** It belongs in the tool everything goes through. Severity:
+  **high** (live outage, manual recovery); owner: fixed here.
+
 - **The admin Resend button still collides with the booking-time confirmation,
   and BK-43 did not close it.** Found in BK-43's implementation review,
   2026-08-18. `api/admin/appointments/resend.ts:90` builds its plan through
@@ -1133,7 +1164,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | ✅ **implemented 2026-08-18** — gates green, 4 red rows; awaiting review |
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + travel-fee field**, approve → payment link, escalation timers, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **partially implemented 2026-08-18** — Tasks 1/2/3/7 built and gated (14 red rows); **Tasks 4 (escalation), 5 (service area), 6 (photo gallery) NOT started**. Not deployable alone |
-| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 009**), GST line item, expiry cron, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, expiry cron, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | draft |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1156,10 +1187,35 @@ together or the site tells a lie between deploys.
    made, and the half that is made assumes the other half. In particular the
    approval email currently offers the Interac route only, because
    `createCheckoutUrl` returns null until BK-32 fills it in. Commit separately, one ticket per commit;
-   deploy as one release. Migrations 007/008/009 apply to **production first**,
-   in order, before the code ships — `insertBooking` will name the new columns,
-   so new code against the old schema 500s every booking. Same rollout shape as
-   BK-27's.
+   deploy as one release.
+
+   **ROLLOUT — THREE STEPS, AND THE ORDER IS NOT BK-27's.** This paragraph used
+   to read "migrations 007/008/009 apply to production first, in order, before
+   the code ships", copying BK-27's shape. **That instruction was wrong and it
+   caused a production outage on 2026-08-18** — see Known traps. Migration 008
+   rebuilt the slot index, and the code then live could not resolve its
+   `ON CONFLICT ... WHERE status <> 'cancelled'` against the new predicate, so
+   every booking raised 42P10 until the schema was restored by hand.
+
+   BK-23 therefore split its migration into an **expand** half and a **contract**
+   half, and the deploy goes between them:
+
+   | # | Step | Why it is safe here and nowhere else |
+   | --- | --- | --- |
+   | 1 | `migrate --target prod` applies **007 and 008** | Additive and widening only. 008 does NOT touch the unique index and does NOT move the column default, so the code still live keeps working unchanged. Its CHECK permits `booked` *and* the new statuses precisely so the old code can keep inserting during the window |
+   | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
+   | 3 | `migrate --target prod` applies **009** | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
+
+   **BK-32's migration (now 010) has no such constraint** — it only adds columns
+   and a table — so it goes with step 1. The general rule this replaces the old
+   one with: **a migration that only ADDS may go before the deploy; a migration
+   that RENAMES, NARROWS a CHECK, or REBUILDS an index that live code names must
+   go after it.** BK-27's "production first" was correct for BK-27 because 005
+   only added a column.
+
+   `insertBooking` names `status` explicitly rather than leaning on the column
+   default, which is what makes step 2 sit between the halves at all — during
+   the window the default is still the pre-P9 one.
 
    The fix was BK-23's until 2026-08-18. It moved to its own ticket because the
    build order needed it committed *before* BK-31 while BK-23 lands *after* —
@@ -1236,6 +1292,14 @@ for the next implementer and are quoted in three ticket files as well as here.
 This is the second time P9's numbering has shifted (the spec's §6 item 12 was
 the first); the lesson is that a migration number is worth nothing until it is
 applied, and the ROADMAP row is the only place it is real.
+
+**Third shift, 2026-08-18: BK-32 → 010.** BK-23's migration 008 was split into
+an expand half (008) and a contract half (**009**) after the rollout outage, so
+BK-32's payment migration moves to **010**. The lesson above holds and gained a
+corollary: a number is worth nothing until applied, and **an applied number is
+not worth reusing** — 007/008/009 were briefly applied to production and rolled
+back by hand, and the reason it was safe to re-number afterwards is that the
+`schema_migrations` rows were deleted in the same operation.
 
 **Deployed as "Deploy 1.5"** — after Deploy 1, before the Deploy 2 flip, with
 no coupling to either. BK-40's migration applies to production first, matching

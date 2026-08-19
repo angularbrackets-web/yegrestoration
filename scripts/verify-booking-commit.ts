@@ -1255,6 +1255,112 @@ try {
   }
 }
 
+// ---------------------------------------------------------------------------
+{
+  console.log('\nThe deploy window: both arbiters against the EXPAND-phase index (BK-23)');
+  // -------------------------------------------------------------------------
+  //
+  // This is the property that makes the two-phase rollout safe, and until the
+  // implementation review it existed only as an `EXPLAIN` someone ran once in a
+  // session that has since ended.
+  //
+  // Migrations 008 (expand) and 009 (contract) sit either side of the code
+  // deploy. Between them the OLD code is live against the index 008 leaves
+  // standing — the pre-P9 `status <> 'cancelled'` one. Postgres resolves an
+  // `ON CONFLICT ... WHERE` arbiter by proving the ARBITER predicate implies the
+  // INDEX predicate, and that relation is directional:
+  //
+  //   old arbiter  status <> 'cancelled'    — wider, does NOT imply the deny-list
+  //   new arbiter  status NOT IN (three)    — narrower, DOES imply `<> 'cancelled'`
+  //
+  // So the new arbiter works against the old index (which is what lets the code
+  // deploy first) and the old arbiter raises 42P10 against the new one (which is
+  // why the index rebuild must come last). Rebuilding it before the deploy takes
+  // every booking down, public and admin, for the length of the window.
+  //
+  // Against a SCRATCH TABLE carrying each index in turn, never `appointments`:
+  // the assertion must not depend on which half of the rollout the database in
+  // front of it happens to be on.
+  //
+  // `sql.query()`, NOT `sql.unsafe()`. `sql.unsafe` builds an interpolation
+  // fragment for a tagged template — it is not executable, so `await
+  // sql.unsafe(...)` runs NOTHING and resolves. The first version of this probe
+  // did exactly that and reported every arbiter as resolving, including a
+  // deliberately unrelated one. The CONTROL below is what caught it and is the
+  // reason it stays: a probe on which everything passes is not evidence.
+  const probe = 'bk23_deploy_window_probe';
+  const LEGACY_PREDICATE = "status <> 'cancelled'";
+  const q = (text: string) => sql.query(text);
+
+  const arbiterResolves = async (indexPredicate: string, arbiter: string): Promise<boolean> => {
+    await q(`DROP INDEX IF EXISTS ${probe}_slot`);
+    await q(`CREATE UNIQUE INDEX ${probe}_slot ON ${probe} (slot_start) WHERE ${indexPredicate}`);
+    try {
+      // EXPLAIN: arbiter inference happens at planning time, so the 42P10 is
+      // raised without writing a row.
+      await q(`
+        EXPLAIN INSERT INTO ${probe} (slot_start, status)
+        VALUES (now(), 'pending_review')
+        ON CONFLICT (slot_start) WHERE ${arbiter} DO NOTHING
+      `);
+      return true;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === '42P10') return false;
+      throw err;
+    }
+  };
+
+  try {
+    await q(`DROP TABLE IF EXISTS ${probe}`);
+    await q(`
+      CREATE TABLE ${probe} (
+        id SERIAL PRIMARY KEY,
+        slot_start TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'booked'
+      )
+    `);
+
+    // CONTROL FIRST. An arbiter that plainly cannot be implied by the index
+    // predicate must be REFUSED. If this passes, the probe is not testing
+    // anything and every assertion under it is decoration.
+    check(
+      !(await arbiterResolves(SLOT_HOLD_PREDICATE, "status <> 'no_show'")),
+      'control: an unrelated arbiter is refused with 42P10 — without this the probe cannot fail',
+    );
+
+    // THE ONE THAT MAKES THE ROLLOUT SAFE. If this goes false, the code can no
+    // longer be deployed ahead of the contract migration and the deploy window
+    // becomes a funnel outage again.
+    check(
+      await arbiterResolves(LEGACY_PREDICATE, SLOT_HOLD_PREDICATE),
+      'the NEW arbiter resolves against the EXPAND-phase index — this is what lets the code deploy between 008 and 009',
+    );
+
+    // And the reason the halves cannot be swapped: production's own arbiter
+    // against the index 009 builds. Asserted as a fact rather than left as a
+    // warning in a comment, because a comment is what it was.
+    check(
+      !(await arbiterResolves(SLOT_HOLD_PREDICATE, LEGACY_PREDICATE)),
+      'the OLD arbiter raises 42P10 against the CONTRACT-phase index — which is why 009 must not run before the deploy',
+    );
+
+    // The steady state on either side, so a future predicate change that breaks
+    // both directions at once is still caught.
+    check(
+      await arbiterResolves(SLOT_HOLD_PREDICATE, SLOT_HOLD_PREDICATE),
+      'and the new arbiter resolves against the new index, which is the steady state after 009',
+    );
+    check(
+      await arbiterResolves(LEGACY_PREDICATE, LEGACY_PREDICATE),
+      'as the old pair did before any of this, which is the state production is in right now',
+    );
+  } finally {
+    await q(`DROP TABLE IF EXISTS ${probe}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 if (failures > 0) {
   console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.`);
   process.exit(1);

@@ -621,8 +621,10 @@ site tells a lie between deploys.
    fallback file input. Independent. Delivers the client's photo problem
    *today* without Twilio.
 
-**Deploy 2 — the flip** (four tickets, one deploy, migrations 007–009 applied to
-production first, in order, before the code goes out)
+**Deploy 2 — the flip** (four tickets, one deploy; migrations go **expand →
+deploy → contract**, NOT all-before-the-code — see ROADMAP §P9's rollout table.
+The "production first, in order" wording this line used to carry caused a live
+42P10 outage on 2026-08-18)
 
 3. **BK-31** — tier picker (006). Must precede BK-32, which charges the tier.
 4. **BK-23** — lifecycle, statuses + index, request-received page/email,

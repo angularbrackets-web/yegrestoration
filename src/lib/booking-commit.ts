@@ -16,7 +16,7 @@
 
 import type { getDb } from './db';
 import type { BookingPayload } from './booking-payload';
-import { SLOT_HOLD_PREDICATE } from './booking-status';
+import { SLOT_HOLD_PREDICATE, type AppointmentStatus } from './booking-status';
 
 type Sql = ReturnType<typeof getDb>;
 
@@ -71,13 +71,25 @@ export async function insertBooking(
   // value it will not see until execution.
   const slotHold = sql.unsafe(SLOT_HOLD_PREDICATE);
 
+  // STATUS IS NAMED, NOT DEFAULTED — and that is a rollout requirement, not a
+  // style preference.
+  //
+  // Migration 008 (expand) runs before this code deploys and 009 (contract)
+  // runs after, so there is a window in which the column default is still the
+  // pre-P9 one. A row's lifecycle position must not be decided by a default
+  // that one half of that boundary has not moved yet: leaning on it would put
+  // every booking made during the deploy window into the wrong status, silently
+  // and unrecoverably. Naming it makes this function's behaviour identical on
+  // both sides of the migration.
+  const status: AppointmentStatus = 'pending_review';
+
   const rows = (await sql`
     WITH new_appt AS (
       INSERT INTO appointments (
         name, phone, email, service, description, address, city, postal_code,
         payment_route, insurer_name, policy_number, claim_number,
         slot_start, source, sms_consent_at, terms_acked_at, assessment_tier,
-        admin_notes
+        admin_notes, status
       ) VALUES (
         ${p.name}, ${p.phone}, ${p.email}, ${p.service}, ${p.description},
         ${p.address}, ${p.city}, ${p.postal_code},
@@ -85,7 +97,7 @@ export async function insertBooking(
         ${p.slotStart.toISOString()}, ${source},
         ${p.smsConsent ? now.toISOString() : null},
         ${p.termsAcked ? now.toISOString() : null},
-        ${p.assessmentTier}, ${adminNotes}
+        ${p.assessmentTier}, ${adminNotes}, ${status}
       )
       ON CONFLICT (slot_start) WHERE ${slotHold} DO NOTHING
       RETURNING id
