@@ -69,10 +69,28 @@ export function isPaymentOverdue(paymentDueAt: Date | null, now: Date): boolean 
 }
 
 /** The two things the office can do to a request. */
-export type ReviewAction = 'approve' | 'decline';
+export type ReviewAction = 'approve' | 'decline' | 'preview';
 
+/**
+ * `'preview'` is the confirm step, and it is the guard rail Task 7 asks for:
+ * "show the itemized total, as the customer will see it, before the admin
+ * confirms — not just the fields."
+ *
+ * The screen it replaces rendered that total from the SUGGESTION at page load,
+ * with no client script behind it, so the figure was correct only until the
+ * admin touched a field — i.e. correct in exactly the case where it did not
+ * matter. Found in BK-23's implementation review.
+ *
+ * Done as a server round trip rather than a live-updating field on purpose.
+ * `new.astro` records that the admin pages carry no client JS ("CSS, not JS"),
+ * and a screen where money is typed is the wrong place to set the opposite
+ * precedent: a total kept honest by a script is a total that is wrong whenever
+ * the script fails to run, and nothing on the page would say so. A round trip
+ * cannot disagree with itself — the figures shown are computed from the same
+ * parse of the same strings that the approve step re-parses.
+ */
 export function isReviewAction(value: unknown): value is ReviewAction {
-  return value === 'approve' || value === 'decline';
+  return value === 'approve' || value === 'decline' || value === 'preview';
 }
 
 /**
@@ -84,6 +102,18 @@ export function isReviewAction(value: unknown): value is ReviewAction {
  * a typo directly into a card charge.
  */
 export const MAX_ADMIN_AMOUNT_CENTS = 1_000_000; // $10,000.00
+
+/**
+ * Dollars, for a form field. `39900` → `"399.00"`.
+ *
+ * The inverse of `parseAmountCents`, and shared rather than local to a page
+ * because the confirm step round-trips through it: the amounts the office sees
+ * on the confirmation are re-posted through these strings and re-parsed by
+ * `parseAmountCents`. Two spellings of this would be two numbers.
+ */
+export function amountField(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
 
 /**
  * Parse an admin-entered dollar amount into cents.

@@ -12,6 +12,7 @@ import {
   planCalendarInvite,
   planCancellationEmail,
   planRestoreEmail,
+  planFirstConfirmationEmail,
 } from '../../../../lib/booking-admin-notify';
 import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
 import type { IcsKind } from '../../../../lib/booking-ics';
@@ -256,10 +257,25 @@ async function sendBoundaryMail(row: UpdatedRow, now: Date): Promise<void> {
     ];
 
     if (email) {
+      // THREE messages across this boundary, not two.
+      //
+      // Before BK-23 the only inward crossing was `cancelled -> booked`, so
+      // "restored" described every one of them. P9 makes
+      // `pending_review -> confirmed` and `approved_awaiting_payment ->
+      // confirmed` reachable — and with `createCheckoutUrl` returning null
+      // until BK-32, the status dropdown is currently the ONLY route to
+      // `confirmed`. Sending the restore copy there tells a customer their
+      // assessment "was cancelled and has now been reinstated" on the first
+      // booking they ever paid for.
+      //
+      // The question is asked of where the row CAME FROM, because that is what
+      // the word "reinstated" is a claim about. Only `cancelled` earns it.
       const message =
         kind === 'cancel'
           ? planCancellationEmail(event, email, now)
-          : planRestoreEmail(event, email, now);
+          : row.prev_status === 'cancelled'
+            ? planRestoreEmail(event, email, now)
+            : planFirstConfirmationEmail(event, email, now);
       sends.push(
         sendCalendarInvite(message, { id: row.id, kind, now, audience: 'customer' }).then(
           (outcome) => ['customer', outcome] as [string, 'sent' | 'skipped' | 'failed'],

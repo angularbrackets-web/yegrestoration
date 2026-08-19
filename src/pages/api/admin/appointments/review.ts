@@ -16,6 +16,7 @@ import { assessmentQuote, gstFor, isAssessmentTier } from '../../../../lib/booki
 import {
   isReviewAction,
   parseAmountCents,
+  amountField,
   paymentDeadline,
 } from '../../../../lib/booking-review';
 import { formatSlot } from '../../../../lib/booking-time';
@@ -127,10 +128,72 @@ export const POST: APIRoute = async ({ request }) => {
     filesAttached: 0,
   };
 
+  if (action === 'preview') return preview(row, form, now, detail);
+
   return action === 'approve'
     ? approve(sql, row, notificationInput, form, now, detail)
     : decline(sql, row, notificationInput, now, detail);
 };
+
+/**
+ * The confirm step. Parses and validates the typed amounts, changes nothing,
+ * and sends the office back to the detail page with the figures to look at.
+ *
+ * **Nothing here writes.** A preview that transitioned would be an approval
+ * with an extra click, and the whole point is that the click AFTER the total is
+ * the one that charges.
+ *
+ * The amounts go back as normalised decimal strings rather than as cents,
+ * because the page re-posts them into the same `assessment_amount` /
+ * `travel_fee` fields that `approve` re-parses. One parser, one spelling: the
+ * number the office confirms cannot differ from the number that is charged,
+ * because they are produced by the same call on the same string.
+ */
+function preview(row: Appointment, form: FormData, now: Date, detail: string): Response {
+  const parsed = amountsFrom(row, form);
+  if ('error' in parsed) return back(detail, { review: parsed.error });
+
+  const deadline = paymentDeadline(row.slot_start, now);
+  return back(detail, {
+    confirm: '1',
+    base: amountField(parsed.baseCents),
+    travel: amountField(parsed.travelCents),
+    due: deadline.dueAt ? String(deadline.dueAt.getTime()) : 'now',
+  });
+}
+
+/**
+ * The one place the typed amounts become numbers, shared by `preview` and
+ * `approve` so the confirmed figure and the charged figure cannot drift.
+ *
+ * Absent fields fall back to the suggestion; present-but-unparseable ones are
+ * an error, never a silent fallback — a typo that quietly becomes the suggested
+ * price is a charge nobody chose.
+ */
+function amountsFrom(
+  row: Appointment,
+  form: FormData,
+):
+  | { baseCents: number; travelCents: number; suggested: ReturnType<typeof assessmentQuote> }
+  | { error: 'amount' | 'travel' | 'tier' } {
+  if (!row.assessment_tier) return { error: 'tier' };
+
+  const suggested = assessmentQuote({
+    tier: row.assessment_tier,
+    service: row.service,
+    slotStart: row.slot_start,
+  });
+
+  const baseRaw = form.get('assessment_amount');
+  const travelRaw = form.get('travel_fee');
+
+  const baseCents =
+    baseRaw === null || baseRaw === '' ? suggested.baseCents : parseAmountCents(baseRaw);
+  const travelCents = travelRaw === null || travelRaw === '' ? 0 : parseAmountCents(travelRaw);
+  if (baseCents === null) return { error: 'amount' };
+  if (travelCents === null) return { error: 'travel' };
+  return { baseCents, travelCents, suggested };
+}
 
 async function approve(
   sql: ReturnType<typeof getDb>,
@@ -160,13 +223,9 @@ async function approve(
   // Absent fields fall back to the suggestion; present-but-unparseable ones are
   // an error, never a silent fallback — a typo that quietly becomes the
   // suggested price is a charge nobody chose.
-  const baseRaw = form.get('assessment_amount');
-  const travelRaw = form.get('travel_fee');
-
-  const baseCents = baseRaw === null || baseRaw === '' ? suggested.baseCents : parseAmountCents(baseRaw);
-  const travelCents = travelRaw === null || travelRaw === '' ? 0 : parseAmountCents(travelRaw);
-  if (baseCents === null) return back(detail, { review: 'amount' });
-  if (travelCents === null) return back(detail, { review: 'travel' });
+  const parsed = amountsFrom(row, form);
+  if ('error' in parsed) return back(detail, { review: parsed.error });
+  const { baseCents, travelCents } = parsed;
 
   // GST AND THE TOTAL ARE COMPUTED, NEVER TYPED — there is no field for either,
   // so no typo can put the tax and the subtotal on different numbers.

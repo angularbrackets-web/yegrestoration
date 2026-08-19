@@ -105,6 +105,31 @@ export const RESTORED_LEAD =
 export const RESTORED_CALENDAR_LINE =
   'A calendar invite is attached — open it to put the appointment back on your calendar.';
 
+/**
+ * A FIRST confirmation crossing the same boundary, which is not a restore.
+ *
+ * Before BK-23 the only inward crossing was `cancelled → booked`, so the
+ * restore copy above was always true of it. P9 adds two more —
+ * `pending_review → confirmed` and `approved_awaiting_payment → confirmed` —
+ * and told this way round they are false in a way that matters: the customer
+ * is informed their assessment "was cancelled and has now been reinstated" on
+ * the first booking they ever paid for. Found in BK-23's implementation review.
+ *
+ * Deliberately says nothing about payment. This message is sent by the office
+ * moving a row to `confirmed`, which under P9 is what a completed payment
+ * means, but the transition itself is not proof one arrived — the status
+ * dropdown can be driven by hand. Stating the fact (the appointment is
+ * confirmed, here is the invite) is true on every path that reaches it;
+ * "thank you for your payment" would not be.
+ */
+export const CONFIRMED_HEADING = 'Your assessment is confirmed';
+
+export const CONFIRMED_LEAD =
+  'Your assessment is confirmed and we have you booked in for the time below.';
+
+export const CONFIRMED_CALENDAR_LINE =
+  'A calendar invite is attached — open it to add the appointment to your calendar.';
+
 // ---------------------------------------------------------------------------
 // The assessment fee terms (BK-27)
 //

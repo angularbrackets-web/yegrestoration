@@ -59,6 +59,9 @@ import {
   CANCELLED_LEAD,
   CANCELLED_REBOOK_LINE,
   RESTORED_CALENDAR_LINE,
+  CONFIRMED_HEADING,
+  CONFIRMED_LEAD,
+  CONFIRMED_CALENDAR_LINE,
   RESTORED_HEADING,
   RESTORED_LEAD,
   TIMEZONE_NOTE,
@@ -394,6 +397,26 @@ export function planCancellationEmail(event: IcsEvent, email: string, now: Date)
 }
 
 /** "It is back on" — plus a fresh METHOD:REQUEST, same UID, later SEQUENCE. */
+/**
+ * The other inward crossing: a FIRST confirmation, not a reinstatement.
+ *
+ * See `CONFIRMED_HEADING`'s note for why this exists. `sendBoundaryMail` picks
+ * between the two on whether the row is coming back from `cancelled` — the only
+ * status for which "reinstated" is a true description of what happened.
+ */
+export function planFirstConfirmationEmail(
+  event: IcsEvent,
+  email: string,
+  now: Date,
+): Message {
+  return planBoundaryEmail(event, email, now, 'request', {
+    heading: CONFIRMED_HEADING,
+    lead: CONFIRMED_LEAD,
+    calendarLine: CONFIRMED_CALENDAR_LINE,
+    phoneLine: CANCEL_LINE,
+  });
+}
+
 export function planRestoreEmail(event: IcsEvent, email: string, now: Date): Message {
   return planBoundaryEmail(event, email, now, 'request', {
     heading: RESTORED_HEADING,

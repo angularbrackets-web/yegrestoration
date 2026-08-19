@@ -29,8 +29,8 @@ import {
   assessmentQuote,
   formatCents,
 } from '../../../lib/booking-pricing';
-import { paymentDeadline } from '../../../lib/booking-review';
-import { TRAVEL_FEE_CENTS_PER_KM, TRAVEL_FEE_FREE_RADIUS_KM } from '../../../lib/booking-pricing';
+import { paymentDeadline, amountField, parseAmountCents } from '../../../lib/booking-review';
+import { TRAVEL_FEE_CENTS_PER_KM, TRAVEL_FEE_FREE_RADIUS_KM, gstFor } from '../../../lib/booking-pricing';
 import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
   appointmentUploadUrl,
@@ -291,12 +291,48 @@ const suggestedQuote =
       })
     : null;
 
-/** Dollars, for a form field. `39900` → `399.00`. */
-function amountField(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
-
 const isPendingReview = appointment?.status === 'pending_review';
+
+// ── The confirm step (BK-23 Task 7 guard rail) ─────────────────────────────
+//
+// The office posts `action=preview`, the route parses the typed amounts and
+// bounces back here with them normalised. This block renders what the CUSTOMER
+// will be quoted, computed from those exact values, and the button under it is
+// the one that charges.
+//
+// Recomputed here rather than passed in as a total: the query string carries
+// only the two figures the office typed, so a tampered or stale URL cannot
+// display one number while approving another — everything shown below is
+// derived, and the same two strings are what get re-parsed on approve.
+const confirmRequested = Astro.url.searchParams.get('confirm') === '1';
+const confirmBaseCents = parseAmountCents(Astro.url.searchParams.get('base'));
+const confirmTravelCents = parseAmountCents(Astro.url.searchParams.get('travel'));
+const confirming =
+  confirmRequested && isPendingReview && confirmBaseCents !== null && confirmTravelCents !== null
+    ? (() => {
+        const subtotalCents = confirmBaseCents + confirmTravelCents;
+        const gstCents = gstFor(subtotalCents);
+        return {
+          baseCents: confirmBaseCents,
+          travelCents: confirmTravelCents,
+          subtotalCents,
+          gstCents,
+          totalCents: subtotalCents + gstCents,
+        };
+      })()
+    : null;
+
+// What was actually settled, for a row past review. Without this the office can
+// approve an amount and then have no screen anywhere that shows what it was.
+const settled =
+  appointment && appointment.assessment_amount_cents !== null
+    ? {
+        baseCents: appointment.assessment_amount_cents,
+        travelCents: appointment.travel_fee_cents ?? 0,
+        gstCents: appointment.gst_cents ?? 0,
+        totalCents: appointment.total_amount_cents ?? 0,
+      }
+    : null;
 
 /**
  * What the customer will be asked to pay if the office approves as suggested.
@@ -812,6 +848,113 @@ function statusClasses(status: Appointment['status']) {
         deadline and no email. It cannot: `review.ts` is the only path that
         performs the transition, and it guards on `status = 'pending_review'`.
       -->
+      {/*
+        WHAT WAS SETTLED, for a row past review.
+        <br />
+        Without this the office could approve an amount and then have no screen
+        anywhere that showed what it was — `assessment_amount_cents` and its
+        siblings were written by the approval and read by nothing. The figure a
+        customer is disputing has to be visible to the person taking the call.
+      */}
+      {settled && (
+        <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6">
+          <h2 class="text-white font-semibold mb-1">Amount settled at approval</h2>
+          <p class="text-zinc-500 text-xs mb-4">
+            Snapshotted when this was approved — not recomputed from today's prices.
+          </p>
+          <dl class="text-sm max-w-sm">
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Assessment</dt>
+              <dd class="text-zinc-200">{formatCents(settled.baseCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Travel</dt>
+              <dd class="text-zinc-200">{formatCents(settled.travelCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">GST (5%)</dt>
+              <dd class="text-zinc-200">{formatCents(settled.gstCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-2.5 font-semibold">
+              <dt class="text-white">Total</dt>
+              <dd class="text-white">{formatCents(settled.totalCents)}</dd>
+            </div>
+          </dl>
+          {appointment.payment_due_at && (
+            <p class="text-zinc-500 text-xs mt-3">
+              Payment due by {formatSlot(appointment.payment_due_at)} ({TIMEZONE_NOTE}).
+            </p>
+          )}
+        </section>
+      )}
+
+      {/*
+        THE CONFIRM STEP. Rendered from the amounts the office actually typed,
+        server-side, with no script keeping it honest — see `isReviewAction`'s
+        note for why this is a round trip rather than a live field.
+
+        The button in here is the one that charges. Everything above it is the
+        same itemisation the customer receives, in the same order, so what is
+        approved and what is quoted cannot be two different numbers.
+      */}
+      {confirming && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REVIEW_ENDPOINT}
+          class="bg-zinc-900 border border-amber-500 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+          {/*
+            The SAME strings the route just normalised, re-posted into the same
+            fields `approve` parses. The office confirms a number produced by
+            one parser and that same parser produces the number charged.
+          */}
+          <input type="hidden" name="assessment_amount" value={amountField(confirming.baseCents)} />
+          <input type="hidden" name="travel_fee" value={amountField(confirming.travelCents)} />
+
+          <h2 class="text-white font-semibold mb-1">Confirm the amount</h2>
+          <p class="text-zinc-500 text-xs mb-5">
+            This is what {appointment.name} will be asked to pay. Nothing has been sent yet.
+          </p>
+
+          <dl class="text-sm mb-5 max-w-sm">
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Assessment</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.baseCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Travel</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.travelCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">GST (5%)</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.gstCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-2.5 font-semibold">
+              <dt class="text-white">Total</dt>
+              <dd class="text-amber-400">{formatCents(confirming.totalCents)}</dd>
+            </div>
+          </dl>
+
+          <div class="flex flex-wrap gap-3 items-center">
+            <button
+              type="submit"
+              name="action"
+              value="approve"
+              class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+            >
+              Approve and send — {formatCents(confirming.totalCents)}
+            </button>
+            <a
+              href={adminAppointmentPath(appointment.id)}
+              class="text-zinc-400 hover:text-zinc-200 text-sm underline underline-offset-4"
+            >
+              Change the amounts
+            </a>
+          </div>
+        </form>
+      )}
+
       {isPendingReview && (
         <form
           method="POST"
@@ -874,9 +1017,16 @@ function statusClasses(status: Appointment['status']) {
               <p class="text-zinc-400 text-sm mb-1">
                 GST and the total are worked out from these — there is no field for either.
               </p>
+              {/*
+                NO TOTAL HERE, deliberately. This panel used to print one from
+                the suggestion, which stopped being true the moment either field
+                was edited — correct only in the case where it did not matter.
+                The itemised figure now lives on the confirm step below, where it
+                is computed from what was actually typed.
+              */}
               <p class="text-zinc-500 text-xs mb-4">
-                As suggested: {formatCents(suggestedQuote.baseCents)} + GST {formatCents(suggestedQuote.gstCents)}
-                = <span class="text-zinc-300 font-semibold">{formatCents(suggestedQuote.totalCents)}</span>.
+                Suggested {formatCents(suggestedQuote.baseCents)} before GST. You will see the
+                itemised total, as the customer gets it, before anything is sent.
                 {suggestedDeadline && suggestedDeadline.dueAt
                   ? ` Payment due by ${formatSlot(suggestedDeadline.dueAt)} (${TIMEZONE_NOTE}).`
                   : ' This slot is close, so the link will be sent to be paid right away rather than on a deadline.'}
@@ -886,10 +1036,10 @@ function statusClasses(status: Appointment['status']) {
                 <button
                   type="submit"
                   name="action"
-                  value="approve"
+                  value="preview"
                   class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
                 >
-                  Approve and send payment link
+                  Review the amount →
                 </button>
                 <button
                   type="submit"

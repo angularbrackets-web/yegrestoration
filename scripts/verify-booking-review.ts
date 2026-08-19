@@ -9,8 +9,12 @@ import {
   PAYMENT_WINDOW_HOURS,
   PAY_NOW_THRESHOLD_HOURS,
 } from '../src/lib/booking-config';
+import { readFileSync } from 'fs';
+
+import { gstFor } from '../src/lib/booking-pricing';
 import {
   MAX_ADMIN_AMOUNT_CENTS,
+  amountField,
   isPaymentOverdue,
   isReviewAction,
   parseAmountCents,
@@ -148,10 +152,101 @@ console.log('\nThe admin amount field');
 console.log('\nThe action set');
 // ---------------------------------------------------------------------------
 {
-  check(isReviewAction('approve') && isReviewAction('decline'), 'both actions are recognised');
+  check(
+    isReviewAction('approve') && isReviewAction('decline') && isReviewAction('preview'),
+    'all three actions are recognised',
+  );
   for (const bad of ['confirm', 'APPROVE', '', 'cancel', 1, null]) {
     check(!isReviewAction(bad), `${JSON.stringify(bad)} is not a review action`);
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe confirm step: the office sees the charge before it is sent (BK-23 Task 7)');
+// ---------------------------------------------------------------------------
+//
+// The guard rail Task 7 spells out — "show the itemized total, as the customer
+// will see it, before the admin confirms — not just the fields" — was rendered
+// from the SUGGESTION at page load with no script behind it, so the figure was
+// stale the instant either field was edited. Correct in exactly the case where
+// it did not matter, wrong in the case the screen exists for. And nothing
+// anywhere showed the amount after approval, so a typo had no recovery surface
+// either.
+//
+// The fix is a server round trip: `action=preview` parses, bounces back with
+// the normalised strings, and the page re-posts THOSE into the fields `approve`
+// re-parses. What is asserted here is the property that makes the round trip
+// worth anything — that the two stages cannot produce different numbers.
+{
+  // The round trip, end to end, in cents: parse -> render -> re-post -> parse.
+  for (const typed of ['399', '399.00', '46.50', '1,199.00', '0', '0.00', '9999.99']) {
+    const first = parseAmountCents(typed);
+    check(first !== null, `${JSON.stringify(typed)} parses`);
+    if (first === null) continue;
+    // What the confirm screen puts in its hidden field...
+    const roundTripped = amountField(first);
+    // ...and what `approve` makes of it. These must be the same cents, or the
+    // office confirms one number and the customer is charged another.
+    check(
+      parseAmountCents(roundTripped) === first,
+      `${JSON.stringify(typed)} survives the confirm round trip (${roundTripped} -> ${parseAmountCents(roundTripped)}, expected ${first})`,
+    );
+  }
+
+  // The itemisation the confirm screen renders is the one `approve` stores.
+  // Spelled out rather than recomputed with gstFor, so the assertion does not
+  // move with the function it is about.
+  const cases: [number, number, number, number][] = [
+    // base,  travel, gst,  total
+    [39900, 0, 1995, 41895],
+    [39900, 4650, 2228, 46778],
+    [57750, 0, 2888, 60638],
+    [0, 0, 0, 0],
+  ];
+  for (const [base, travel, gst, total] of cases) {
+    const subtotal = base + travel;
+    check(gstFor(subtotal) === gst, `GST on ${subtotal} is ${gst}, got ${gstFor(subtotal)}`);
+    check(
+      subtotal + gstFor(subtotal) === total,
+      `and the total is ${total}, got ${subtotal + gstFor(subtotal)}`,
+    );
+  }
+
+  // The route must not write on a preview. An approval with an extra click is
+  // not a confirm step.
+  const reviewSrc = readFileSync('src/pages/api/admin/appointments/review.ts', 'utf8');
+  const previewBody = reviewSrc.slice(
+    reviewSrc.indexOf('function preview('),
+    reviewSrc.indexOf('function amountsFrom('),
+  );
+  check(previewBody.length > 0, 'the preview handler exists');
+  check(
+    !/\bUPDATE\b|\bINSERT\b|sendBookingNotifications|sql`/.test(previewBody),
+    'the preview handler writes nothing and sends nothing — it only re-renders',
+  );
+
+  // One parser for both stages. Two would be two numbers.
+  check(
+    (reviewSrc.match(/parseAmountCents\(/g) ?? []).length === 2 &&
+      /function amountsFrom\(/.test(reviewSrc) &&
+      (reviewSrc.match(/amountsFrom\(row, form\)/g) ?? []).length === 2,
+    'preview and approve both go through one amountsFrom, which is the only caller of parseAmountCents',
+  );
+
+  // The page must render the total from the TYPED amounts, not the suggestion.
+  const pageSrc = readFileSync('src/pages/admin/appointments/[id].astro', 'utf8');
+  check(
+    /confirming\.totalCents/.test(pageSrc) && /name="action"\s*\n?\s*value="approve"/.test(pageSrc),
+    'the approve button sits on the panel that renders confirming.totalCents',
+  );
+  check(
+    !/suggestedQuote\.totalCents/.test(pageSrc),
+    'and no total is rendered from the suggestion, which is what went stale',
+  );
+  check(
+    /settled\.totalCents/.test(pageSrc),
+    'an approved row still shows what was settled, so a disputed charge has a screen',
+  );
 }
 
 // ---------------------------------------------------------------------------
