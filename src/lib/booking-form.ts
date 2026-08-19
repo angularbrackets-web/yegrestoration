@@ -35,7 +35,7 @@ import {
   type FieldError,
 } from './booking-payload';
 import type { AssessmentTier } from './booking-pricing';
-import { earliestBookableDate, earliestBookableInstant, slotStartsForDate } from './booking-time';
+import { earliestBookableDate } from './booking-time';
 import { EXTENSION_TO_TYPE, formatBytes, isAllowedContentType } from './booking-uploads';
 
 export type Step = 1 | 2 | 3;

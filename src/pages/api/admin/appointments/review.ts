@@ -210,6 +210,30 @@ async function approve(
     return back(detail, { review: 'notier' });
   }
 
+  // THE SLOT MUST STILL BE IN THE FUTURE.
+  //
+  // Task 4's auto-decline at slot-4h is what would normally make this
+  // unreachable, and it is not built — an omission that is fine on its own but
+  // leaves the built path with no equivalent. A request submitted Monday for
+  // Tuesday 11:30 that nobody reviews is still sitting in `pending_review` on
+  // Wednesday, and Approve would email "please pay as soon as you can" for a
+  // visit two days gone, then (under BK-32) open a live Checkout Session for
+  // it. Taking money for a slot that has passed is the one outcome this whole
+  // ticket exists to prevent.
+  //
+  // `paymentDeadline` will not catch it: a negative time-to-slot lands in the
+  // pay-now branch, which is correct for a slot four hours out and wrong for
+  // one that is behind us. The check belongs here, on the transition, not in
+  // the deadline arithmetic.
+  //
+  // Refuses rather than auto-declining. Declining is a customer-facing message
+  // and an irreversible slot release; an office member who meant to approve
+  // should be told why they cannot, not have a different transition chosen for
+  // them. Task 4 is what turns this into an automatic apology.
+  if (row.slot_start.getTime() <= now.getTime()) {
+    return back(detail, { review: 'elapsed' });
+  }
+
   // The pre-filled quote, recomputed server-side rather than trusted from the
   // form: the form's numbers came from here in the first place, and a round
   // trip through a browser is not a reason to start believing them.

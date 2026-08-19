@@ -158,22 +158,23 @@ export function earliestBookableDate(now: Date = new Date()): DateKey {
   return addDays(localDateKey(now), MIN_NOTICE_DAYS);
 }
 
-/**
- * The earliest instant a public booking may start.
+/*
+ * `earliestBookableInstant` was here and is deliberately GONE (BK-23 review).
  *
- * The first slot of the first bookable date — not `now + N hours`. BK-23 moved
- * the rule from a rolling window to a calendar one, and this stayed the single
- * chokepoint both `booking-form.ts` (which filters the picker) and
- * `booking-availability.ts` (which filters the API) already read, so the change
- * landed in one function rather than at every call site.
+ * BK-23's own text called it "the single chokepoint both the picker and the
+ * availability filter already read" — and by the time that sentence shipped it
+ * was false. Moving the rule from a rolling window to a calendar one turned
+ * both callers into date-key comparisons: `booking-form.ts` compares keys
+ * directly and `booking-availability.ts` calls `isWithinBookingWindow`. Nothing
+ * called it, and an exported instant-cutoff sitting beside a calendar rule is
+ * an invitation to reintroduce the rolling comparison it replaced.
  *
- * Callers use it as a cutoff to compare slot instants against, and that keeps
- * working: every slot on the first bookable date is at or after its first slot
- * time, and every slot before that date is before it.
+ * `earliestBookableDate` is the real chokepoint. Use that.
+ *
+ * The name stays on `verify-booking-admin-entry.ts`'s banned-import list on
+ * purpose: a banned name that no longer exists costs nothing and catches a
+ * reintroduction.
  */
-export function earliestBookableInstant(now: Date = new Date()): Date {
-  return zonedTimeToUtc(earliestBookableDate(now), SLOT_START_TIMES[0]);
-}
 
 /** The last local date the public calendar offers. */
 export function latestBookableDate(now: Date = new Date()): DateKey {

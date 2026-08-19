@@ -42,7 +42,6 @@ export const GET: APIRoute = async () => {
     // The predicate is the partial unique index's, shared rather than mirrored:
     // an availability query that offers a held slot is a double booking one
     // click later. See SLOT_HOLD_PREDICATE.
-    // (appointments_slot_unique), so a cancelled booking frees its slot.
     const [bookedRows, blackoutRows] = await Promise.all([
       sql`
         SELECT slot_start

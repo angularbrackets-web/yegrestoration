@@ -245,11 +245,23 @@ const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
     tone: 'warn',
     text: 'Choose an assessment first — the amount comes from it. Nothing was approved.',
   },
+  elapsed: {
+    tone: 'warn',
+    text: 'That time has already passed, so it cannot be approved or paid for. Nothing was approved — decline it, or call the customer to rebook.',
+  },
   amount: { tone: 'warn', text: 'That assessment amount was not a valid figure. Nothing was approved.' },
   travel: { tone: 'warn', text: 'That travel fee was not a valid figure. Nothing was approved.' },
+  // No "mark it paid" is offered here, because there is no such action:
+  // `markPaid()` is BK-32's seam and nothing in `src/` implements it yet. The
+  // earlier wording sent the office looking for a button that does not exist,
+  // which is worse than saying nothing — this is the ROADMAP's standing
+  // email-exemption trap surfacing as an instruction that cannot be followed.
+  //
+  // What is offered instead is the only move that actually exists today: get an
+  // address onto the row, from the edit form directly above.
   noemail: {
     tone: 'warn',
-    text: 'This booking has no email address, so there is nobody to send a payment link to. Take payment by phone and mark it paid instead.',
+    text: 'This booking has no email address, so there is nowhere to send a payment link and nothing was approved. Add one above — a phone booking still needs an address to be paid for. If the customer has none, call the office before promising a visit.',
   },
   nopayment: {
     tone: 'warn',

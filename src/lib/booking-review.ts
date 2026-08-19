@@ -100,6 +100,20 @@ export function isReviewAction(value: unknown): value is ReviewAction {
  * travel fee is tens of dollars, so five figures means a slipped decimal or a
  * stray keystroke. It is checked server-side because the screen it guards turns
  * a typo directly into a card charge.
+ *
+ * **PER FIELD, not per approval.** Base and travel are each bounded, so the
+ * arithmetic ceiling on a single approval is about $21,000 with GST. Stated
+ * rather than tightened: the two fields are independently plausible, a combined
+ * cap would have to pick which one to blame, and the confirm step now shows the
+ * total before anything is charged — which is the control that actually catches
+ * a two-field mistake. Raise this only alongside a reason it should be raised.
+ *
+ * **$0.00 is accepted, deliberately.** A zero travel fee is the default and the
+ * common case. A zero *assessment* is a goodwill visit the office should be
+ * able to record without inventing a cent, and under prepay a $0 total is a
+ * booking that needs no payment step rather than a booking with a broken one —
+ * BK-32 must treat it that way rather than opening a Checkout Session for
+ * nothing.
  */
 export const MAX_ADMIN_AMOUNT_CENTS = 1_000_000; // $10,000.00
 
@@ -125,12 +139,33 @@ export function amountField(cents: number): string {
  * Deliberately NOT `parseFloat`: `parseFloat('12abc')` is 12, and a field that
  * silently accepts "12abc" as twelve dollars is a field that will one day
  * accept a paste of something else entirely.
+ *
+ * COMMA PLACEMENT IS VALIDATED BEFORE THE COMMAS ARE STRIPPED, and that order
+ * is the whole point. An earlier version stripped every comma unconditionally,
+ * so `"46,50"` — a comma decimal, which is how most of the world writes forty-
+ * six fifty, and a plausible slip on any keyboard — became `"4650"` and was
+ * accepted as **$4,650.00**. It sat well under the ceiling, so nothing else
+ * caught it, and this is the travel-fee field: two-digit dollars is exactly its
+ * range. Found in BK-23's implementation review.
+ *
+ * The rule is that a comma may only appear as a thousands separator, in the
+ * places a thousands separator goes. `"1,199.00"` parses; `"46,50"`, `"1,23"`
+ * and `"1,2345"` are refused. **Refusing an ambiguous money value beats
+ * interpreting one** — the office retypes it, and nobody is charged a number
+ * they did not mean.
  */
 export function parseAmountCents(raw: unknown): number | null {
   if (typeof raw !== 'string' && typeof raw !== 'number') return null;
-  const text = String(raw).trim().replace(/^\$/, '').replace(/,/g, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
-  const cents = Math.round(Number(text) * 100);
+  const text = String(raw).trim().replace(/^\$/, '');
+  // Grouped form or plain form, and nothing in between. Checked on the text
+  // that still HAS its commas, because after stripping them the two are
+  // indistinguishable.
+  if (!/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(text) && !/^\d+(\.\d{1,2})?$/.test(text)) {
+    return null;
+  }
+  const bare = text.replace(/,/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(bare)) return null;
+  const cents = Math.round(Number(bare) * 100);
   if (!Number.isFinite(cents) || cents < 0 || cents > MAX_ADMIN_AMOUNT_CENTS) return null;
   return cents;
 }

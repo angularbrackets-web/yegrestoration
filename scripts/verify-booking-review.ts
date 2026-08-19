@@ -129,6 +129,7 @@ console.log('\nThe admin amount field');
   check(parseAmountCents('399.00') === 39900, 'with cents');
   check(parseAmountCents('46.50') === 4650, 'a travel fee');
   check(parseAmountCents('$1,199.00') === 119900, 'a pasted figure with a symbol and separator');
+  check(parseAmountCents('1,199') === 119900, 'and a grouped figure without cents');
   check(parseAmountCents('0') === 0, 'zero is a legitimate travel fee');
   check(parseAmountCents(1199) === 119900, 'a number, not only a string');
 
@@ -137,6 +138,42 @@ console.log('\nThe admin amount field');
   for (const bad of ['12abc', 'abc', '', '  ', '1.234', '-5', '1e3', '.5', '399.', null, undefined, {}]) {
     check(parseAmountCents(bad) === null, `${JSON.stringify(bad)} is refused rather than guessed`);
   }
+
+  // COMMA PLACEMENT, and the case the assertion above did not reach.
+  //
+  // The parser used to strip every comma before testing anything, so "46,50" —
+  // a comma decimal, which is how most of the world writes forty-six fifty —
+  // became "4650" and was accepted as $4,650.00. Under the ceiling, so nothing
+  // else caught it, in the field whose natural range is two-digit dollars.
+  // The positive assertion above passed throughout: it proved commas CAN be
+  // stripped, never that they are only stripped where a separator belongs.
+  //
+  // Each of these is a real slip, not a fuzz case. A comma decimal, a short
+  // group, a long group, a doubled comma, a leading comma, a trailing one.
+  for (const ambiguous of [
+    '46,50',
+    '46,5',
+    '1,23',
+    '1,2345',
+    '1,,199',
+    ',199',
+    '199,',
+    '1,199,',
+    '$46,50',
+    '12,34.56',
+  ]) {
+    check(
+      parseAmountCents(ambiguous) === null,
+      `${JSON.stringify(ambiguous)} is refused — an ambiguous money value must never be interpreted`,
+    );
+  }
+
+  // And the specific arithmetic of the defect, stated as a number so it cannot
+  // come back quietly: if "46,50" ever parses again, it must not parse to this.
+  check(
+    parseAmountCents('46,50') !== 465000,
+    '"46,50" must never become $4,650.00 — a hundredfold charge inside the sanity ceiling',
+  );
 
   check(
     parseAmountCents(String(MAX_ADMIN_AMOUNT_CENTS / 100)) === MAX_ADMIN_AMOUNT_CENTS,

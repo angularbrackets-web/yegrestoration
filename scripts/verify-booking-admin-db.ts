@@ -1664,6 +1664,50 @@ try {
       return id;
     };
 
+    // --- APPROVE REFUSES A SLOT THAT HAS ALREADY PASSED ----------------------
+    //
+    // Task 4's auto-decline at slot-4h is what would normally make this
+    // unreachable, and it is not built. Without an equivalent on the built
+    // path, a request nobody reviewed in time could still be approved days
+    // later — emailing "please pay as soon as you can" for a visit that has
+    // been and gone, and under BK-32 opening a live Checkout Session for it.
+    //
+    // Inserted directly rather than through the create route, because every
+    // door refuses a past slot and the point is to reach the row a lapsed
+    // request BECOMES by sitting there.
+    {
+      const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, assessment_tier)
+        VALUES ('Elapsed Probe', '780-555-0199', 'elapsed@example.com', 'water', '1 Past St',
+                'private', ${past.toISOString()}, 'pending_review', 'standard')
+        RETURNING id
+      `) as { id: number }[];
+      const elapsedId = inserted[0]?.id;
+      check(elapsedId !== undefined, 'a lapsed request was constructed');
+      if (elapsedId !== undefined) {
+        createdIds.push(elapsedId);
+        const location = await call(reviewRoute, { id: String(elapsedId), action: 'approve' });
+        check(
+          location.includes('review=elapsed'),
+          `approving a slot in the past is refused, got "${location}"`,
+        );
+
+        const after = (await sql`
+          SELECT status, approved_at, assessment_amount_cents, payment_status
+          FROM appointments WHERE id = ${elapsedId}
+        `) as Record<string, unknown>[];
+        check(after[0]?.status === 'pending_review', 'and the row does not transition');
+        check(after[0]?.approved_at === null, 'nothing is stamped');
+        check(after[0]?.assessment_amount_cents === null, 'and no amount is written');
+        check(
+          after[0]?.payment_status === 'not_required',
+          'and payment_status is untouched — a refusal must change nothing',
+        );
+      }
+    }
+
     // --- APPROVE -------------------------------------------------------------
     const approveId = await makeRequest('11:30');
     check(approveId !== null, 'a request to approve was created');

@@ -210,6 +210,30 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   side; `inviteIdempotencyPrefix` (`booking-ics.ts:156`) exists precisely
   because a fixed prefix collapsed CANCEL into REQUEST. **Owner: BK-23, and it
   is the first task of Deploy 2** — the prefix must carry the transition.
+- **The "assertion that cannot fail" family has a SEVENTH instance, and it was
+  found by logging a red row rather than by a review.** BK-23's should-fix S6
+  asked only that the arbiter and hold/release assertions get red rows, since
+  they had none. Driving one of the breaks — adding `'completed'` to
+  `LIVE_STATUSES` — produced **no failure at all**. The reason:
+  `verify-booking-admin.ts` built its upcoming/past expectation as
+  `LIVE_STATUSES.includes(status)`, reading the same constant
+  `partitionAppointments` reads to make the decision under test. Both sides moved
+  together, so putting finished jobs into the office's *upcoming* column kept
+  every assertion green.
+
+  The sixth instance's rule already covered it — *an assertion must never call
+  the function it is asserting about* — and this widens it by one word:
+  **never call the function OR READ THE CONSTANT it is asserting about.** A
+  shared list is a shared function with the parentheses left off.
+
+  The expectation is a literal now, `LIVE_STATUSES` is deliberately not imported
+  there, and a completeness check fails loudly if a status is added to the enum
+  and to neither list. **The transferable part is the method, not the fix:**
+  every one of the seven was found by breaking the production target and
+  watching, and this one was invisible to two fresh-agent reviews that read the
+  code. Severity: **medium** — it silently converts a gate into decoration;
+  owner: fixed in BK-23's should-fix pass.
+
 - **A bare `npm run migrate` meant PRODUCTION, and on 2026-08-18 it took the
   booking funnel down.** `scripts/migrate.ts` read `DATABASE_URL` with no
   argument; `DATABASE_URL_DEV` was only ever reached by scripts that opted into
