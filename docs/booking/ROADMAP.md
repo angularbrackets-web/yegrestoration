@@ -1222,9 +1222,9 @@ together or the site tells a lie between deploys.
 
    | | |
    | --- | --- |
-   | **BK-32** | not started. Until it exists `createCheckoutUrl` returns null, so the approval email offers Interac alone |
+   | **BK-32** | not started, **except its expiry cron**, which shipped early because Task 4 had nowhere else to live (`/api/cron/expire-payments/`, both sweeps, gated). Until the rest exists `createCheckoutUrl` returns null, so the approval email offers Interac alone. **Open against it:** expiring a row must also cancel its Checkout Session |
    | **BK-36** | not started, and it is a **release gate** — the terms box states the standard prices while the picker and both emails show the price that applies. A Saturday mould booking mails a customer a document that contradicts itself about the amount *and* about whether the choice binds |
-   | **BK-23 Task 4** | respec'd into this deploy 2026-08-19 — the stale-request expiry sweep, built inside BK-32's cron handler. Without it a lapsed request holds its slot forever, and the review's S3 guard closed the manual way out |
+   | **BK-23 Task 4** | ✅ **built 2026-08-19** — the stale-request expiry sweep, in BK-32's cron handler. Gated and red-observed; awaiting implementation review |
 
    BK-23's Tasks 5 and 6 stay out of Deploy 2; both are additive UI and nothing
    built depends on them. Commit separately, one ticket per commit; deploy as one

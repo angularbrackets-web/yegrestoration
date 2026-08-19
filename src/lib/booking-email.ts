@@ -56,6 +56,9 @@ import {
   APPROVED_LEAD,
   APPROVED_PAY_NOW_NOTE,
   DECLINED_HEADING,
+  EXPIRED_REQUEST_HEADING,
+  EXPIRED_REQUEST_LEAD,
+  EXPIRED_REQUEST_REBOOK_LINE,
   DECLINED_LEAD,
   DECLINED_REBOOK_LINE,
 } from './booking-copy';
@@ -612,6 +615,59 @@ export function approvalMessage(
  * Returns null when there is no email address — the office declines those by
  * phone, which is how they were taken.
  */
+/**
+ * The stale-request expiry message (BK-23 Task 4).
+ *
+ * Same shape as `declineMessage` and deliberately NOT the same words — see
+ * `EXPIRED_REQUEST_HEADING`. Kept as its own builder rather than a flag on that
+ * one, because a boolean parameter on a customer-facing message is how the
+ * wrong branch gets sent.
+ */
+export function expiredRequestMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(EXPIRED_REQUEST_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(EXPIRED_REQUEST_LEAD)}</p>`,
+    table(
+      [
+        rawRow('Requested', `<strong>${escapeHtml(when)}</strong>`),
+        row('Service', input.serviceLabel),
+        input.id > 0 ? row('Reference', `#${input.id}`) : '',
+      ].filter(Boolean),
+    ),
+    `<p style="margin:16px 0;">${escapeHtml(EXPIRED_REQUEST_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    EXPIRED_REQUEST_HEADING,
+    '',
+    EXPIRED_REQUEST_LEAD,
+    '',
+    `Requested: ${when}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    EXPIRED_REQUEST_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    to: input.email,
+    from: BOOKING_EMAIL_FROM,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: `${EXPIRED_REQUEST_HEADING} — ${input.slotLabel}`,
+    html,
+    text,
+  };
+}
+
 export function declineMessage(input: BookingNotificationInput): Message | null {
   if (!input.email) return null;
 

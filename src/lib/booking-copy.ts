@@ -384,5 +384,27 @@ export const DECLINED_HEADING = 'We cannot take this one';
 export const DECLINED_LEAD =
   "We are sorry — we are at capacity at this time and cannot take your assessment. Nothing has been charged.";
 
+/**
+ * The stale-request expiry (BK-23 Task 4), and it is NOT the decline above.
+ *
+ * `DECLINED_LEAD` says "we are at capacity", which is a claim about our
+ * schedule. This customer was not turned away — nobody looked at their request
+ * in time, and their slot is now hours off. Sending them the at-capacity line
+ * would be a tidy untruth, and P9 exists to remove those.
+ *
+ * So it says what happened, does not blame them, and **offers the phone**: the
+ * damage that made them book has not gone away, and a form that has just
+ * expired on them is the wrong thing to send them back to.
+ *
+ * No apology for "the delay" — the delay is the whole event, not a detail of
+ * it.
+ */
+export const EXPIRED_REQUEST_HEADING = 'We did not get to your request in time';
+
+export const EXPIRED_REQUEST_LEAD =
+  'We are sorry — we did not review your assessment request before the time you asked for, so we have released it. Nothing has been charged, and this is our fault rather than anything you did.';
+
+export const EXPIRED_REQUEST_REBOOK_LINE = `Please call or text us on ${SUPPORT_PHONE} and we will sort out a time — if the damage is urgent, say so and we will treat it that way. You can also pick a new time on the website.`;
+
 export const DECLINED_REBOOK_LINE =
   'You are welcome to pick another time, and if the damage is urgent please call or text us — we will do what we can.';

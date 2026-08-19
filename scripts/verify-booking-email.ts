@@ -18,6 +18,7 @@ import {
   RECEIVED_HEADING,
   RECEIVED_HOLD_LINE,
   RECEIVED_NEXT_STEPS,
+  EXPIRED_REQUEST_REBOOK_LINE,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
@@ -27,7 +28,9 @@ import {
   VISIT_LENGTH_LINE,
 } from '../src/lib/booking-copy';
 import {
+  declineMessage,
   escapeHtml,
+  expiredRequestMessage,
   headerSafe,
   planBookingNotifications,
   type BookingNotificationInput,
@@ -921,6 +924,81 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
   check(
     /keyPrefix \? \{ idempotencyKey: `\$\{keyPrefix\}:\$\{message\.to\}` \} : \{\}/.test(notifySrc),
     'a null prefix still passes no Idempotency-Key header',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nThe stale-request expiry message (BK-23 Task 4)');
+// ---------------------------------------------------------------------------
+//
+// This customer was not turned away — nobody looked at their request in time.
+// Sending them the at-capacity decline would be a tidy untruth of exactly the
+// kind P9 exists to remove, so the words are the assertion here.
+{
+  const expired = expiredRequestMessage({ ...INSURANCE, messageType: 'expired' });
+  check(expired !== null, 'a request with an email address gets a message');
+  const bodies = [expired?.html ?? '', expired?.text ?? '', expired?.subject ?? ''];
+
+  for (const [i, body] of bodies.entries()) {
+    const where = ['html', 'text', 'subject'][i];
+
+    // NOT the decline. "At capacity" is a claim about our schedule and it is
+    // false here.
+    check(
+      !/at capacity/i.test(body),
+      `the expiry ${where} does not claim we were at capacity — we simply missed it`,
+    );
+    // NOT a booking. Same rule the request emails already carry.
+    check(
+      !/\byou'?re booked\b|\bconfirmed\b/i.test(body),
+      `the expiry ${where} claims no booking`,
+    );
+  }
+
+  // It must OFFER the phone: their damage has not gone away and their slot is
+  // hours off, so "pick another time on the website" cannot be the only answer.
+  //
+  // Asserted on the REBOOK LINE, not on the body. Every message in this file
+  // ends with a `YEG Restoration · <phone>` footer, so
+  // `body.includes(SUPPORT_PHONE)` is true of all of them and would have passed
+  // with the offer deleted entirely — noticed when breaking the copy produced
+  // only one red instead of two.
+  check(
+    EXPIRED_REQUEST_REBOOK_LINE.includes(SUPPORT_PHONE),
+    'the expiry REBOOK LINE carries the phone number — not merely the footer, which every message has',
+  );
+  check(
+    /call or text/i.test(EXPIRED_REQUEST_REBOOK_LINE),
+    'and offers it in words rather than only printing a number',
+  );
+  check(
+    (expired?.html ?? '').includes(EXPIRED_REQUEST_REBOOK_LINE) &&
+      (expired?.text ?? '').includes(EXPIRED_REQUEST_REBOOK_LINE),
+    'and that line reaches both bodies',
+  );
+
+  // It owns the failure rather than implying the customer did something.
+  check(
+    /our fault|we did not|we are sorry/i.test(expired?.text ?? ''),
+    'and it owns the miss rather than describing it passively',
+  );
+
+  // The two messages must not be the same message.
+  const declined = declineMessage({ ...INSURANCE, messageType: 'declined' });
+  check(
+    (expired?.html ?? '') !== (declined?.html ?? ''),
+    'the expiry and the decline are different messages',
+  );
+  check(
+    /at capacity/i.test(declined?.text ?? ''),
+    'while the real decline still says what the client asked it to say',
+  );
+
+  // No address, no message — same posture as the decline: the slot is released
+  // either way, and a phone booking with no email is still expired.
+  check(
+    expiredRequestMessage({ ...INSURANCE, messageType: 'expired', email: null }) === null,
+    'a row with no email address yields no message rather than a broken send',
   );
 }
 

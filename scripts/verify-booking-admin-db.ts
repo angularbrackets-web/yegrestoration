@@ -96,6 +96,10 @@ const { POST: reviewRoute } = await import('../src/pages/api/admin/appointments/
 const { POST: blackoutAdd } = await import('../src/pages/api/admin/blackouts/add');
 const { POST: blackoutDelete } = await import('../src/pages/api/admin/blackouts/delete');
 const { GET: availability } = await import('../src/pages/api/booking/availability');
+// The expiry cron authenticates on CRON_SECRET, so the value has to exist
+// before the module is imported — same swap-then-import ordering as the DB URL.
+process.env.CRON_SECRET = process.env.CRON_SECRET ?? 'verify-cron-secret';
+const { GET: expiryCron } = await import('../src/pages/api/cron/expire-payments');
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { UNTICKED_NOTE } = await import('../src/lib/booking-admin-entry');
@@ -1846,6 +1850,172 @@ try {
     check(bogus.includes('review=invalid'), `an unrecognised action is refused, got "${bogus}"`);
 
     console.log('  approve, decline, override, refusals, and both idempotence guards');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nThe expiry cron: two sweeps, one handler (BK-32 + BK-23 Task 4)');
+  // -------------------------------------------------------------------------
+  //
+  // The verification BK-23 Task 4 named as mandatory, plus the payment sweep's
+  // one rule that must never regress.
+  {
+    const hours = (n: number) => new Date(Date.now() + n * 60 * 60 * 1000);
+
+    // A pending_review request is expired only once its slot is inside
+    // slot - PAYMENT_DEADLINE_LEAD_HOURS. Both sides of that boundary, because
+    // an off-by-one here either strands requests forever or kills live ones.
+    const seed = async (
+      status: string,
+      slotAt: Date,
+      extra: { paymentDueAt?: Date | null; notes?: string | null } = {},
+    ): Promise<number> => {
+      const rows = (await sql`
+        INSERT INTO appointments (
+          name, phone, email, service, address, payment_route,
+          slot_start, status, assessment_tier, payment_due_at, admin_notes
+        ) VALUES (
+          ${`${MARKER} expiry`}, '780-555-0111', 'expiry@example.com', 'water', '1 Expiry St',
+          'private', ${slotAt.toISOString()}, ${status}, 'standard',
+          ${extra.paymentDueAt ? extra.paymentDueAt.toISOString() : null},
+          ${extra.notes ?? null}
+        )
+        RETURNING id
+      `) as { id: number }[];
+      createdIds.push(rows[0].id);
+      return rows[0].id;
+    };
+
+    const statusOf = async (id: number) =>
+      ((await sql`SELECT status FROM appointments WHERE id = ${id}`) as { status: string }[])[0]
+        ?.status;
+
+    // INSIDE the window — must expire.
+    const staleId = await seed('pending_review', hours(1));
+    // OUTSIDE it by an hour — must be left alone. This is the arm that would
+    // catch a sweep that expired everything pending.
+    const freshId = await seed('pending_review', hours(5));
+    // The office's own note must survive the audit line being appended.
+    const notedId = await seed('pending_review', hours(1), { notes: 'Office: customer called.' });
+
+    // Not this sweep's business, in both directions.
+    const awaitingOverdue = await seed('approved_awaiting_payment', hours(1), {
+      paymentDueAt: hours(-1),
+    });
+    // THE PAY-NOW ROW. A NULL deadline must NEVER be treated as overdue: it is
+    // the near-term branch, and expiring it would auto-cancel every emergency
+    // and every next-day booking within 15 minutes of approval.
+    const payNow = await seed('approved_awaiting_payment', hours(1), { paymentDueAt: null });
+    const confirmedRow = await seed('confirmed', hours(1));
+
+    const res = await expiryCron({
+      request: new Request('https://example.com/api/cron/expire-payments/', {
+        headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+      }),
+    } as never);
+    check(res.status === 200, `the cron answers 200, got ${res.status}`);
+    const counts = (await res.json()) as Record<string, number>;
+
+    check(await statusOf(staleId) === 'declined', 'a stale request inside slot-4h is declined');
+    check(
+      await statusOf(freshId) === 'pending_review',
+      'a request still outside slot-4h is left alone — the boundary is a window, not a sweep-everything',
+    );
+    check(
+      await statusOf(awaitingOverdue) === 'payment_expired',
+      'an overdue payment expires',
+    );
+    check(
+      await statusOf(payNow) === 'approved_awaiting_payment',
+      'a PAY-NOW row (NULL payment_due_at) is NEVER expired — it has no deadline to be past',
+    );
+    check(await statusOf(confirmedRow) === 'confirmed', 'a confirmed booking is untouched');
+    // A FLOOR, not an equality. Earlier arms in this script leave their own
+    // `pending_review` rows behind, and the sweep correctly takes any of them
+    // that are inside the window — including the deliberately-elapsed row the
+    // S3 arm seeds. Pinning an exact count here would fail whenever another arm
+    // is added, which is a test that breaks for being right.
+    check(
+      counts.requestsExpired >= 2,
+      `at least the two seeded stale requests expired, got ${counts.requestsExpired}`,
+    );
+    check(counts.paymentsExpired === 1, `one payment expired, got ${counts.paymentsExpired}`);
+
+    // The system actor is RECORDED, not inferred, and does not eat the office's
+    // note. BK-40's repair of this exact idiom is why both halves are asserted.
+    const noted = (await sql`
+      SELECT admin_notes, declined_at FROM appointments WHERE id = ${notedId}
+    `) as { admin_notes: string | null; declined_at: Date | null }[];
+    check(
+      noted[0]?.admin_notes?.includes('Office: customer called.') === true,
+      "the office's own note survives",
+    );
+    check(
+      noted[0]?.admin_notes?.includes('Auto-declined by the expiry sweep') === true,
+      'and the system actor is recorded beside it',
+    );
+    check(noted[0]?.declined_at !== null, 'declined_at is stamped');
+
+    // THE SLOT IS GENUINELY BACK — asserted against SLOT_HOLD_PREDICATE, the
+    // exact fragment the partial unique index and the availability query are
+    // both built from, rather than against the status string.
+    //
+    // NOT against the public calendar, and the reason is worth stating: every
+    // row this sweep touches is by definition within four hours of its slot,
+    // and the next-day-earliest notice rule means such a slot is never offered
+    // publicly whether it is held or free. An availability assertion here would
+    // pass identically before and after the release — a check that cannot fail.
+    // What "released" actually means is that the slot stops matching the hold
+    // predicate, which is what frees it for the office to rebook by phone and
+    // what stops it blocking the index.
+    const staleRow = (await sql`
+      SELECT slot_start FROM appointments WHERE id = ${staleId}
+    `) as { slot_start: Date }[];
+    const stillHeld = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${staleRow[0].slot_start.toISOString()}
+        AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    check(
+      stillHeld.length === 0,
+      `the expired request no longer holds its slot (${stillHeld.length} row(s) still hold it)`,
+    );
+
+    // And the proof that the check above can fail: the row that was NOT expired
+    // is still holding its own slot.
+    const freshRow = (await sql`
+      SELECT slot_start FROM appointments WHERE id = ${freshId}
+    `) as { slot_start: Date }[];
+    const freshHeld = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${freshRow[0].slot_start.toISOString()}
+        AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    check(
+      freshHeld.some((r) => r.id === freshId),
+      'while the request that was left alone still holds its slot — so the check above is discriminating',
+    );
+
+    // A SECOND RUN IS A NO-OP. The guarded update is what makes the office
+    // approving mid-sweep safe, and this is the observable half of it.
+    const second = (await (
+      await expiryCron({
+        request: new Request('https://example.com/api/cron/expire-payments/', {
+          headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+        }),
+      } as never)
+    ).json()) as Record<string, number>;
+    check(
+      second.requestsExpired === 0 && second.paymentsExpired === 0,
+      `a second run expires nothing, got ${JSON.stringify(second)}`,
+    );
+
+    // And it will not run at all without the secret.
+    const unauthorized = await expiryCron({
+      request: new Request('https://example.com/api/cron/expire-payments/'),
+    } as never);
+    check(unauthorized.status === 401, `an unauthenticated call is refused, got ${unauthorized.status}`);
+
+    console.log('  both sweeps, the pay-now exemption, the audit line, and the released slot');
   }
 
 } finally {
