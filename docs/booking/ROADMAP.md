@@ -1244,7 +1244,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
 | BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | ✅ **DEPLOYED 2026-08-16** (`5a2fe4a`) — reviewed, all findings resolved. Left `verify:booking:admin:db` red (see Known traps); repaired 2026-08-16 |
-| BK-36 | Terms rewrite — constants restructured, five surfaces, `dist/`-reading pins for "deductible" and insurer-billing shapes. **Refund placeholder now filled (24h rule); tier 3 states lab results take 3-5 business days; weekend surcharge disclosed** | Reviewed (copy) | draft |
+| BK-36 | Terms rewrite — `FEE_TERMS_OUTRO` split into PAYMENT/REFUND/CREDIT, five renders, terms moved below the picker on `/book/`, `dist/`-reading pins for "deductible" and insurer-billing shapes. **Refund placeholder filled (24h rule) plus the walk-away term; tier 3 states lab results take 3-5 business days; weekend surcharge disclosed; standard-rates sentence reconciles the mould and weekend prices** | Reviewed (copy) | ✅ **implemented and REVIEWED 2026-08-19** — plan-reviewed first (4 blockers / 8 should-fix / 4 nits), then implementation-reviewed (3 blockers / 4 should-fix / 7 nits). **All 30 findings accepted, none refused, all resolved.** 23 gates green, 36 red rows. Also discharges **BK-31's refused blocker B3** and three sibling claims the constant-based inventory could not see: `/contact/`'s hero, `/llms.txt`, and the island's own post-submit card |
 
 **Build order — grouped by DEPLOY, not by commit.** Several tickets must land
 together or the site tells a lie between deploys.
@@ -1262,12 +1262,16 @@ together or the site tells a lie between deploys.
    (BK-31 B3) refused in writing as BK-36's, two should-fix handed to BK-32.
    The branch is `deploy-2-prepay`.
 
-   **Still to build before this deploys:**
+   **Deploy 2 is CODE-COMPLETE as of 2026-08-19.** Everything below is built,
+   reviewed by fresh agents, and has every finding resolved. What remains is the
+   user's rollout, in the recorded order — see ROLLOUT below.
+
+   **The record of what was built:**
 
    | | |
    | --- | --- |
    | **BK-32** | ✅ **implemented 2026-08-19** — Checkout Session at approval (transition first, then Stripe), webhook with a three-layer claim, `markPaid()` with its two callers, the Interac admin action, migration 010, the conversion moved onto the payment, and `verify:stripe:webhook` simulating the generated route table. 23 gates green, 49 red rows. **The open item is closed:** the expiry sweep now cancels the Checkout Session of every row it expires. **Reviewed 2026-08-19** together with the Task 4 cron commit — 2 blockers / 7 should-fix / 7 nits, all resolved |
-   | **BK-36** | not started, and it is a **release gate** — the terms box states the standard prices while the picker and both emails show the price that applies. A Saturday mould booking mails a customer a document that contradicts itself about the amount *and* about whether the choice binds |
+   | **BK-36** | ✅ **implemented and REVIEWED 2026-08-19** — the release gate is discharged. `FEE_TERMS_OUTRO` split into PAYMENT/REFUND/CREDIT across five renders; the terms moved below the picker on `/book/`; BK-31's refused blocker B3 gone. The Saturday-mould case is closed by one sentence saying the listed figures are standard rates and pointing at the form. Two review rounds, 30 findings, all accepted and resolved. **The three the constant-based inventory could not see are worth recording:** `/llms.txt` published *"confirmed instantly"* AND *"paid at the end of the visit"* in one sentence, `/contact/`'s hero said *"you're confirmed on the spot"*, and the island's own fallback card said *"You're booked"* under a checkmark for a `pending_review` row. None is a constant; all three are now pinned by claim shape rather than by constant name |
    | **BK-23 Task 4** | ✅ **built and REVIEWED 2026-08-19** — the stale-request expiry sweep, in BK-32's cron handler. Reviewed inside BK-32's implementation review, which confirmed every item on Task 4's "Verification it owes" table is delivered, including its amendment |
 
    BK-23's Tasks 5 and 6 stay out of Deploy 2; both are additive UI and nothing

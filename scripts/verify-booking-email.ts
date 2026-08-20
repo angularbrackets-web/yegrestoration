@@ -15,12 +15,14 @@ import {
 } from '../src/lib/booking-config';
 import {
   CALENDAR_ATTACHED_LINE,
+  CANCEL_LINE,
   RECEIVED_HEADING,
   RECEIVED_HOLD_LINE,
   RECEIVED_NEXT_STEPS,
   EXPIRED_REQUEST_REBOOK_LINE,
   PAYMENT_EXPIRED_REBOOK_LINE,
   AFTER_HOURS_NOTE,
+  ASSESSMENT_TIER_DESCRIPTIONS,
   FEE_TERMS_ACK_LABEL,
   FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
@@ -301,6 +303,33 @@ console.log('\nCustomer confirmation contents');
     'and NO refund once the assessment is done and the customer does not go ahead — a different case from either cancellation rule',
   );
 
+  // AND THE ORDER OF THOSE FIVE LINES IS THE ARGUMENT, not layout.
+  //
+  // The section opens on what WE owe the customer and closes on how to reach
+  // us; the three no-refund/refund rules sit between. A block that opened on
+  // forfeiture is the failure mode the superseded draft had, and the three
+  // pins above are all satisfied by any permutation. Asserted on the joined
+  // REFUND lines only, because that is the claim being made.
+  //
+  // ANCHORED ON THE CLAIM, NOT ON THE ARRAY POSITION. The first version of the
+  // opening check was `indexOf(FEE_TERMS_REFUND[0]) === 0`, which is true of
+  // any array whatsoever — element zero is always at index zero. Its red row
+  // reordered the lines and it stayed green, which is how it was caught. That
+  // is the ninth member of the assertion-that-cannot-fail family this file
+  // keeps a record of; it reads like an ordering pin and is a tautology.
+  const refundOrder = [...FEE_TERMS_REFUND].join(' ');
+  const weCancelAt = refundOrder.search(/if we cancel|we cancel or cannot/i);
+  const theyLoseAt = refundOrder.search(/(?:inside|within) 24 hours/i);
+  check(
+    weCancelAt >= 0 && theyLoseAt > weCancelAt,
+    'the refund section opens on OUR cancellation and reaches the customer\'s loss afterwards — what we owe them first, not what they lose',
+  );
+  check(
+    refundOrder.indexOf(CANCEL_LINE) ===
+      refundOrder.length - CANCEL_LINE.length,
+    'and closes on the phone number, so the block ends on an action rather than on a loss',
+  );
+
   // WHEN the money moves, and it INVERTED at the prepay flip.
   //
   // This pin used to REQUIRE `paid … end of the visit | on site | on the day`.
@@ -360,17 +389,48 @@ console.log('\nCustomer confirmation contents');
   // risk that buys is that they drift to two different multipliers, so both are
   // pinned against the constants `assessmentQuote` actually multiplies by.
   const multiplier = String(AFTER_HOURS_NUMERATOR / AFTER_HOURS_DENOMINATOR);
+  // BOUNDED, not `includes`. A bare substring test passes for free whenever the
+  // real multiplier is a substring of the written one: at 5x, `String(5)` is
+  // "5" and "1.5 times" contains it, so the copy could promise 1.5 while the
+  // code charged five times the price and this pin would stay green. The
+  // boundary is `\d` on either side rather than `\b`, because `\b` does not
+  // exist between "1." and "5".
+  const statesMultiplier = (text: string) =>
+    new RegExp(`(?<!\\d|\\d\\.)${multiplier.replace('.', '\\.')}(?!\\d)`).test(text);
   check(
-    payment.includes(multiplier),
+    statesMultiplier(payment),
     `FEE_TERMS_PAYMENT states the weekend multiplier the code charges (${multiplier})`,
   );
   check(
-    AFTER_HOURS_NOTE.includes(multiplier),
+    statesMultiplier(AFTER_HOURS_NOTE),
     `and so does AFTER_HOURS_NOTE, so the two cannot drift (${multiplier})`,
   );
   check(
     /Saturday/i.test(payment) && /Sunday/i.test(payment),
     'and it names Saturday and Sunday, in plain words rather than as a formula',
+  );
+
+  // THE LAB TURNAROUND, and it is a client answer (2026-08-18), not drafting.
+  //
+  // Someone choosing the top tier is usually choosing it because they need
+  // documentation for a claim, and documentation they expected on the day is a
+  // complaint rather than a deliverable. It is stated TWICE — in
+  // `FEE_TERMS_ITEMS[2]`, which is the prose, and in
+  // `ASSESSMENT_TIER_DESCRIPTIONS.sketch`, which is the control the customer
+  // chooses with — and the doc comment on ITEMS calls that out as "one fact,
+  // two places it must appear, and they may not drift into two different
+  // promises". Nothing asserted it: the figure pins only test 399/699/1,199 and
+  // GST, so deleting the sentence from either place, or drifting one to "5-7
+  // business days", left every gate green. Same shape as the weekend
+  // multiplier above, same treatment.
+  const TURNAROUND = /3[–-]5 business days/;
+  check(
+    TURNAROUND.test(FEE_TERMS_ITEMS[2]),
+    'FEE_TERMS_ITEMS[2] states the 3-5 business day lab turnaround (client, 2026-08-18)',
+  );
+  check(
+    TURNAROUND.test(ASSESSMENT_TIER_DESCRIPTIONS.sketch),
+    'and so does the tier-3 radio description, so the prose and the control cannot promise different things',
   );
 
   // TWO WORDS THAT MAY NEVER APPEAR IN THIS COPY, asserted at the constants —

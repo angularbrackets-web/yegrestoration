@@ -300,6 +300,15 @@ export const FEE_TERMS_ITEMS: readonly string[] = [
  * final number is stated. Writing the stronger claim would manufacture exactly
  * the contradiction this block exists to prevent.
  *
+ * The first attempt made that claim anyway, by other means: it listed the
+ * determinants ("the service you need and the time you pick") as though they
+ * were exhaustive and then said the form shows the result. A customer 40 km out
+ * would read that and then open an approval email with a bigger number on it.
+ * So the list is no longer offered as complete, and the sentence now ends where
+ * the final figure actually lives. Whether the travel fee should be disclosed
+ * in these terms at all is the client's call and is an open assumption on
+ * BK-36 — this wording pre-empts neither answer.
+ *
  * The weekend sentence is a SECOND SENTENCE about the same fact as
  * `AFTER_HOURS_NOTE`, not a second copy of that string. `AFTER_HOURS_NOTE` is a
  * just-in-time explanation gated on `tierQuotes[…].afterHours` and rendered
@@ -309,7 +318,7 @@ export const FEE_TERMS_ITEMS: readonly string[] = [
  * cannot drift to two different multipliers.
  */
 export const FEE_TERMS_PAYMENT: readonly string[] = [
-  'Those are our standard rates. Your own price depends on the service you need and the time you pick, and the booking form shows it before you send your request.',
+  'Those are our standard rates. What you pay depends on the service you need and the time you pick — the booking form shows that price before you send your request, and the approval email states the amount we will charge.',
   'Saturday and Sunday appointments are charged at 1.5 times the weekday price.',
   'Nothing is charged when you send your request. Once we approve it we email you a secure payment link, stating the amount and when we need it paid.',
   'If we do not have the payment in time, we may release the time, and you are welcome to book again.',

@@ -37,6 +37,22 @@ Read the area's `ROADMAP.md` before starting anything.
 
 ## Known traps in the process itself
 
+- **A copy inventory built from "where does the constant render" misses every
+  sentence that describes the same mechanism in its own words.** BK-36 carried
+  a four-file surface table and still shipped to review with the pre-prepay
+  claim live on three surfaces no constant touches: `/llms.txt` said *"confirmed
+  instantly"* AND *"paid at the end of the visit"* in one sentence, `/contact/`'s
+  hero said *"you're confirmed on the spot"*, and the booking island's own
+  fallback card said *"You're booked"* under a checkmark for a `pending_review`
+  row. A fourth hid inside a constant *name* — `EMAILED_LINE` ("a copy of this
+  confirmation") where `RECEIVED_EMAILED_LINE` ("a copy of this request") was
+  the reviewed constant for that state. BK-29 paid for this once already, in
+  `dist/` rather than in source. **Therefore:** when a mechanism changes, grep
+  the *claim* across `src/` — its adjectival and predicative grammars both — not
+  the constants that state it, and pin the claim shape rather than the constant
+  name. `verify-cutover.ts`'s `BOOKED_CLAIM_SHAPES` over five surfaces is the
+  pattern to copy.
+
 - **`astro dev` does not exercise the Vercel route table, so a smoke test
   against it proves nothing about URL resolution.** The dev server routes by
   Astro's own matcher; the deployed site routes by the generated

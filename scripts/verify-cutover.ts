@@ -35,6 +35,12 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { dirname, extname, join, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+// The ONE import from `src/` in this file, and it earns its place: the `dist/`
+// pins below have to find the built chunk that carries the terms copy, and
+// naming that chunk by filename is what made an earlier version of those pins
+// inert. Matching on the constant's own text follows the copy wherever Vite
+// puts it.
+import { FEE_TERMS_HEADING as FEE_TERMS_HEADING_TEXT } from '../src/lib/booking-copy';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -436,7 +442,7 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // could be rendered in the form arm and appear on `/contact/` beside "Send Us
   // a Message" with this gate green. BK-36 split that constant into three, so
   // the list is the whole block rather than a pair.
-  for (const constant of ['FEE_TERMS_ITEMS', 'FEE_TERMS_PAYMENT', 'FEE_TERMS_REFUND', 'FEE_TERMS_CREDIT']) {
+  for (const constant of TERMS_CONSTANTS) {
     check(
       section.slice(boundary).includes(constant),
       `${constant} sits in the CTA-card arm, which only the homepage renders`,
@@ -474,8 +480,9 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // Under the old model "free assessment" was conditionally true — free for the
   // customers who went ahead — and the CTA button and headings that said it were
   // parked for the client (BK-27 Q9). Under the credit model NOBODY gets a free
-  // assessment at the point of sale: every customer pays on the day and the fee
-  // is credited back afterwards. So these strings are now false, and two of them
+  // assessment at the point of sale: every customer pays — under P9 on a link
+  // before the visit rather than at it — and the fee is credited back
+  // afterwards. So these strings are now false, and two of them
   // sat in the same card as the box that prices the visit.
   //
   // RENDERED TEMPLATE ONLY, and the boundary is the point. `book.astro`'s
@@ -685,21 +692,71 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // THE GENERAL RULE THIS ENFORCES: a copy inventory built from "where does the
   // constant render" misses every sentence that describes the same mechanism in
   // its own words.
+  //
+  // ── AND IT IS APPLIED TO EVERY PUBLIC SURFACE THAT DESCRIBES THE MECHANISM,
+  //    not only to the island ─────────────────────────────────────────────────
+  //
+  // The first version read `BookingForm.svelte` alone, which is how the
+  // implementation review found the claim still live in three more places on
+  // the day this ticket was meant to remove it: `/contact/`'s hero said "Pick a
+  // time and you're confirmed on the spot", `llms.txt` said "confirmed
+  // instantly" AND "paid at the end of the visit" in one sentence, and the
+  // homepage bullet this ticket had just rewritten was pinned by nothing at
+  // all. Two of those are on surfaces no constant renders, and `llms.txt` is
+  // the file an AI assistant quotes with no page around it to qualify the
+  // claim.
+  //
+  // So the grammars are pinned, over every file that can carry them. Both
+  // shapes of the claim: the ADJECTIVAL ("instant confirmation") and the
+  // PREDICATIVE ("you're confirmed on the spot"), plus the payment-timing claim
+  // the flip falsified.
   const BOOKED_CLAIM_SHAPES = [
     /\byou'?re booked\b/i,
     /\bconfirm booking\b/i,
     /\bbooking confirmed\b/i,
     /\byour booking is confirmed\b/i,
+    /\binstant(?:ly)?\s+confirm/i,
+    /\bconfirmation\b[^.<>]{0,20}\binstant/i,
+    /\bconfirmed\s+(?:instantly|immediately|on the spot|right away)\b/i,
   ];
+  // The pre-prepay payment claim, anchored to a payment verb for the same
+  // reason `verify-booking-email.ts` anchors its own: a bare `on site` fires on
+  // "the on-site assessment" and survives only by a hyphen.
+  const ONSITE_PAYMENT_SHAPE =
+    /pa(?:id|y|yable|ying)\b[^.<>]{0,40}(?:end of the visit|at the visit|on site|on the day)/i;
+
+  const CLAIM_SURFACES = [
+    'src/components/BookingForm.svelte',
+    'src/sections/ContactSection.astro',
+    'src/pages/book.astro',
+    'src/pages/contact.astro',
+    'src/pages/llms.txt.ts',
+  ];
+  for (const file of CLAIM_SURFACES) {
+    const text = normalise(stripForUse(readFileSync(resolve(root, file), 'utf8')));
+    const bookedHit = BOOKED_CLAIM_SHAPES.find((r) => r.test(text));
+    check(
+      bookedHit === undefined,
+      `${file}: claims the request is booked or confirmed at submission (${bookedHit?.source ?? ''}) — under prepay it produces a REQUEST, and neither the review nor the payment has happened`,
+    );
+    check(
+      !ONSITE_PAYMENT_SHAPE.test(text),
+      `${file}: says the assessment is paid on site or on the day — the pre-prepay claim, which must not survive the flip by even one deploy`,
+    );
+  }
+
   const islandRaw = stripForUse(readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8'));
-  const bookedHit = BOOKED_CLAIM_SHAPES.find((r) => r.test(islandRaw));
-  check(
-    bookedHit === undefined,
-    `BookingForm.svelte claims the request is booked (${bookedHit?.source ?? ''}) — under prepay submission produces a request, and neither the review nor the payment has happened`,
-  );
   check(
     islandRaw.includes('RECEIVED_HEADING') && islandRaw.includes('RECEIVED_LEAD'),
-    'and its post-submit card renders the request wording from the same constants /book/received/ and the request email use',
+    'and the island\'s post-submit card renders the request wording from the same constants /book/received/ and the request email use',
+  );
+  // The fourth sibling, and it hid inside a constant NAME rather than in a
+  // sentence: `EMAILED_LINE` reads "a copy of this confirmation" and
+  // `RECEIVED_EMAILED_LINE` reads "a copy of this request". No shape above can
+  // tell them apart at the call site, so the call site is asserted directly.
+  check(
+    islandRaw.includes('RECEIVED_EMAILED_LINE') && !/\bEMAILED_LINE\b(?<!RECEIVED_EMAILED_LINE)/.test(islandRaw),
+    'and it names the emailed copy a REQUEST, not a confirmation — RECEIVED_EMAILED_LINE, never EMAILED_LINE',
   );
 
   // NOT a check on `contact.astro`. The first version asserted that file
@@ -888,15 +945,40 @@ console.log('\nWhat actually reaches the browser (AC5)');
   // shapes match that string — not because `/book/` is clean of every insurer
   // claim. Stated so the next reader does not mistake the pin's scope for its
   // subject.
-  const bookingSurfaces = bundles.filter(
-    (f) =>
-      /dist\/client\/book\/.*\.html$/.test(f) ||
-      /dist\/client\/index\.html$/.test(f) ||
-      /_astro\/BookingForm\.[^/]*\.js$/.test(f),
+  // ── HOW THE SURFACE LIST IS BUILT, AND WHY IT IS NOT A FILENAME GUESS ─────
+  //
+  // The first version named `_astro/BookingForm.*.js` as the island's bundle.
+  // That chunk contains NONE of this copy: Vite splits `booking-copy.ts` into a
+  // shared chunk (`booking-handoff.*.js` today, and the name is a build
+  // artifact that will change), so the arm the comment described as "where a
+  // customer chooses and acknowledges an assessment" matched zero fee-terms
+  // strings. Coverage survived only through the SSR'd HTML — a different
+  // property than the one claimed, and one that would vanish the day any of
+  // this copy became client-only. Neither red row noticed, because both fired
+  // on HTML.
+  //
+  // So the JS arm is found by CONTENT, not by filename: any built chunk that
+  // carries the terms copy is a booking surface, whatever it ends up called.
+  // And the guard below is a presence probe rather than a count — a count of
+  // four is satisfied by the `/book/**` HTML alone, which is exactly how the
+  // inert arm went unnoticed.
+  const TERMS_MARKER = FEE_TERMS_HEADING_TEXT;
+  const termsBundles = bundles.filter(
+    (f) => f.endsWith('.js') && readFileSync(f, 'utf8').includes(TERMS_MARKER),
+  );
+  const bookingSurfaces = [
+    ...bundles.filter(
+      (f) => /dist\/client\/book\/.*\.html$/.test(f) || /dist\/client\/index\.html$/.test(f),
+    ),
+    ...termsBundles,
+  ];
+  check(
+    termsBundles.length > 0,
+    `at least one built JS chunk carries the terms copy, so the bundle arm of these pins is live, got ${termsBundles.length}`,
   );
   check(
-    bookingSurfaces.length >= 3,
-    `the built booking surfaces were found, got ${bookingSurfaces.length}`,
+    bookingSurfaces.filter((f) => f.endsWith('.html')).length >= 2,
+    `and the built booking pages were found, got ${bookingSurfaces.filter((f) => f.endsWith('.html')).length}`,
   );
   const deductibleOffenders = bookingSurfaces.filter((f) =>
     /deductible/i.test(readFileSync(f, 'utf8')),
@@ -919,6 +1001,11 @@ console.log('\nWhat actually reaches the browser (AC5)');
     /(?:covered|paid) by your insurance/i,
     /insurance (?:pays|covers) (?:for )?(?:the |this )?assessment/i,
   ];
+  // The homepage HTML is dropped here and only here: its hero and testimonials
+  // carry the site-wide direct-billing claim about restoration WORK, which is
+  // the client's, has no ticket, and is a different claim from "the assessment
+  // is billed to an insurer". The JS chunks stay in — they carry the terms copy
+  // and are loaded by /book/.
   const bookOnly = bookingSurfaces.filter((f) => !/dist\/client\/index\.html$/.test(f));
   const insurerOffenders = bookOnly.filter((f) => {
     const source = readFileSync(f, 'utf8');

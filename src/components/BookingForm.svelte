@@ -29,7 +29,6 @@
   } from '../lib/booking-config';
   import type { Confirmation } from '../lib/booking-confirmation';
   import {
-    EMAILED_LINE,
     FEE_TERMS_ACK_LABEL,
     FEE_TERMS_CREDIT,
     FEE_TERMS_HEADING,
@@ -43,6 +42,7 @@
     ASSESSMENT_TIER_NAMES,
     QUOTE_HEADING,
     QUOTE_TIMING_NOTE,
+    RECEIVED_EMAILED_LINE,
     RECEIVED_HEADING,
     RECEIVED_HOLD_LINE,
     RECEIVED_LEAD,
@@ -677,9 +677,14 @@
     and the request email use, so the three cannot drift. `verify-cutover.ts`
     pins that this file makes no booked/confirmed claim at all.
 
-    `result.emailSent` still gates the emailed line, and `EMAILED_LINE` is
-    correct on this branch: the message that went out is the request-received
-    one, which is a copy of the request.
+    `result.emailSent` still gates the emailed line, and the constant is
+    `RECEIVED_EMAILED_LINE` — "a copy of this REQUEST" — not `EMAILED_LINE`,
+    which says "a copy of this confirmation". The message that went out is
+    subject-lined "Request received"; nothing has been confirmed. That was the
+    fourth sibling of the three claims above, and it survived the first pass
+    because it hides inside a constant name rather than in a sentence.
+    `BookingConfirmation.svelte` already made this exact choice for this exact
+    state.
   -->
   {#if result}
     <div class="text-center py-12">
@@ -696,7 +701,7 @@
         <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{PHONE_DISPLAY}</a>.
       </p>
       {#if result.emailSent}
-        <p class="text-yeg-text-secondary text-sm mt-2">{EMAILED_LINE}</p>
+        <p class="text-yeg-text-secondary text-sm mt-2">{RECEIVED_EMAILED_LINE}</p>
       {/if}
     </div>
   {:else}

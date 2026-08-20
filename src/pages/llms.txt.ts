@@ -51,7 +51,7 @@ ${otherServices.join('\n')}
 
 - [Insurance Claims Guide](${site}/insurance-claims/): How the insurance claim process works with restoration, and how direct billing removes the paperwork burden.
 - [About](${site}/about/): Who we are, certifications, and how we work.
-- [Book an Assessment](${site}/book/): Pick a time for an on-site assessment — about 30 minutes, confirmed instantly. The assessment is paid at the end of the visit and credited in full against the final invoice if the customer goes ahead with the work. This is the way to request a quote.
+- [Book an Assessment](${site}/book/): Pick a time for an on-site assessment — about 30 minutes. Booking online sends a request: the office reviews it, and if it is approved the customer gets an emailed payment link. The appointment is confirmed once that payment goes through. The assessment fee is credited in full against the final invoice if the customer goes ahead with the work. This is the way to request a quote.
 - [Contact](${site}/contact/): Send a message with a question, or reach the 24/7 emergency line.
 
 ## Blog
