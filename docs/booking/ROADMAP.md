@@ -1313,6 +1313,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
 | BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Needs a client answer first: may the office ever confirm by hand? | Reviewed | draft — see `tickets/BK-44.md` |
+| BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | draft — see `tickets/BK-45.md` |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1377,7 +1378,7 @@ together or the site tells a lie between deploys.
    | 2 · deploy the code | ✅ done (`befce39`, then `c346fce`) |
    | 3 · migration 009 | ✅ done, verified |
    | 4 · register the webhook | ✅ done — `booking-payments-test`, **test mode**, `https://www.yegrestoration.ca/api/stripe/webhook/`, 4 Checkout events, Snapshot payload. `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in Vercel, **Production only** |
-   | 5 · test-mode run end to end | ⏳ **part-way.** Booking **#35** exists on production: Sun Aug 23 3:30 p.m., mould, standard tier, `pending_review`, $577.50 + GST = $606.38. The request half is proven — form, photo upload, both emails, request page, admin panel. **The approve → pay → webhook → confirm half has NOT been exercised.** Next action is "Review the amount →" on #35, then Stripe test card `4242 4242 4242 4242` |
+   | 5 · test-mode run end to end | ✅ **DONE 2026-08-19 — the whole chain is proven on production.** Booking #35: request → office review → confirm-the-amount step → approve ($606.38, deadline Thu Aug 20 11:39 a.m.) → approval email with Pay button and Interac option → Stripe Checkout (itemized: $577.50 assessment + $28.88 GST) → test card → `/book/confirmed/` → **webhook fired, `markPaid` ran, status went to `confirmed`** → customer confirmation with ICS → office calendar invite. Mould + weekend pricing correct at every surface |
    | 6 · swap live keys | ❌ not started. Needs its OWN webhook registration in live mode with its own `whsec_` — the test one does not carry over |
 
    **Two defects were found by that hands-on test, both of which all 23 gates
@@ -1387,6 +1388,20 @@ together or the site tells a lie between deploys.
      said *"NEW REQUEST"* — fixed and deployed (`c346fce`);
    - the admin status dropdown can perform an approval, which is the one thing
      `review.ts` was split out to prevent — **recorded as BK-44, not fixed.**
+
+   **A third came out of the payment run itself: BK-45.** `markPaid` sends
+   `planFirstConfirmationEmail`, a calendar-boundary message that is heading +
+   lead + a 4-row table + calendar line + phone line. **The email a paying
+   customer keeps carries no assessment terms, no have-ready list and no "You
+   chose".** `booking-email.ts` states the opposite intent in the block BK-36
+   edited — *"the confirmed message carries it because it is the one the
+   customer keeps after paying"* — but that reasoning is about
+   `customerConfirmation`, which nothing on the payment path sends. It is what
+   the **Resend confirmation** button sends, so the office can mail a
+   materially different, fuller message under a different heading than the one
+   the customer originally received. Moderate severity, not a blocker: the
+   terms went out in the request email and `/book/confirmed/` shows the
+   have-ready list. See `tickets/BK-45.md`.
 
    **Both are route-relationship or screen-legibility failures, and the suite
    tests neither.** Every verify script exercises one route in isolation; none
