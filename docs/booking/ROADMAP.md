@@ -203,36 +203,17 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   leaving it below the fold would be a half-fix. Severity: low.
   **Owner: BK-47.**
 
-- **When a defect is old enough, the TEST SUITE encodes it, and a correct fix
-  presents as a wall of failing assertions.** BK-44's guard turned
-  `verify-booking-admin-db.ts` red in 35 places, and not one of them was a
-  regression: **seven arms reached `confirmed` by POSTing it to the status
-  dropdown**, because that was the only way to get a row there when they were
-  written. One of them defended the step in a comment — *"That step is not
-  scaffolding; it is the new rule made visible."* It was the defect, and the
-  suite had been leaning on it since BK-23. This is part of why 23 green scripts
-  could not see BK-44: the fixtures needed the hole to be open.
-  **Therefore:** when a fix makes existing arms fail, the first question is
-  whether the ARM was relying on the bug, not whether the fix is too strict. The
-  answer is to make the FIXTURE honest — BK-44 added a `markFixturePaid` helper
-  and changed no assertion — never to loosen the rule until the suite goes
-  quiet. And a fixture helper must move the minimum the thing under test reads:
-  the first version also stamped `payment_status` and `payment_method` and broke
-  two unrelated arms. Severity: method, not code. **Owner: everyone.**
-
-- **A rule rewrite invalidates every conclusion drawn from the old rule,
-  including the ones in the same document.** BK-44's plan carried a transition
-  table listing `approved_awaiting_payment -> confirmed` as ❌ with the reason
-  *"bypasses `markPaid`… no double-payment detection"*. Plan review replaced the
-  rule's PREDICATE — from "may not write `confirmed`" to "may not cross into the
-  invite-holding set unpaid" — and the revision silently dropped that row
-  because the new predicate happened to permit it. Implementation review caught
-  it as a live hole: `paid_at` is never cleared, so a re-approved booking could
-  be confirmed on the previous cycle's money. **Therefore:** after any rule
-  rewrite, re-derive every enumerated case against the NEW rule and say
-  explicitly which verdicts changed and why. A row that silently disappears
-  between two versions of a plan is a decision nobody made. Severity: method.
-  **Owner: everyone.**
+- **Two method traps from BK-44 were PROMOTED to `CLAUDE.md`'s "Known traps in
+  the process itself" on 2026-08-20, and live there rather than here** — *a fix
+  that turns EXISTING assertions red is a question about the assertions* (seven
+  arms in `verify-booking-admin-db.ts` reached `confirmed` through the dropdown,
+  so the suite needed the hole open), and *a rule rewrite invalidates every case
+  enumerated under the old rule* (BK-44's revision silently dropped a forbidden
+  transition and it was a live hole). Promoted because neither is
+  booking-specific and this file is the booking area's; a future
+  `docs/<area>/ROADMAP.md` would never see them. **Kept as a pointer, not a
+  copy** — two statements of one rule is the drift this repo has paid for more
+  than once. Read them in `CLAUDE.md`.
 
 - **`approve` and `rollBack` never clear `paid_at` or `payment_method`, so a
   re-approved booking carries the previous cycle's payment.** Nothing in the

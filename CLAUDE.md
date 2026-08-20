@@ -69,3 +69,30 @@ Read the area's `ROADMAP.md` before starting anything.
   (`scripts/verify-appointment-upload.ts` does the latter and is the pattern to
   copy). A green dev-server smoke test does not satisfy this gate and must not
   be logged as though it did.
+
+- **A fix that turns EXISTING assertions red is a question about the
+  assertions, not about the fix.** BK-44's transition guard reddened
+  `verify-booking-admin-db.ts` in 35 places and not one was a regression: seven
+  arms reached `confirmed` by POSTing it to the status dropdown, because that
+  was the only way to get a row there when they were written, and one defended
+  the step in a comment as *"not scaffolding; it is the new rule made visible"*.
+  It was the defect. **A defect old enough gets encoded in the fixtures, so a
+  green suite is not evidence the defect is absent — the fixtures may require
+  it.** **Therefore:** when a fix reddens existing arms, establish whether each
+  arm was relying on the old behaviour before touching the rule. Make the
+  FIXTURE honest — BK-44 added a `markFixturePaid` helper and changed no
+  assertion — and never loosen the rule until the suite goes quiet. A fixture
+  helper moves the minimum the thing under test actually reads: that one's first
+  version also stamped `payment_status` and broke two unrelated arms.
+
+- **A rule rewrite invalidates every case enumerated under the old rule,
+  including the cases in the same document.** BK-44's plan tabulated
+  `approved_awaiting_payment -> confirmed` as forbidden, with its reasons. Plan
+  review replaced the rule's PREDICATE — "may not write `confirmed`" became "may
+  not cross into the invite-holding set unpaid" — and the revision silently
+  dropped that row, because the new predicate happened to permit it.
+  Implementation review found it as a live hole: `paid_at` is never cleared, so
+  a re-approved booking could be confirmed on the previous cycle's money.
+  **Therefore:** after any rule rewrite, re-derive every enumerated case against
+  the NEW rule and state which verdicts changed and why. A row that disappears
+  between two versions of a plan is a decision nobody made.
