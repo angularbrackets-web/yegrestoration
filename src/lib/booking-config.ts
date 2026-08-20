@@ -454,6 +454,63 @@ export const BOOKING_INTERNAL_TO = 'info@yegrestoration.ca';
  */
 export const INTERAC_EMAIL: string | null = 'info@yegrestoration.ca';
 
+/**
+ * The business's GST/HST registration number (BK-48).
+ *
+ * ── WHY IT EXISTS: THE RECEIPT DID NOT CARRY IT ───────────────────────────
+ *
+ * A GST registrant must show this number on a receipt for a supply of $30 or
+ * more, so
+ * the customer can claim an input tax credit. The first real charge this
+ * business took — live booking #36, 2026-08-20, $628.43 — produced a Stripe
+ * receipt itemising `GST (5%) — CA$29.93` and naming no registrant anywhere.
+ *
+ * The number HAD been entered in Stripe that morning, under Settings → Billing
+ * → Invoices → "Invoice tax information". **That field governs invoices.** A
+ * Checkout Session issues a RECEIPT, a different artifact, and our GST is a
+ * hand-built line item rather than a Stripe Tax rate — so Stripe has no tax
+ * registration associated with the charge and renders none. The dashboard step
+ * was real and did nothing for this path.
+ *
+ * ── A CONSTANT, NOT AN ENV VAR, AND THAT OVERTURNS A P9 DECISION ──────────
+ *
+ * P9 specified `GST_REGISTRATION_NUMBER` as an env var because the number was
+ * unknown and needed a placeholder. It is known now, and it is not a secret —
+ * it is printed on every receipt and invoice the business issues, which is the
+ * entire point of it. `INTERAC_EMAIL` directly above is the same class of value
+ * decided the same way, and this module's header states that nothing in it
+ * reads the environment.
+ *
+ * **The deciding argument is the failure mode.** An env var unset in Vercel
+ * means silently absent from every receipt — which is exactly the state this
+ * constant exists to end, and exactly the state that went unnoticed for a day.
+ * A compliance value that can vanish through configuration is the wrong shape.
+ *
+ * Format is CRA's: nine-digit Business Number, `RT`, four-digit account. The
+ * nine digits carry a Luhn check digit and `verify-booking-email.ts` pins both,
+ * because a WRONG number on a tax document is worse than an absent one — the
+ * customer's accountant will act on it — and nothing else here would catch a
+ * typo.
+ *
+ * **What that buys, stated exactly, because the first version over-claimed it.**
+ * Enumerated over this number: every single-digit substitution (81 of 81) and
+ * every ADJACENT transposition (6 of 6) are caught. Eleven of the twenty-seven
+ * arbitrary two-position swaps are NOT — Luhn is blind to swapping two digits
+ * of the same parity. And the `RT0001` account portion carries no check digit
+ * at all, so nothing here can catch a wrong account number. The pin is a strong
+ * guard against a typist's slip, not a proof of correctness.
+ */
+export const GST_REGISTRATION_NUMBER = '775654577RT0001';
+
+/**
+ * How the registrant is named on a document the customer keeps.
+ *
+ * CRA's own term, spelled out, rather than the compact form the Stripe line
+ * item uses — an email has room and "Reg." is jargon on a page with none of the
+ * surrounding context a receipt column implies.
+ */
+export const GST_REGISTRATION_LINE = `GST/HST registration number: ${GST_REGISTRATION_NUMBER}`;
+
 // ---------------------------------------------------------------------------
 // Calendar invites (BK-14)
 //

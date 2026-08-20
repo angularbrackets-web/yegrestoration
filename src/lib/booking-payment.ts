@@ -42,6 +42,7 @@ import type Stripe from 'stripe';
 import {
   checkoutCancelUrl,
   checkoutSuccessUrl,
+  GST_REGISTRATION_NUMBER,
   POST_COMMIT_BUDGET_MS,
 } from './booking-config';
 import {
@@ -241,7 +242,28 @@ function lineItems(request: CheckoutRequest): Stripe.Checkout.SessionCreateParam
   // GST AS ITS OWN LINE (client, 2026-08-16). The tier figures are ex-GST on
   // every surface that renders them, so a single tax-inclusive line would
   // silently contradict all of them.
-  items.push(line('GST (5%)', 'Goods and services tax', request.gstCents));
+  // THE REGISTRANT GOES IN THE NAME, and the field choice is evidence rather
+  // than preference (BK-48). Live booking #36's receipt rendered
+  // `GST (5%) × 1` — names only, no descriptions beside them — so the name is
+  // the field observed to survive onto the document the customer keeps. The
+  // Stripe SDK documents `description` as "for your own rendering purposes",
+  // which is not a promise it appears anywhere.
+  //
+  // NOT `unit_label`, which IS documented as included in receipts and invoices
+  // and is nonetheless wrong: it labels the unit of the quantity, so it would
+  // render as a noun beside `× 1` rather than as a document-level tax
+  // statement. Recorded because the next reader will find it in the types and
+  // wonder.
+  //
+  // This also renders on the Checkout PAGE, not only the receipt — the customer
+  // sees the registrant before paying as well as after. Deliberate.
+  items.push(
+    line(
+      `GST (5%) — Reg. ${GST_REGISTRATION_NUMBER}`,
+      'Goods and services tax',
+      request.gstCents,
+    ),
+  );
 
   return items;
 }

@@ -657,7 +657,9 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   receipt.** Stripe renders business and tax info on Checkout receipts from
   Dashboard settings (or through Stripe Tax / Invoicing), not from anything
   passed into the session. The receipt needs a Dashboard configuration step
-  that no amount of code will cover. **Severity: low technically, high
+  that no amount of code will cover. **(That sentence is the one this entry got
+  wrong. The Dashboard step exists, was taken, and did nothing for this path —
+  code covered it. See the BK-48 note below.)** **Severity: low technically, high
   operationally** — it is the kind of thing found at go-live, by an accountant.
   **Owner: BK-32**, recorded as a rollout task rather than an implementation
   one.
@@ -693,11 +695,20 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   number on a receipt for a supply over $30 so the customer can claim an input
   tax credit. Every live receipt from 2026-08-20 onward lacks it.
 
-  **The fix is code, not configuration** — the line item NAME is ours and it is
-  what receipts render: `line('GST (5%)', 'Goods and services tax', gstCents)`
-  in `booking-payment.ts` becomes a name carrying the number. Our own approval
-  and confirmation emails are also ours and can carry it. **Owner: needs a
-  ticket.**
+  **The fix was code, not configuration** — the line item NAME is ours and it is
+  what receipts render. **FIXED 2026-08-20 by BK-48**: the GST line is named
+  `GST (5%) — Reg. 775654577RT0001`, and our approval email and paid
+  confirmation carry the registrant too — which matters because an Interac payer
+  never receives a Stripe receipt at all.
+
+  **SUPERSEDED BY BK-48, 2026-08-20.** Everything from here down is the record
+  of what was believed before the first real receipt existed, kept because the
+  belief was reasonable and wrong in an instructive way. Two of its sentences
+  are now false and both are corrected above: no code read
+  `GST_REGISTRATION_NUMBER` (a CONSTANT of that name is now read by
+  `booking-payment.ts` and `booking-email.ts`), and Stripe's receipt is NOT
+  where the number appears — BK-48 put it in the line item name because Stripe
+  put it nowhere.
 
   **Corrected 2026-08-19.** This entry used to add *"the env var correctly
   drives our emails"*, and BK-32's own rollout note says the same. **It is not
@@ -1454,8 +1465,11 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
   published — it would turn an operational intent into a screenshot-able
   commitment.
 - **GST** is charged as a separate Stripe line item, and the receipt must show
-  the registration number. Built against a `GST_REGISTRATION_NUMBER` env var;
-  the number itself is a client question.
+  the registration number. **BK-48 (2026-08-20) made it a CONSTANT, not an env
+  var** — `GST_REGISTRATION_NUMBER` in `booking-config.ts`, beside
+  `INTERAC_EMAIL` and for the same reason. The env var was chosen when the
+  number was unknown; an env var unset in Vercel means silently absent from
+  every receipt, which is the defect BK-48 was filed for.
 - **Service-area FSA list** ships with a proposed Edmonton-metro default behind
   config. Client signs off later; not a blocker.
 
@@ -1586,8 +1600,8 @@ audit and the merge record are in `prepay-flow-spec.md` section 8.
 - **All three tiers stay bookable online** (client-confirmed). Tier 3's copy
   **must state that lab results take 3-5 business days** — BK-31 and BK-36.
 
-- **GST registration number: still pending from the client.** Ships as a
-  clearly-marked placeholder behind `GST_REGISTRATION_NUMBER`; does not block.
+- **GST registration number: ANSWERED 2026-08-20 — `775654577RT0001`.** No
+  longer a placeholder and no longer an env var; see BK-48.
 
 **Corrections applied to the external spec rather than adopted from it** (each
 verified against the code on 2026-08-18; see `prepay-flow-spec.md` section 8):
@@ -1785,7 +1799,13 @@ together or the site tells a lie between deploys.
       issuing since the live-key swap earlier the same day, so the exposure
       window was hours rather than days.
 
-      **No code changed and none was needed** — see the Known trap: nothing in
+      **THIS PARAGRAPH WAS WRONG AND BK-48 FIXED WHAT IT MISSED.** It said no
+      code changed and none was needed, on the belief that Stripe renders tax
+      info on Checkout receipts from Dashboard settings. It does not, for this
+      shape. BK-48 (2026-08-20) reads a `GST_REGISTRATION_NUMBER` **constant**
+      in `booking-payment.ts` and `booking-email.ts`. The original text follows.
+
+      No code changed and none was needed — see the Known trap: nothing in
       `src/` or `scripts/` reads `GST_REGISTRATION_NUMBER`, and Stripe renders
       tax info on Checkout receipts from Dashboard settings alone. Our own
       emails itemize the GST *amount* and print no registration number, which
@@ -2029,9 +2049,12 @@ not actually need.
    invoice" matches how an insurance job actually settles, i.e. that the credit
    comes off the customer's share. Blocks nothing mechanical; it decides
    whether BK-36's closing sentence is true.
-7. **GST registration number** for Stripe receipts. Built against
-   `GST_REGISTRATION_NUMBER`. **Note the number alone is not sufficient** — see
-   the Known trap on Stripe receipts.
+7. ~~**GST registration number** for Stripe receipts.~~ **ANSWERED AND BUILT
+   2026-08-20 — `775654577RT0001`, shipped by BK-48 as a constant.** The note
+   this item carried was right and understated: the number alone was not
+   sufficient, and neither was the Dashboard step — that field governs
+   invoices, and a Checkout Session issues a receipt. It took a code change to
+   put the registrant in the line item NAME, which is what a receipt renders.
 8. **FSA service-area list sign-off.** A proposed Edmonton-metro default ships
    meanwhile; not a blocker.
 9. ~~**Phone customers: pay by link, or exempt?**~~ **ANSWERED 2026-08-16: pay
@@ -2043,9 +2066,10 @@ not actually need.
     Not a blocker, and not a question anyone is waiting on — recorded so the
     gap in the form is legible as a decision rather than an oversight.
 
-**Still open after 2026-08-18: #6 (insurance credit settlement), #7 (GST
-number), #8 (FSA list), #10 (stat holidays, deferred).** **None of them block
-Deploy 2.** #7 ships as a marked placeholder behind `GST_REGISTRATION_NUMBER`;
+**Still open after 2026-08-20: #6 (insurance credit settlement), #8 (FSA list),
+#10 (stat holidays, deferred). #7 closed 2026-08-20 by BK-48.** **None of them block
+Deploy 2.** #7 was to ship as a placeholder; it shipped as the real number
+(BK-48, 2026-08-20);
 #8 ships with the Edmonton-metro default; #6 decides only whether BK-36's
 closing sentence is true, and the client has not disputed it.
 

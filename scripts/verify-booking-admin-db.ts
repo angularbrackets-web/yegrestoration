@@ -133,6 +133,7 @@ const { buildBookingIcs, icsCustomer } = await import('../src/lib/booking-ics');
 const { FEE_TERMS_HEADING, FEE_TERMS_INTRO, HAVE_READY_HEADING } = await import(
   '../src/lib/booking-copy'
 );
+const { GST_REGISTRATION_LINE } = await import('../src/lib/booking-config');
 // BK-10's lead-reply path. Same split as the appointment resend above: the
 // helper's send is injectable (lib-level), the route is driven under the mute
 // (route-level).
@@ -2434,6 +2435,13 @@ try {
       check(
         !fromPayment.html.includes(escapeHtml(FEE_TERMS_INTRO)),
         'and NOT the sentence promising a payment link to a customer who has just paid',
+      );
+      // BK-48, asserted HERE and not only on a builder call: this is the
+      // message the payment route actually handed its sender, and a receipt
+      // that states a GST amount owes the number that makes it claimable.
+      check(
+        fromPayment.html.includes(escapeHtml(GST_REGISTRATION_LINE)),
+        'and the GST registrant, on the message the payment route really sent',
       );
     }
   }

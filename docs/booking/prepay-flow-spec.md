@@ -941,7 +941,9 @@ brief, and with what each supersedes in the sections above:
   key and never an amount.
 - **All three tiers stay bookable online**; tier 3 must disclose that lab
   results take 3-5 business days.
-- **GST registration number: still pending.** Unchanged from §7 item 7.
+- **GST registration number: ANSWERED 2026-08-20 — `775654577RT0001`.** Shipped
+  by BK-48 as a constant, and it took code: the Stripe Dashboard field governs
+  invoices, not Checkout receipts.
 
 ### 8.4 What in this document is now stale
 

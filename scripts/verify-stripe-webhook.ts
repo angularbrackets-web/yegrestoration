@@ -24,6 +24,7 @@ import {
   checkoutCancelUrl,
   checkoutSuccessUrl,
   stripeWebhookUrl,
+  GST_REGISTRATION_NUMBER,
   PAYMENT_DEADLINE_LEAD_HOURS,
   PAYMENT_WINDOW_HOURS,
   PAY_NOW_THRESHOLD_HOURS,
@@ -149,6 +150,44 @@ console.log('\nThe session is built from the amounts it was handed');
   check(
     travelLines[2].price_data.unit_amount === 2245,
     'and GST last, computed on base + travel rather than on the base alone',
+  );
+
+  // ── THE NAMES, WHICH NOTHING PINNED UNTIL BK-48 ─────────────────────────
+  //
+  // Every assertion above is about MONEY, and every one of them was green while
+  // the receipt carried no GST registration number — because the receipt is
+  // made of the NAMES, and no assertion had ever read one. The money was
+  // covered and the document was not.
+  //
+  // Asserted against the imported constant, never a repeated literal: two
+  // spellings of a tax registration number is exactly how one of them ends up
+  // wrong on a customer's receipt.
+  // PINNED WHOLE, NOT BY `.includes`, and implementation review is why. The
+  // first version asked only whether the registrant appeared somewhere in the
+  // name — so renaming the line to a bare `Reg. 775654577RT0001` left every
+  // gate green and would have put a registration number and an amount on the
+  // receipt with nothing saying the amount was TAX. On a document whose whole
+  // purpose is to let an accountant identify the tax, that is worse than the
+  // omission this ticket fixed.
+  //
+  // The other two names are pinned with `===` and the one this ticket changed
+  // was not, which is the wrong way round.
+  check(
+    travelLines[2].price_data.product_data.name ===
+      `GST (5%) — Reg. ${GST_REGISTRATION_NUMBER}`,
+    'the GST line names the tax AND the registrant — this is the field the receipt renders',
+  );
+  check(
+    travelLines[2].price_data.product_data.description === 'Goods and services tax',
+    'and its description is unchanged — moving the number there is a guess the receipt disproved',
+  );
+  check(
+    travelLines[0].price_data.product_data.name === 'On-site restoration assessment',
+    'the assessment line is named for what was sold',
+  );
+  check(
+    travelLines[1].price_data.product_data.name === 'Travel',
+    'and the travel line for what it is',
   );
 
   console.log('  three line items at most, GST always its own, travel only when real');

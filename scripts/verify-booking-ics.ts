@@ -29,6 +29,7 @@ import {
   planRestoreEmail,
   planFirstConfirmationEmail,
 } from '../src/lib/booking-admin-notify';
+import { GST_REGISTRATION_NUMBER } from '../src/lib/booking-config';
 import {
   CANCEL_LINE,
   CANCELLED_REBOOK_LINE,
@@ -737,6 +738,12 @@ console.log('\nBK-45 — the boundary builder carries no money and no terms');
     ['the credit line', FEE_TERMS_CREDIT],
     ['the have-ready heading', HAVE_READY_HEADING],
     ['a have-ready item', HAVE_READY_ITEMS[0]],
+    // BK-48. A TAX REGISTRATION NUMBER IS A CLAIM THAT GST WAS CHARGED, so it
+    // belongs only on a document where it was. The `$`-shaped check below
+    // cannot stand in for this one: `775654577RT0001` carries no dollar sign
+    // and no decimals, which is exactly the hole that let the same class of
+    // defect through on the $0 confirmation.
+    ['the GST registrant', GST_REGISTRATION_NUMBER],
   ];
 
   for (const [label, message] of [

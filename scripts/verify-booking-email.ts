@@ -10,6 +10,8 @@ import {
   BOOKING_EMAIL_FROM,
   BOOKING_EMAIL_REPLY_TO,
   BOOKING_INTERNAL_TO,
+  GST_REGISTRATION_LINE,
+  GST_REGISTRATION_NUMBER,
   POST_COMMIT_BUDGET_MS,
   SUPPORT_PHONE,
 } from '../src/lib/booking-config';
@@ -48,6 +50,7 @@ import {
   formatCents,
 } from '../src/lib/booking-pricing';
 import {
+  approvalMessage,
   declineMessage,
   escapeHtml,
   expiredRequestMessage,
@@ -818,6 +821,126 @@ console.log('\nBK-45 — the message a PAYING customer keeps states what the ROW
       !noSnapshot.html.includes(escapeHtml(NO_CHARGE_LINE)),
     'and makes NO claim about payment at all — a confirmed row with no snapshot may not be called paid',
   );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-48 — the GST registrant, and only where GST was charged');
+// ---------------------------------------------------------------------------
+//
+// THE NUMBER ITSELF IS PINNED FIRST, and it is the assertion this ticket would
+// otherwise not have had. A constant cannot be "unset" — the failure mode a
+// constant HAS is a typo, and a WRONG registration number on a tax document is
+// worse than an absent one, because the customer's accountant will believe it.
+//
+// CRA's format is a nine-digit Business Number, `RT`, then a four-digit
+// account. The nine digits carry a Luhn check digit, which catches every
+// single-digit error and every ADJACENT transposition — not every transposition
+// (Luhn is blind to swapping two digits of the same parity), and nothing at all
+// in the `RT` account portion, which has no check digit. Stated precisely
+// because the first version of this comment claimed more than it delivers.
+{
+  check(
+    /^\d{9}RT\d{4}$/.test(GST_REGISTRATION_NUMBER),
+    `the registration number is a CRA GST/HST account number — typo? got "${GST_REGISTRATION_NUMBER}"`,
+  );
+
+  const bn = GST_REGISTRATION_NUMBER.slice(0, 9);
+  let sum = 0;
+  for (const [i, ch] of [...bn].reverse().entries()) {
+    let digit = Number(ch);
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  check(
+    sum % 10 === 0,
+    `and its Business Number passes the Luhn check digit — a mistyped or adjacent-transposed digit fails here (sum ${sum})`,
+  );
+}
+
+// WHERE IT APPEARS, AND — the half that matters — WHERE IT MUST NOT.
+{
+  const SETTLED = {
+    baseCents: 57750,
+    travelCents: 4600,
+    gstCents: 3118,
+    totalCents: 65468,
+    paidCents: 65468,
+  };
+  const confirmedPaid = planBookingNotifications({
+    ...INSURANCE,
+    messageType: 'confirmed',
+    settled: SETTLED,
+  }).customer!;
+
+  for (const part of ['html', 'text'] as const) {
+    const needle = part === 'html' ? escapeHtml(GST_REGISTRATION_LINE) : GST_REGISTRATION_LINE;
+    check(
+      confirmedPaid[part].includes(needle),
+      `a PAID confirmation names the registrant in its ${part} part`,
+    );
+  }
+
+  // ── THE FOUR NEGATIVES ──────────────────────────────────────────────────
+  //
+  // A tax registration number is a claim that GST was charged. Three of these
+  // are confirmed-arm renders of the SAME function, which is why the gate is
+  // `paidAmounts` and not `!isRequest`: the $0 goodwill visit and a confirmed
+  // row with no snapshot are both "not a request" and both charged nothing.
+  //
+  // The $0 arm's existing guard could not have caught this — it asserts no
+  // computed amount, and `775654577RT0001` carries no `$` and no decimals.
+  const mustNotName: [string, { html: string; text: string }][] = [
+    [
+      'a request message — nothing has been charged yet',
+      planBookingNotifications({ ...INSURANCE, messageType: 'request' }).customer!,
+    ],
+    [
+      'a $0 goodwill confirmation — no GST was charged',
+      planBookingNotifications({
+        ...INSURANCE,
+        messageType: 'confirmed',
+        settled: { baseCents: 0, travelCents: 0, gstCents: 0, totalCents: 0, paidCents: 0 },
+      }).customer!,
+    ],
+    [
+      'a confirmed row with no snapshot — no amount to attach a registrant to',
+      planBookingNotifications({ ...INSURANCE, messageType: 'confirmed' }).customer!,
+    ],
+  ];
+  for (const [label, message] of mustNotName) {
+    for (const part of ['html', 'text'] as const) {
+      check(
+        !message[part].includes(GST_REGISTRATION_NUMBER),
+        `${label}: no registrant in the ${part} part`,
+      );
+    }
+  }
+
+  // The approval message, which is the OTHER document a customer keeps — and
+  // the only one an Interac payer ever gets, since no Stripe receipt exists on
+  // that path.
+  const approval = approvalMessage(
+    { ...INSURANCE, messageType: 'payment-link' },
+    {
+      baseCents: 57750,
+      travelCents: 4600,
+      gstCents: 3118,
+      totalCents: 65468,
+      dueAt: new Date('2026-08-21T09:00:00.000Z'),
+      paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_x',
+      interacEmail: 'info@yegrestoration.ca',
+    },
+  )!;
+  for (const part of ['html', 'text'] as const) {
+    const needle = part === 'html' ? escapeHtml(GST_REGISTRATION_LINE) : GST_REGISTRATION_LINE;
+    check(
+      approval[part].includes(needle),
+      `the approval message names the registrant in its ${part} part`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

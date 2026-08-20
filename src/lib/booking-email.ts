@@ -24,6 +24,7 @@ import {
   BOOKING_EMAIL_FROM,
   BOOKING_EMAIL_REPLY_TO,
   BOOKING_INTERNAL_TO,
+  GST_REGISTRATION_LINE,
   SUPPORT_PHONE,
 } from './booking-config';
 import {
@@ -546,6 +547,16 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
           ),
         ]
       : []),
+    // BK-48. GATED ON `paidAmounts`, THE SAME EXPRESSION THE GST ROW USES, and
+    // the gate is the whole finding. `!isRequest` or `settled` would have
+    // printed a tax-registration number on a document where no GST was charged
+    // — the $0 goodwill visit, and a confirmed row whose snapshot is missing.
+    // The $0 arm's existing guard would NOT have caught it: it asserts no
+    // computed amount, and a registration number carries no `$` and no
+    // decimals.
+    ...(paidAmounts
+      ? [`<p style="margin:8px 0 0;color:#666;font-size:12px;">${escapeHtml(GST_REGISTRATION_LINE)}</p>`]
+      : []),
     ...(arrivedLine ? [`<p style="margin:8px 0 0;">${escapeHtml(arrivedLine)}</p>`] : []),
     // NO INVITE ON A REQUEST. An .ics for an unpaid slot is the "you're booked"
     // claim in a form the customer's calendar repeats back to them every day
@@ -602,6 +613,7 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
           `  Total       ${formatCents(paidAmounts.totalCents)}`,
         ]
       : []),
+    ...(paidAmounts ? [GST_REGISTRATION_LINE] : []),
     ...(arrivedLine ? ['', arrivedLine] : []),
     ...(isRequest ? [] : ['', CALENDAR_ATTACHED_LINE]),
     '',
@@ -726,6 +738,11 @@ export function approvalMessage(
     ].filter(Boolean)),
     `<h2 style="font-size:16px;margin:24px 0 8px;">Amount</h2>`,
     table(amountRows),
+    // BK-48. The registrant, on the document the customer keeps. This message
+    // states a GST amount, so it owes the number that makes the amount
+    // claimable — and an Interac payer never receives a Stripe receipt at all,
+    // which makes our own two messages their only record.
+    `<p style="margin:8px 0 0;color:#666;font-size:12px;">${escapeHtml(GST_REGISTRATION_LINE)}</p>`,
     ...(deadlineLabel
       ? [
           `<p style="margin:16px 0;"><strong>${escapeHtml(`Please pay by ${deadlineLabel}.`)}</strong></p>`,
@@ -764,6 +781,7 @@ export function approvalMessage(
     ...(details.travelCents > 0 ? [`  Travel      ${formatCents(details.travelCents)}`] : []),
     `  GST         ${formatCents(details.gstCents)}`,
     `  Total       ${formatCents(details.totalCents)}`,
+    GST_REGISTRATION_LINE,
     '',
     ...(deadlineLabel
       ? [`Please pay by ${deadlineLabel}.`, '', APPROVED_DEADLINE_NOTE]
