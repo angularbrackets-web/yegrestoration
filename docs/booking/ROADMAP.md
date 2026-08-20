@@ -128,6 +128,26 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   so a row re-approved after a previous payment carries a stale stamp; an
   approved row's crossing is refused outright for that reason.
 
+- **The recorded webhook health check gives a FALSE ALARM unless it sends
+  `Content-Type: application/json`.** This file records the live probe as
+  *"the Stripe webhook answers `400 {\"error\":\"No signature\"}` to an unsigned
+  POST"*, which is the response that proves the route exists and both secrets
+  are readable. A bare `curl -X POST` sends no content type, Astro's
+  `checkOrigin` treats it as a cross-site FORM submission, and the answer is
+  **"Cross-site POST form submissions are forbidden"** — which reads exactly
+  like a broken webhook to whoever runs it. Observed 2026-08-20 while smoke-
+  testing the BK-44/45/46 deploy, and it cost a minute of thinking production
+  was broken.
+
+  **Stripe is unaffected**: `checkOrigin` only guards the form content types,
+  and Stripe posts `application/json`. Verified immediately with
+  `-H "Content-Type: application/json"`, which returns the documented
+  `400 {"error":"No signature"}`. **Therefore:** always send the header when
+  probing that route, and do not treat the CSRF message as a failure.
+  Severity: none technically, moderate operationally — it is a health check that
+  lies in the alarming direction. **Owner: nobody — the probe is documentation,
+  not code.**
+
 - **RESOLVED 2026-08-20 by BK-46 — kept for the shape, not as open work.**
   **A column written by a proven route and read by no surface passes every test
   in the suite.** `markPaid()` writes `paid_at` and `payment_method` — the
