@@ -1312,6 +1312,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
+| BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Needs a client answer first: may the office ever confirm by hand? | Reviewed | draft — see `tickets/BK-44.md` |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1366,6 +1367,32 @@ together or the site tells a lie between deploys.
    | 1 | `migrate --target prod --only 007-assessment-tier,008-review-lifecycle,010-payments` | Additive and widening only. 008 does NOT touch the unique index and does NOT move the column default, so the code still live keeps working unchanged. Its CHECK permits `booked` *and* the new statuses precisely so the old code can keep inserting during the window |
    | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
    | 3 | `migrate --target prod` (bare — 009 is all that is left) | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
+
+   **ROLLOUT STATE, 2026-08-19 end of session — steps 1-4 done, step 5 part-way,
+   step 6 not started.**
+
+   | Step | State |
+   | --- | --- |
+   | 1 · migrations 007/008/010 to prod | ✅ done, verified |
+   | 2 · deploy the code | ✅ done (`befce39`, then `c346fce`) |
+   | 3 · migration 009 | ✅ done, verified |
+   | 4 · register the webhook | ✅ done — `booking-payments-test`, **test mode**, `https://www.yegrestoration.ca/api/stripe/webhook/`, 4 Checkout events, Snapshot payload. `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in Vercel, **Production only** |
+   | 5 · test-mode run end to end | ⏳ **part-way.** Booking **#35** exists on production: Sun Aug 23 3:30 p.m., mould, standard tier, `pending_review`, $577.50 + GST = $606.38. The request half is proven — form, photo upload, both emails, request page, admin panel. **The approve → pay → webhook → confirm half has NOT been exercised.** Next action is "Review the amount →" on #35, then Stripe test card `4242 4242 4242 4242` |
+   | 6 · swap live keys | ❌ not started. Needs its OWN webhook registration in live mode with its own `whsec_` — the test one does not carry over |
+
+   **Two defects were found by that hands-on test, both of which all 23 gates
+   missed, and the pattern matters more than either bug:**
+
+   - the office email called a request a *"New booking"* while its own subject
+     said *"NEW REQUEST"* — fixed and deployed (`c346fce`);
+   - the admin status dropdown can perform an approval, which is the one thing
+     `review.ts` was split out to prevent — **recorded as BK-44, not fixed.**
+
+   **Both are route-relationship or screen-legibility failures, and the suite
+   tests neither.** Every verify script exercises one route in isolation; none
+   asks whether two routes overlap, or how a screen reads to the person using
+   it. That is a gap in the method, not a gap in coverage, and it is why the
+   first real booking found two things 23 green scripts did not.
 
    **ROLLOUT — STEPS 1, 2 AND 3 ARE DONE. DEPLOY 2 IS LIVE (2026-08-19).**
 
