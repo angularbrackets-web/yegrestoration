@@ -9,8 +9,9 @@
  */
 
 import { TIMEZONE } from './booking-config';
-import { LIVE_STATUSES } from './booking-status';
-import type { Appointment } from './db';
+import { assessmentQuote, isAfterHoursSlot } from './booking-pricing';
+import { isAwaitingPayment, LIVE_STATUSES } from './booking-status';
+import type { Appointment, AppointmentStatus } from './db';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -329,4 +330,257 @@ export function formatFileSize(bytes: number | string | null): string {
     unit++;
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+// ---------------------------------------------------------------------------
+// What a booking costs, as ONE derivation (BK-46)
+//
+// THE DEFECT THIS EXISTS TO REMOVE. The detail page derived money in two
+// places. The header called `assessmentQuote({tier, service, slotStart})`,
+// which takes an optional `travelFeeCents` **defaulting to zero** and
+// recomputes from today's price table; the panel below it read the four stored
+// columns. So on any booking with a travel fee — the figure the office adjusts
+// most often — one screen showed two totals, both labelled in dollars, with
+// nothing saying which the customer was charged. The page's own comment had
+// predicted it: "BK-32 adds one, snapshotted at approval, and at that point
+// this display should read the snapshot instead". The column shipped; the
+// display did not follow.
+//
+// So the fix is not "add travel to the header". It is to delete the header's
+// arithmetic and have both surfaces read this. **One consequence, stated
+// because it decides how this is tested:** once both read one function, "the
+// header total equals the settled total" is true by construction and cannot
+// fail. It is not asserted as though it could. What is asserted is this
+// function's own answers, and — structurally — that the page has no second
+// derivation.
+// ---------------------------------------------------------------------------
+
+/**
+ * What the office may say about this booking's money, and on what authority.
+ *
+ * Three kinds, because there are three different authorities and collapsing any
+ * two of them is how a screen states a number it cannot stand behind:
+ *
+ *   `settled`  — the office approved these figures and they are ON the row.
+ *   `estimate` — nothing is settled; this is arithmetic, shown as arithmetic.
+ *   `none`     — no tier was chosen, so there is not even a price to compute.
+ */
+export type AppointmentMoney =
+  | {
+      kind: 'settled';
+      baseCents: number;
+      travelCents: number;
+      gstCents: number;
+      totalCents: number;
+      afterHours: boolean;
+    }
+  | {
+      kind: 'estimate';
+      /**
+       * WHY nothing is settled, because the two reasons need different words.
+       *
+       * `suggestion`    — the row is awaiting review. The figure is what the
+       *                   office is about to be offered on the Review panel.
+       * `never-settled` — the row is past review and no amount was ever
+       *                   recorded: declined, or cancelled from the dropdown
+       *                   before anyone approved it.
+       *
+       * **Neither claims anything about the row's AGE**, and an earlier version
+       * of this split did. It called the second case a row that "predates the
+       * amount snapshot" — false twice: those columns are migration 008's, not
+       * 010's, and the rows that actually land here are declines from this
+       * week. `assessment_tier` is 007's and was never backfilled, so genuinely
+       * old rows carry no tier and answer `none`. Caught at plan review, on the
+       * screen this ticket exists to make honest.
+       */
+      basis: 'suggestion' | 'never-settled';
+      baseCents: number;
+      totalCents: number;
+      afterHours: boolean;
+    }
+  | { kind: 'none' };
+
+/** The columns this reads. Narrow on purpose — it is a view, not a row. */
+export type MoneyBearingAppointment = Pick<
+  Appointment,
+  | 'status'
+  | 'service'
+  | 'slot_start'
+  | 'assessment_tier'
+  | 'assessment_amount_cents'
+  | 'travel_fee_cents'
+  | 'gst_cents'
+  | 'total_amount_cents'
+>;
+
+/**
+ * ORDER IS THE RULE, and it is written here rather than left to the shape of
+ * the `if`s, because plan review found the precedence genuinely undecided.
+ *
+ * 1. **No tier, no answer.** Nothing to settle and nothing to compute.
+ *
+ * 2. **`pending_review` outranks a surviving snapshot.** A row walked back from
+ *    `approved_awaiting_payment` through the STATUS DROPDOWN keeps its amount
+ *    columns — `update.ts`'s SET clause writes status, stage, notes, tier and
+ *    `cancelled_at`, and nothing else — while `review.ts`'s own `rollBack`
+ *    nulls them and says exactly why: *"leaving them set would make the admin
+ *    page render 'Amount settled at approval' over a row nobody has approved."*
+ *    That sentence describes the dropdown path today. So a `pending_review` row
+ *    shows the SUGGESTION, which is the number the office is about to act on,
+ *    and the settled panel does not render for it at all.
+ *
+ * 3. **A snapshot past review is the truth**, read whole. `gst_cents` and
+ *    `total_amount_cents` are read, never re-derived: `review.ts` computes GST
+ *    once on the overridden subtotal, and recomputing at 5% here would
+ *    reintroduce the same drift one rounding later. A $0 approval reaches this
+ *    arm with four zeros, which is correct — it WAS settled, at zero.
+ *
+ * 4. **Otherwise it is an estimate that was never settled.**
+ */
+/**
+ * Which side of the approval each status sits on, as an EXHAUSTIVE record
+ * rather than a predicate call.
+ *
+ * A `Record<AppointmentStatus, …>` makes a ninth status a typecheck error here.
+ * The `isAwaitingReview(...)` this replaces was correct and silently
+ * open-ended: a status added later fell through to the `never-settled` arm,
+ * whose copy reads *"no amount was ever settled"* — which would be a confident
+ * false sentence about a row nobody had classified. Implementation review
+ * caught the omission; the plan had specified this shape and the first
+ * implementation wrote an if-chain.
+ *
+ * The same pattern, and the same reason, as `STATUS_ENTRY_OWNER`.
+ */
+const MONEY_STAGE: Record<AppointmentStatus, 'review' | 'past'> = {
+  pending_review: 'review',
+  approved_awaiting_payment: 'past',
+  confirmed: 'past',
+  completed: 'past',
+  no_show: 'past',
+  declined: 'past',
+  payment_expired: 'past',
+  cancelled: 'past',
+};
+
+export function appointmentMoney(row: MoneyBearingAppointment): AppointmentMoney {
+  if (!row.assessment_tier) return { kind: 'none' };
+
+  const afterHours = isAfterHoursSlot(row.slot_start);
+
+  const estimate = (basis: 'suggestion' | 'never-settled'): AppointmentMoney => {
+    const quote = assessmentQuote({
+      tier: row.assessment_tier!,
+      service: row.service,
+      slotStart: row.slot_start,
+    });
+    return {
+      kind: 'estimate',
+      basis,
+      baseCents: quote.baseCents,
+      totalCents: quote.totalCents,
+      afterHours,
+    };
+  };
+
+  if (MONEY_STAGE[row.status] === 'review') return estimate('suggestion');
+
+  // All four or none. A partial snapshot cannot be rendered honestly, and the
+  // obvious spelling of "keyed on one, read four" is a `?? 0` that would print
+  // $0.00 for a real GST amount on the screen somebody reads during a dispute.
+  const { assessment_amount_cents: base, gst_cents: gst, total_amount_cents: total } = row;
+  if (base !== null && gst !== null && total !== null) {
+    return {
+      kind: 'settled',
+      baseCents: base,
+      // `NOT NULL DEFAULT 0` — the one amount column that cannot be missing.
+      travelCents: row.travel_fee_cents,
+      gstCents: gst,
+      totalCents: total,
+      afterHours,
+    };
+  }
+
+  return estimate('never-settled');
+}
+
+/**
+ * Whether this row still owes money — the question the due line should have
+ * been asking all along.
+ *
+ * It asked whether `payment_due_at` was non-null. **Nothing ever clears that
+ * column**, so its presence describes the past: a paid booking's only money
+ * panel read "Payment due by Thu, Aug 20 · 11:39 a.m.", and so did every
+ * expired, declined and cancelled row, where it invites somebody to chase a
+ * payment on a booking that is closed.
+ *
+ * `total > 0` is not defensive. `approveFree` leaves a $0 row at
+ * `approved_awaiting_payment` with `payment_status = 'pending'` until `markPaid`
+ * moves it, and a row that owes $0.00 does not owe.
+ */
+export function stillOwesPayment(
+  row: Pick<Appointment, 'status' | 'payment_status' | 'total_amount_cents'>,
+): boolean {
+  return (
+    isAwaitingPayment(row.status) &&
+    row.payment_status !== 'paid' &&
+    (row.total_amount_cents ?? 0) > 0
+  );
+}
+
+/**
+ * How the money arrived, as a sentence — or null when it has not.
+ *
+ * ── GATED ON `payment_status`, NOT ON `paid_at` BEING NON-NULL ─────────────
+ *
+ * **Nothing clears `paid_at` or `payment_method`.** Not `approve`, not
+ * `rollBack`, not `update.ts`. So a booking that was paid, walked back to
+ * `pending_review` by the dropdown and re-approved at a corrected amount sits
+ * at `approved_awaiting_payment` carrying the PREVIOUS cycle's stamp — and the
+ * first draft of this function would have rendered "Payment due by …" and "Paid
+ * by card · <last month>" in the same panel. The ROADMAP predicted it by name:
+ * *"it becomes visible the moment BK-46 renders those columns."*
+ *
+ * `payment_status` is the column the payment path actually maintains, so it is
+ * the one asked. **The staleness itself is not fixed here** — clearing those
+ * columns is a write-path change to the approval route and is its own ticket.
+ *
+ * ── AND KEYED ON THE PAYMENT COLUMNS, NOT ON THE SNAPSHOT ─────────────────
+ *
+ * `markPaid`'s paid-after-release branch records real money on `declined`,
+ * `cancelled` and `payment_expired` rows without touching the amount columns.
+ * Hanging this off the settled panel's condition would leave a corner where
+ * money arrived and no screen said so — which is the defect, surviving its own
+ * fix.
+ */
+export function paymentReceipt(
+  row: Pick<
+    Appointment,
+    'payment_status' | 'payment_method' | 'paid_at' | 'interac_marked_by' | 'interac_marked_at'
+  >,
+): { line: string; at: Date | null } | null {
+  if (row.payment_status !== 'paid' || row.payment_method === null) return null;
+
+  // Exhaustive over the four non-null methods rather than a switch with a
+  // default: a fifth must be a typecheck error here, not a blank line on the
+  // screen the office reads during a dispute. (Null is the early return above.)
+  const LINES: Record<NonNullable<Appointment['payment_method']>, string> = {
+    stripe: 'Paid by card',
+    // A HUMAN CLAIM ABOUT MONEY, and it reads differently on purpose. BK-32
+    // recorded an author for this one precisely because no inbox is parsed and
+    // nothing is auto-matched — somebody looked at a bank notification and said
+    // so. The actor is optional on the column, so a missing one degrades to the
+    // passive rather than printing "by null".
+    interac: row.interac_marked_by
+      ? `Marked paid by ${row.interac_marked_by} — e-Transfer`
+      : 'Marked paid — e-Transfer',
+    none: 'Approved at no charge',
+    // Pre-prepay rows. Named rather than hidden: "paid on site" is a real thing
+    // that happened, and blank would read as unpaid.
+    onsite: 'Paid on site — before prepay',
+  };
+
+  return {
+    line: LINES[row.payment_method],
+    at: row.payment_method === 'interac' ? (row.interac_marked_at ?? row.paid_at) : row.paid_at,
+  };
 }

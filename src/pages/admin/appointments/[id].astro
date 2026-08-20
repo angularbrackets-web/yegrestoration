@@ -18,6 +18,9 @@ import {
   PAYMENT_ROUTE_LABELS,
   PIPELINE_STAGE_LABELS,
   STATUS_LABELS,
+  appointmentMoney,
+  paymentReceipt,
+  stillOwesPayment,
 } from '../../../lib/booking-admin';
 import {
   APPOINTMENT_STATUSES,
@@ -83,22 +86,31 @@ try {
 }
 
 /**
- * What this assessment comes to, if a tier was chosen.
+ * What this assessment comes to — READ, not recomputed, wherever the office has
+ * settled it (BK-46).
  *
- * Recomputed from `(tier, service, slot_start)` rather than read off a column,
- * because there is no amount column yet — BK-32 adds one, snapshotted at
- * approval, and at that point this display should read the snapshot instead so
- * the office sees what the customer was actually quoted rather than what the
- * table says today.
+ * THE COMMENT THIS REPLACES WAS TRUE WHEN WRITTEN AND FALSE WHEN READ, which is
+ * the third time this codebase has paid for that shape after `update.ts:266`
+ * and `booking-email.ts`'s invite line. It said *"there is no amount column yet
+ * — BK-32 adds one, snapshotted at approval, and at that point this display
+ * should read the snapshot instead"*. **Migration 008 added those columns and
+ * BK-23's approval screen writes them** (010 only added the payment block, and
+ * says so itself). The prediction came true, nobody acted on it, and the
+ * sentence stayed on the page reading like a considered decision.
+ *
+ * What it cost: `assessmentQuote` takes an optional `travelFeeCents` that
+ * DEFAULTS TO ZERO and this call passed none, so the header stated base + GST
+ * on every row at every status — while the panel below read the snapshot, which
+ * includes travel. Two totals on one screen, both in dollars, neither saying
+ * which the customer was charged, on the booking shape the office adjusts most
+ * often.
+ *
+ * The derivation now lives in `appointmentMoney`, which is pure and therefore
+ * assertable without a database. **This page must hold no money arithmetic of
+ * its own** — that is pinned structurally in `verify-booking-admin.ts`, because
+ * "the two agree" cannot be asserted once they are one function.
  */
-const quote =
-  appointment && appointment.assessment_tier
-    ? assessmentQuote({
-        tier: appointment.assessment_tier,
-        service: appointment.service,
-        slotStart: appointment.slot_start,
-      })
-    : null;
+const money = appointment ? appointmentMoney(appointment) : null;
 
 // A row that does not exist is a 404, the same answer a bad id gets. A database
 // that is down is not — that renders the error card below.
@@ -455,15 +467,20 @@ const confirming =
 
 // What was actually settled, for a row past review. Without this the office can
 // approve an amount and then have no screen anywhere that shows what it was.
-const settled =
-  appointment && appointment.assessment_amount_cents !== null
-    ? {
-        baseCents: appointment.assessment_amount_cents,
-        travelCents: appointment.travel_fee_cents ?? 0,
-        gstCents: appointment.gst_cents ?? 0,
-        totalCents: appointment.total_amount_cents ?? 0,
-      }
-    : null;
+/**
+ * BK-46 ROUTES THIS THROUGH THE SAME DERIVATION THE HEADER USES, and the change
+ * is not cosmetic: it used to key on `assessment_amount_cents !== null` alone,
+ * so a row walked back to `pending_review` by the STATUS DROPDOWN — which
+ * leaves the amount columns behind, unlike `review.ts`'s own `rollBack` — got a
+ * panel headed "Amount settled at approval" over a row nobody had approved.
+ * `rollBack`'s comment describes that outcome exactly and was written to
+ * prevent it on the route it controls; the dropdown was the other way in.
+ */
+const settled = money?.kind === 'settled' ? money : null;
+
+/** BK-46 findings 3 and 4: what the row still owes, and how it was paid. */
+const owes = appointment ? stillOwesPayment(appointment) : false;
+const receipt = appointment ? paymentReceipt(appointment) : null;
 
 /**
  * What the customer will be asked to pay if the office approves as suggested.
@@ -557,13 +574,51 @@ function statusClasses(status: Appointment['status']) {
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Assessment</dt>
             <dd class="text-white">
-              {appointment.assessment_tier ? (
+              {money && money.kind !== 'none' ? (
                 <>
-                  {ASSESSMENT_TIER_NAMES[appointment.assessment_tier]}
-                  <span class="text-zinc-400"> · {formatCents(quote!.baseCents)} + GST</span>
+                  {ASSESSMENT_TIER_NAMES[appointment.assessment_tier!]}
+                  <span class="block text-white text-xs mt-0.5">
+                    {formatCents(money.totalCents)} total incl. GST
+                    {/*
+                      "WEEKEND RATE, 1.5×" IS A CLAIM ABOUT A COMPUTATION, and
+                      a settled figure may not contain it: the office can edit
+                      the amount at approval, so a Saturday row approved at $300
+                      would have asserted a multiplier that is not in the number
+                      beside it — on the dispute screen. Before this ticket the
+                      total was itself a recompute and the pairing was
+                      consistent; making the total a snapshot is what broke it.
+                      A settled row states the FACT (it is a weekend slot); an
+                      estimate states the arithmetic, because there it is true.
+                    */}
+                    {money.afterHours
+                      ? money.kind === 'settled'
+                        ? ' · weekend slot'
+                        : ' · weekend rate, 1.5×'
+                      : ''}
+                  </span>
+                  {/*
+                    TRAVEL IS NAMED WHENEVER IT EXISTS. The old header printed
+                    "$X + GST" above the total, which stopped reconciling the
+                    moment a travel fee was added — the reader could not get
+                    from one number to the other, and the missing figure was
+                    exactly the one being disputed.
+                  */}
                   <span class="block text-zinc-500 text-xs mt-0.5">
-                    {formatCents(quote!.totalCents)} total incl. GST
-                    {quote!.afterHours ? ' · weekend rate, 1.5×' : ''}
+                    {money.kind === 'settled' && money.travelCents > 0
+                      ? `${formatCents(money.baseCents)} assessment + ${formatCents(money.travelCents)} travel + GST`
+                      : `${formatCents(money.baseCents)} + GST`}
+                  </span>
+                  {/*
+                    ON WHOSE AUTHORITY. A settled figure is what the office
+                    approved; an estimate is arithmetic. The screen says which,
+                    because the whole defect was two numbers that did not.
+                  */}
+                  <span class="block text-zinc-500 text-xs mt-0.5">
+                    {money.kind === 'settled'
+                      ? 'Settled at approval'
+                      : money.basis === 'suggestion'
+                        ? 'Estimate — nothing approved yet'
+                        : 'Estimate at today’s prices — no amount was ever settled'}
                   </span>
                 </>
               ) : (
@@ -704,7 +759,34 @@ function statusClasses(status: Appointment['status']) {
             </dd>
           </div>
           <div>
-            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Customer confirmation</dt>
+            {/*
+              NOT "CUSTOMER CONFIRMATION" (BK-46), AND NOT "LAST CUSTOMER
+              EMAIL" EITHER — the second label was this ticket's own first
+              attempt and implementation review caught it as a stronger version
+              of the same lie.
+
+              `confirmation_sent_at` has exactly TWO writers:
+              `booking-commit.ts` when the booking-RECEIVED email goes out, and
+              `sendConfirmationAndStamp` behind the admin entry and the resend
+              button. Under P9 the first of those acknowledges a REQUEST, so
+              "Customer confirmation" told the office a confirmation had gone to
+              somebody who had only been told we had their request.
+
+              But at least FIVE other customer emails stamp nothing: the
+              payment link (`review.ts`), the decline, both expiry messages, the
+              post-payment confirmation `markPaid` sends, and the
+              cancellation/restore notices from `update.ts`. So "last customer
+              email" is false on approved, confirmed, declined, expired and
+              cancelled rows — and worse, `customerStampState` can render
+              "Never sent" for a customer who received three emails.
+
+              The label now claims exactly what the column records and the line
+              beneath names what it does not. **The column cannot answer "has
+              this customer heard from us" without a second one** — recorded in
+              ROADMAP Known traps rather than papered over with a better
+              adjective.
+            */}
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Request / confirmation email</dt>
             <dd>
               {customerStamp === 'sent' ? (
                 <span class="text-white">{formatAdminTimestamp(appointment.confirmation_sent_at!)}</span>
@@ -717,6 +799,15 @@ function statusClasses(status: Appointment['status']) {
               ) : (
                 <span class="text-zinc-600">Not applicable</span>
               )}
+              {/*
+                THE CAVEAT IS PART OF THE FIELD, not a footnote. Without it
+                "Never sent" reads as "this customer has heard nothing from us",
+                which is false for any approved or confirmed row — those emails
+                go out through senders that stamp no column.
+              */}
+              <span class="block text-zinc-600 text-xs mt-1">
+                Payment-link, decline, expiry and cancellation emails are not recorded here.
+              </span>
             </dd>
           </div>
           <div>
@@ -1043,11 +1134,73 @@ function statusClasses(status: Appointment['status']) {
               <dd class="text-white">{formatCents(settled.totalCents)}</dd>
             </div>
           </dl>
-          {appointment.payment_due_at && (
+          {/*
+            THE DUE LINE ASKS WHETHER THE ROW STILL OWES, not whether a column
+            is non-null. `payment_due_at` is never cleared, so its presence
+            describes the past: this panel printed "Payment due by …" on paid
+            bookings, and on expired, declined and cancelled ones, where it
+            invites somebody to chase money on a booking that is closed.
+
+            The pay-now arm is not a fallback. `paymentDeadline` returns no due
+            date whenever the approval lands inside the pay-now threshold, so
+            "owes, no deadline" is an ordinary state and going silent on it
+            would hide a live debt. Same sentence the Payment panel below
+            already uses for the same row.
+          */}
+          {owes && (
             <p class="text-zinc-500 text-xs mt-3">
-              Payment due by {formatSlot(appointment.payment_due_at)} ({TIMEZONE_NOTE}).
+              {appointment.payment_due_at
+                ? `Payment due by ${formatSlot(appointment.payment_due_at)} (${TIMEZONE_NOTE}).`
+                : 'Pay-now booking, no deadline. Chase it by phone.'}
             </p>
           )}
+        </section>
+      )}
+
+      {/*
+        WHAT ARRIVED, AND HOW (BK-46 finding 4).
+
+        `markPaid()` writes `paid_at` and `payment_method` — the shared path for
+        the Stripe webhook AND the Interac button — and until this block nothing
+        rendered either. After a successful payment the office saw a badge
+        reading "Confirmed", a panel headed "Amount settled AT APPROVAL", and a
+        stale due date. They could not see when the money arrived or which way
+        it came.
+
+        That last one is operational, not archival: **card and e-Transfer are
+        the two routes and only one of them has a Stripe dashboard behind it.**
+        An office member asked to refund a booking could not tell from this
+        screen whether to open Stripe or their bank.
+
+        IT IS ITS OWN SECTION RATHER THAN A LINE IN THE PANEL ABOVE, because the
+        two are keyed on different columns. `markPaid`'s paid-after-release
+        branch records real money on a `declined` or `cancelled` row without
+        touching the amount snapshot — hanging this off the settled panel would
+        leave exactly one corner where money arrived and no screen said so.
+      */}
+      {receipt && (
+        <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6">
+          <h2 class="text-white font-semibold mb-1">Payment received</h2>
+          <p class="text-sm text-zinc-200">{receipt.line}</p>
+          {receipt.at && (
+            <p class="text-zinc-500 text-xs mt-1">{formatAdminTimestamp(receipt.at)}</p>
+          )}
+          {/*
+            WHAT ACTUALLY ARRIVED, when it is not what was charged. The two are
+            separate columns "precisely so a disagreement between them is a fact
+            somebody can query rather than a number that quietly overwrote the
+            other" (`db.ts`) — and this is the screen that query is for. Silent
+            when they agree: restating the total under a heading that already
+            says "received" is noise.
+          */}
+          {appointment.paid_amount_cents !== null &&
+            appointment.total_amount_cents !== null &&
+            appointment.paid_amount_cents !== appointment.total_amount_cents && (
+              <p class="text-amber-300 text-xs mt-2">
+                {formatCents(appointment.paid_amount_cents)} arrived against{' '}
+                {formatCents(appointment.total_amount_cents)} settled.
+              </p>
+            )}
         </section>
       )}
 

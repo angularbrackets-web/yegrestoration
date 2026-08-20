@@ -1160,10 +1160,34 @@ function internalNotification(input: BookingNotificationInput): Message {
     row('Email', input.email || NO_EMAIL_NOTICE),
     row('Service', input.serviceLabel),
     // BK-31. The office is about to approve this and set an amount, so the tier
-    // and the computed price belong on the message they decide from. "Not
-    // chosen" rather than a blank: an admin entry legitimately has none, and a
-    // blank row reads as a rendering fault.
-    row('Assessment', assessmentSummary(input)),
+    // and the price belong on the message they decide from. "Not chosen" rather
+    // than a blank: an admin entry legitimately has none, and a blank row reads
+    // as a rendering fault.
+    //
+    // BK-46 MAKES IT THE SETTLED FIGURE WHERE ONE EXISTS. `assessmentSummary`
+    // recomputes with `assessmentQuote({tier, service, slotStart})` and passes
+    // no travel fee, so it defaulted to zero and read today's price table — the
+    // same defect the appointment header carried, in the office's own copy of
+    // the booking. Left alone, the customer's confirmation would have named the
+    // snapshot (BK-45) while the office's message named a recomputation of it,
+    // for one appointment. Before approval there is no snapshot and the quote
+    // is the right answer, which is why this is a fallback and not a rewrite.
+    //
+    // NOTHING SENDS THIS MESSAGE ON THE PAYMENT PATH TODAY, and the fix is
+    // still worth making rather than deferred: `plan.internal` is delivered
+    // only by `sendBookingNotifications`, whose production caller is the public
+    // create route — and that route passes `settled: null`, because at
+    // submission there is no snapshot. `planForAppointment` does carry one, and
+    // its own header records that the internal half of that plan is built and
+    // never delivered. So this corrects a figure that is currently unreachable,
+    // in the one builder that would otherwise disagree with the customer's copy
+    // the moment anybody wires the office message to a post-approval send.
+    row(
+      'Assessment',
+      input.settled
+        ? `${input.assessmentTier ? ASSESSMENT_TIER_NAMES[input.assessmentTier] : 'Settled'} — ${formatCents(input.settled.totalCents)} total incl. GST${input.settled.travelCents > 0 ? ` (incl. ${formatCents(input.settled.travelCents)} travel)` : ''}`
+        : assessmentSummary(input),
+    ),
     row('Address', fullAddress(input)),
     row('Payment', insurance ? 'Insurance claim' : 'Private pay'),
   ];

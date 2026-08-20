@@ -706,7 +706,10 @@ export async function markPaid(
  * `confirmation_sent_at` — `sendConfirmationAndStamp` writes that column, this
  * does not, and it must not start, because the column currently records the
  * REQUEST acknowledgement and stamping it here would overwrite that fact. The
- * column's mislabelling is BK-46's to fix, whole.
+ * column's mislabelling was BK-46's. BK-46 renamed the panel field to
+ * "Request / confirmation email" and named the senders it does NOT record —
+ * this one among them. It did NOT make the column answer "has the customer
+ * heard from us"; that needs a second column, and it is recorded as open.
  *
  * One deadline over both sends, run concurrently — the same reasoning
  * `sendBoundaryMail` states: two serial budgets stack past the platform's

@@ -128,7 +128,8 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   so a row re-approved after a previous payment carries a stale stamp; an
   approved row's crossing is refused outright for that reason.
 
-- **A column written by a proven route and read by no surface passes every test
+- **RESOLVED 2026-08-20 by BK-46 — kept for the shape, not as open work.**
+  **A column written by a proven route and read by no surface passes every test
   in the suite.** `markPaid()` writes `paid_at` and `payment_method` — the
   shared path for both the Stripe webhook and the Interac button — and
   **nothing renders either one.** After a successful payment the appointment
@@ -146,8 +147,8 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   transactional one — the money is correct, the record of it is not.
   **Owner: BK-46.**
 
-- **The appointment header's total omits the travel fee, structurally and at
-  every status.** `[id].astro:87` calls `assessmentQuote({tier, service,
+- **RESOLVED 2026-08-20 by BK-46.** **The appointment header's total omits the
+  travel fee, structurally and at every status.** `[id].astro:87` calls `assessmentQuote({tier, service,
   slotStart})` and does not pass `travelFeeCents`, which defaults to zero
   (`booking-pricing.ts:188`). The header's *"$606.38 total incl. GST"* is
   therefore base + GST, while the "Amount settled at approval" panel below it
@@ -165,8 +166,9 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   `booking-email.ts:629`. Severity: moderate-high — it is the screen read
   during a dispute about the amount. **Owner: BK-46.**
 
-- **The Notifications panel reports a "Customer confirmation" that is really the
-  request acknowledgement.** `booking-commit.ts:185` stamps
+- **PARTLY FIXED 2026-08-20 by BK-46, and the remainder is bigger than the
+  label.** **The Notifications panel reported a "Customer confirmation" that is
+  really the request acknowledgement.** `booking-commit.ts:185` stamps
   `confirmation_sent_at` when the booking-*received* email goes out, and the
   detail page renders that column under the label **CUSTOMER CONFIRMATION**. A
   `pending_review` row therefore states that a confirmation was sent to a
@@ -175,7 +177,25 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   REQUEST") and the same audience: the person deciding what to say on the
   phone. The Resend button is correctly hidden here and `resend.ts:84` refuses
   any non-`confirmed` row, so this is a labelling failure and **not** a second
-  route to an unpaid confirmation. Severity: moderate. **Owner: BK-46.**
+  route to an unpaid confirmation. Severity: moderate.
+
+  **What BK-46 fixed:** the field is now "Request / confirmation email" and
+  carries a line naming the senders it does not record.
+
+  **What BK-46 could NOT fix, and this is the real defect:**
+  `confirmation_sent_at` has two writers — `booking-commit.ts` and
+  `sendConfirmationAndStamp` — while **at least five other customer emails stamp
+  nothing**: the payment link, the decline, both expiry messages, the
+  post-payment confirmation `markPaid` sends, and the cancellation/restore
+  notices. So the column cannot answer *"has this customer heard from us"*, and
+  `customerStampState` can render **"Never sent"** for a customer who received
+  three emails. The list page has the same badge from the same column
+  (`index.astro`'s "No confirmation sent").
+
+  BK-46's first attempt relabelled it *"Last customer email"*, which was a
+  STRONGER version of the same lie and was caught at implementation review.
+  Making it true means stamping per message type — a schema and write-path
+  change across five senders. **Owner: unassigned, needs a ticket.**
 
 - **Three surfaces still speak pre-P9, and none of them had a constant to
   follow the rename.** The appointment header labels `created_at` as
@@ -215,7 +235,9 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   copy** — two statements of one rule is the drift this repo has paid for more
   than once. Read them in `CLAUDE.md`.
 
-- **The office's copy of a confirmed booking states a DIFFERENT figure from the
+- **RESOLVED 2026-08-20 by BK-46** — `internalNotification` reads the snapshot
+  where there is one, so the two copies of one booking name one total. **The
+  office's copy of a confirmed booking states a DIFFERENT figure from the
   customer's, and BK-45 made the gap visible rather than creating it.**
   `internalNotification` (`booking-email.ts`) renders `assessmentSummary`, which
   calls `assessmentQuote({tier, service, slotStart})` with **no
@@ -258,7 +280,20 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   visible the moment BK-46 renders those columns** — the screen would show a
   payment date and method belonging to a cycle that was refunded or superseded.
   Severity: moderate, and it is a record-truth failure rather than a money one.
-  **Owner: BK-46.**
+
+  **BK-46 CLOSED THE DISPLAY HALF ONLY, 2026-08-20, and the split is
+  deliberate.** `paymentReceipt` gates on `payment_status` — the column the
+  payment path actually maintains — so a re-approved row reports no payment
+  rather than the previous cycle's. **The prediction above came true exactly as
+  written**, and BK-46's plan review caught it before it shipped.
+
+  **The columns are still never cleared.** That is a change to `approve` and
+  `rollBack` — a write path, on a system taking live card payments — separable
+  from a display fix and deliberately not done inline. It remains a record-truth
+  defect: a query over `paid_at` still returns rows that were not paid on that
+  cycle. **Owner: unassigned, needs a ticket.** Whoever writes it decides whether
+  re-approval clears the columns or whether that history is worth keeping
+  somewhere else.
 
 - **BK-47 inherits a copy dependency it will break.** The Update panel says
   approving is *"in “Review this request” above"*, and that is true only because
@@ -1482,7 +1517,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
 | BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Client answer 2026-08-20: no hand-confirm. | Reviewed | ✅ **committed 2026-08-20** on `deploy-2-prepay` — plan review (2 blockers) and implementation review (2 blockers) both passed after fixes; 12 red-first rows; all 23 verify scripts green. **Not deployed.** |
 | BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | ✅ **implemented 2026-08-20** — plan review (5 blockers / 8 should-fix / 3 nits) and implementation review (3 blockers / 3 should-fix / 6 nits) both passed after fixes; merged on the payment path per the user's six decisions; 13 red-first rows; typecheck 0, build clean, all 23 verify scripts green. **Not deployed.** |
-| BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | draft — see `tickets/BK-46.md` |
+| BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | ✅ **implemented 2026-08-20** — plan review returned 6 blockers, all fixed; `appointmentMoney` replaces the header's own derivation; the due line asks whether the row owes; a Payment received panel gives `paid_at`/`payment_method` their first reader; the mail label tells the truth. 10 red-first rows. **Not deployed.** |
 | BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
@@ -1604,8 +1639,13 @@ together or the site tells a lie between deploys.
    are two surfaces disagreeing, and one is a column with a writer and no
    reader. **Recorded as BK-46 (Reviewed) and BK-47 (Light); see Known traps.**
    The method correction this argues for is a pin that asserts a RELATIONSHIP
-   between two surfaces — BK-46 owes "header total equals settled total for a
-   row with travel" — rather than a sixth per-route script.
+   between two surfaces rather than a sixth per-route script. **BK-46 answered
+   it differently and the answer is worth recording:** it did not assert "header
+   total equals settled total", because it made the two ONE derivation, and an
+   equality between two readings of one function cannot fail. What it asserts
+   instead is the function's own answers, plus a source pin that the page holds
+   no second derivation — which is the same claim, stated where it can still
+   break.
 
    **ROLLOUT — STEPS 1, 2 AND 3 ARE DONE. DEPLOY 2 IS LIVE (2026-08-19).**
 

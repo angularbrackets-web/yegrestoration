@@ -22,6 +22,10 @@ import { fileURLToPath } from 'url';
 
 import { isPublicAdminPath, ADMIN_LOGIN_PATH } from '../src/lib/auth';
 import {
+  appointmentMoney,
+  paymentReceipt,
+  stillOwesPayment,
+  type MoneyBearingAppointment,
   ADMIN_APPOINTMENTS_PATH,
   ADMIN_APPOINTMENT_CREATE_ENDPOINT,
   ADMIN_APPOINTMENT_NEW_PATH,
@@ -52,6 +56,7 @@ import {
 // literal, and importing the constant is how it stopped being one.
 import { APPOINTMENT_STATUSES } from '../src/lib/booking-status';
 import { SUPPORT_PHONE } from '../src/lib/booking-config';
+import { gstFor } from '../src/lib/booking-pricing';
 import type { Appointment, AppointmentStatus, Lead } from '../src/lib/db';
 import { fillTemplate, REPLY_TEMPLATES, SERVICE_FALLBACK } from '../src/lib/reply-templates';
 
@@ -1016,9 +1021,359 @@ console.log('\nNothing in the admin helpers reads the environment');
   check(!source.includes('import.meta.env'), 'booking-admin.ts reads no import.meta.env');
   check(!source.includes('process.env'), 'booking-admin.ts reads no process.env');
   check(!source.includes('getDb'), 'booking-admin.ts touches db.ts for types only, never its client');
+  // MATCHED AS A TYPE-ONLY IMPORT, NOT AS A FIXED LINE. This pinned the exact
+  // string `import type { Appointment } from './db'` and went red when BK-46
+  // added `AppointmentStatus` to the same import — a change that satisfies
+  // every word of the message below. The arm was not relying on the old
+  // behaviour; it was over-specified, so the assertion was widened to the
+  // property it claims rather than the fix being contorted to match it.
   check(
-    source.includes("import type { Appointment } from './db'"),
+    /import type \{[^}]*\bAppointment\b[^}]*\} from '\.\/db'/.test(source),
     'and takes those types from db.ts rather than restating the schema',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-46 — one money derivation, and it READS the snapshot');
+// ---------------------------------------------------------------------------
+//
+// THE FIXTURE DISAGREES WITH ARITHMETIC ON PURPOSE, and a later reader must not
+// "fix" it. `gst_cents` is NOT 5% of the subtotal and `total_amount_cents` is
+// NOT base + travel + gst. No row `review.ts` writes can look like this — it
+// computes `gstFor(subtotal)` once and adds. That is exactly why the fixture is
+// built by hand: an expectation that agreed with the arithmetic could not tell
+// "reads the column" from "recomputes", which is the whole property under test.
+//
+// Two separate disagreements, because they catch two separate breaks: a header
+// that recomputes GST, and a header that adds the parts up itself.
+{
+  const SLOT = new Date('2026-08-24T19:30:00.000Z'); // a Monday, so no weekend rate
+  const base = (over: Partial<MoneyBearingAppointment> = {}): MoneyBearingAppointment => ({
+    status: 'confirmed',
+    service: 'water',
+    slot_start: SLOT,
+    assessment_tier: 'standard',
+    assessment_amount_cents: 57750,
+    travel_fee_cents: 4600,
+    gst_cents: 9999,
+    total_amount_cents: 88888,
+    ...over,
+  });
+
+  {
+    const m = appointmentMoney(base());
+    check(m.kind === 'settled', 'a confirmed row with a snapshot is settled');
+    if (m.kind === 'settled') {
+      check(m.gstCents === 9999, 'the GST is READ from the column, not recomputed at 5%');
+      check(m.totalCents === 88888, 'and the total is READ, not added up from the parts');
+      check(m.travelCents === 4600, 'and travel is carried — the omission that filed this ticket');
+      check(
+        m.totalCents > m.baseCents + gstFor(m.baseCents),
+        'so the header total exceeds base + GST, which the old one never did',
+      );
+    }
+  }
+
+  // PENDING_REVIEW OUTRANKS A SURVIVING SNAPSHOT, and the row is reachable:
+  // the status dropdown walks a row back without nulling the amount columns,
+  // while `review.ts`'s own rollBack nulls them and says why.
+  {
+    const m = appointmentMoney(base({ status: 'pending_review' }));
+    check(
+      m.kind === 'estimate' && m.basis === 'suggestion',
+      'a pending_review row shows the SUGGESTION even when a snapshot survived a walk-back',
+    );
+    if (m.kind === 'estimate') {
+      check(m.totalCents !== 88888, 'and does not quote the stale settled total');
+    }
+  }
+
+  // A DECLINE FROM THIS MORNING. It carries a tier from the form and no
+  // amounts, and the copy for it must claim nothing about the row's age — an
+  // earlier draft called this "predates the amount snapshot", which was false
+  // twice over.
+  for (const status of ['declined', 'cancelled'] as const) {
+    const m = appointmentMoney(
+      base({ status, assessment_amount_cents: null, gst_cents: null, total_amount_cents: null }),
+    );
+    check(
+      m.kind === 'estimate' && m.basis === 'never-settled',
+      `a ${status} row that was never approved is an estimate, basis never-settled`,
+    );
+  }
+
+  // The legacy rows really do land in `none`: `assessment_tier` is migration
+  // 007's and was never backfilled.
+  check(
+    appointmentMoney(base({ assessment_tier: null })).kind === 'none',
+    'a row with no tier has no money answer at all — not $0.00',
+  );
+
+  // The $0 approval WAS settled, at zero.
+  {
+    const m = appointmentMoney(
+      base({
+        assessment_amount_cents: 0,
+        travel_fee_cents: 0,
+        gst_cents: 0,
+        total_amount_cents: 0,
+      }),
+    );
+    check(m.kind === 'settled' && m.totalCents === 0, 'a $0 approval is settled, not an estimate');
+  }
+
+  // A PARTIAL SNAPSHOT IS NOT RENDERED AS A WHOLE ONE. The `?? 0` this avoids
+  // would print $0.00 for a real GST amount on the dispute screen.
+  check(
+    appointmentMoney(base({ gst_cents: null })).kind === 'estimate',
+    'a partial snapshot falls back to an estimate rather than printing a zero it invented',
+  );
+
+  // AC3(a) — pending_review with NO snapshot, the ordinary unreviewed booking.
+  // The precedence arm below constructs one WITH a snapshot, which is the
+  // interesting case, and a case that only ever appears with a snapshot is a
+  // case nobody has checked in its normal state.
+  {
+    const m = appointmentMoney(
+      base({
+        status: 'pending_review',
+        assessment_amount_cents: null,
+        gst_cents: null,
+        total_amount_cents: null,
+      }),
+    );
+    check(
+      m.kind === 'estimate' && m.basis === 'suggestion',
+      'an ordinary unreviewed booking is a suggestion',
+    );
+  }
+
+  // AC3(c) — approved and awaiting payment, which is where the office spends
+  // most of its time and which nothing else here passes to this function.
+  {
+    const m = appointmentMoney(base({ status: 'approved_awaiting_payment' }));
+    check(
+      m.kind === 'settled' && m.totalCents === 88888,
+      'an approved row reads its snapshot, exactly as a confirmed one does',
+    );
+  }
+
+  // The weekend note survives on settled rows — it used to render for every
+  // tiered row and would otherwise have vanished with the recompute.
+  {
+    const sat = appointmentMoney(base({ slot_start: new Date('2026-08-22T19:30:00.000Z') }));
+    check(
+      sat.kind === 'settled' && sat.afterHours === true,
+      'a Saturday settled row still knows it is a weekend booking',
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-46 — what the row still owes, and how it was paid');
+// ---------------------------------------------------------------------------
+{
+  const owe = (over: Record<string, unknown> = {}) =>
+    stillOwesPayment({
+      status: 'approved_awaiting_payment',
+      payment_status: 'pending',
+      total_amount_cents: 41895,
+      ...over,
+    } as Parameters<typeof stillOwesPayment>[0]);
+
+  check(owe(), 'an approved unpaid row owes');
+  check(!owe({ payment_status: 'paid' }), 'a paid row does not');
+  check(!owe({ status: 'confirmed' }), 'nor a confirmed one');
+  for (const status of ['payment_expired', 'declined', 'cancelled', 'pending_review'] as const) {
+    check(!owe({ status }), `nor a ${status} row carrying a stale payment_due_at`);
+  }
+  // The $0 approval sits at approved_awaiting_payment until markPaid moves it,
+  // and a row that owes $0.00 does not owe.
+  check(!owe({ total_amount_cents: 0 }), 'and a $0 approval owes nothing');
+
+  const receipt = (over: Record<string, unknown> = {}) =>
+    paymentReceipt({
+      payment_status: 'paid',
+      payment_method: 'stripe',
+      paid_at: new Date('2026-08-20T18:00:00.000Z'),
+      interac_marked_by: null,
+      interac_marked_at: null,
+      ...over,
+    } as Parameters<typeof paymentReceipt>[0]);
+
+  check(receipt()?.line === 'Paid by card', 'a card payment says so');
+  check(
+    receipt({ payment_method: 'interac', interac_marked_by: 'dana' })?.line ===
+      'Marked paid by dana — e-Transfer',
+    'an e-Transfer names the person who asserted it — it is a human claim about money',
+  );
+  // The actor is optional on the column, so the passive is the fallback rather
+  // than the string "null" on the screen the office reads during a dispute.
+  check(
+    receipt({ payment_method: 'interac' })?.line === 'Marked paid — e-Transfer',
+    'and degrades to the passive rather than printing "by null"',
+  );
+  check(receipt({ payment_method: 'none' })?.line === 'Approved at no charge', 'a $0 approval says so');
+  check(receipt({ payment_method: 'onsite' })?.line?.includes('on site') === true, 'a pre-prepay row says so');
+
+  // THE STALE CYCLE THE ROADMAP PREDICTED BY NAME. Nothing clears `paid_at` or
+  // `payment_method`, so a paid row walked back and re-approved carries the
+  // previous cycle's stamp. Gated on `payment_status`, which the payment path
+  // does maintain.
+  check(
+    receipt({ payment_status: 'pending' }) === null,
+    'a re-approved row does NOT report the previous cycle\'s payment',
+  );
+  check(receipt({ payment_method: null }) === null, 'and an unpaid row reports nothing');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-46 — the page holds no money arithmetic of its own');
+// ---------------------------------------------------------------------------
+//
+// THE STRUCTURAL HALF, and it is what carries the ticket's relationship claim.
+// Once the header and the panel read one function, "the two totals agree"
+// cannot fail and is not asserted as though it could. What CAN fail is somebody
+// adding a second derivation back, and that is what this catches.
+//
+// ANCHORED TO THE ASSESSMENT CELL, not to the file. The file legitimately calls
+// `assessmentQuote` twice more — `suggestedQuote` is the approval form's
+// pre-fill and `confirming` is the confirm step — so a file-wide ban would be
+// permanently red or would delete the office's pre-fill. And comments are
+// stripped first: this ticket ADDS prose naming these very identifiers, and a
+// pin a comment can satisfy is the defect the ROADMAP already records.
+{
+  const page = readFileSync(resolve(root, 'src/pages/admin/appointments/[id].astro'), 'utf8');
+  const stripped = page
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+
+  const start = stripped.indexOf('uppercase tracking-wide mb-1">Assessment<');
+  check(start > 0, 'the Assessment cell is findable in the page');
+  const cell = stripped.slice(start, stripped.indexOf('</dd>', start));
+
+  for (const forbidden of [
+    'assessmentQuote(',
+    'gstFor(',
+    'assessment_amount_cents',
+    'travel_fee_cents',
+    'gst_cents',
+    'total_amount_cents',
+  ]) {
+    check(
+      !cell.includes(forbidden),
+      `the header's Assessment cell does not reach for ${forbidden} — one derivation, not two`,
+    );
+  }
+  check(
+    stripped.includes('appointmentMoney(appointment)'),
+    'and the page derives its money from appointmentMoney',
+  );
+
+  // ── AND THE BAN IS FILE-WIDE, NOT CELL-WIDE ─────────────────────────────
+  //
+  // The cell slice above catches the defect written INLINE. It does not catch
+  // it hoisted: a `const headerTotal = a.assessment_amount_cents! +
+  // gstFor(a.assessment_amount_cents!)` in the frontmatter, rendered as
+  // `{formatCents(headerTotal ?? money.totalCents)}`, is finding 1 restored in
+  // full — second derivation, travel omitted, GST recomputed — and the cell
+  // names none of the banned identifiers. Implementation review wrote that
+  // patch and the suite stayed green.
+  //
+  // Plan review had named this exact failure mode as "any inline arithmetic
+  // over the four money columns", and the first implementation answered only
+  // the word "inline". The four amount columns now have NO reader in this file
+  // at all — `appointmentMoney` reads them — so their absence is assertable
+  // outright, which is stronger than any spelling-based ban.
+  for (const column of ['assessment_amount_cents', 'travel_fee_cents', 'gst_cents']) {
+    check(
+      !stripped.includes(column),
+      `${column} is read by appointmentMoney and by nothing on the page`,
+    );
+  }
+  // `total_amount_cents` is exempt and the exemption is narrow: the
+  // payment-mismatch line compares what ARRIVED against what was settled, which
+  // is a comparison rather than a derivation. It may appear only beside
+  // `paid_amount_cents`.
+  for (const [i, line] of stripped.split('\n').entries()) {
+    if (!line.includes('total_amount_cents')) continue;
+    const window = stripped.split('\n').slice(Math.max(0, i - 4), i + 5).join('\n');
+    check(
+      window.includes('paid_amount_cents'),
+      `total_amount_cents on page line ${i + 1} is part of the paid-vs-settled comparison, not a derivation`,
+    );
+  }
+  // One GST recomputation survives in this file — the confirm step, which
+  // quotes a number the office is about to approve. Counted rather than banned,
+  // so it cannot quietly become two.
+  check(
+    (stripped.match(/gstFor\(/g) ?? []).length === 1,
+    'and exactly one gstFor call survives — the confirm step, never the header',
+  );
+  // The pre-fill and the confirm step are NOT collateral damage: they
+  // legitimately recompute, and a pin that killed them would have been a worse
+  // defect than the one it fixed.
+  check(
+    (stripped.match(/assessmentQuote\(/g) ?? []).length === 1,
+    'while the approval pre-fill still recomputes — exactly one call survives, and it is not the header',
+  );
+
+  // A COLUMN WITH A WRITER AND NO READER IS THE DEFECT. `markPaid` has written
+  // `paid_at` and `payment_method` since BK-32 and nothing rendered them.
+  //
+  // ASSERTED THROUGH THE HELPER, not by grepping the column names. The first
+  // version was `stripped.includes(column) || stripped.includes(...)`, whose
+  // right-hand disjunct carried both iterations on its own — the page reads
+  // those columns INSIDE `paymentReceipt`, so neither name appears here and the
+  // check asserted less than its message claimed.
+  check(
+    stripped.includes('paymentReceipt(appointment)') && stripped.includes('receipt &&'),
+    'paid_at and payment_method reach the screen through paymentReceipt, and it is rendered',
+  );
+  check(
+    stripped.includes('stillOwesPayment('),
+    'and the due line asks whether the row owes',
+  );
+  // THE PROPERTY IS "GUARDED BY `owes`", NOT "NEVER MENTIONED".
+  //
+  // The first version of this banned `payment_due_at` in any conditional
+  // position — and went red on correct code, because the column IS read once
+  // the row is known to owe: `formatSlot` takes a non-null Date, so the ternary
+  // choosing between the deadline and the pay-now sentence has to test it. The
+  // defect was never the test; it was the test standing ALONE, deciding whether
+  // to render at all from a column nothing clears.
+  //
+  // So every read is required to sit inside the `owes` block. Ordering by line
+  // rather than by parsing, which is enough here and honest about being a
+  // source pin.
+  // TWO GUARDS ARE LEGITIMATE, and the second one is why this is a window
+  // search rather than a single string. The settled panel's line is gated on
+  // `owes`; the Payment panel — the Interac mark-paid form — is gated on
+  // `isAwaitingPayment`, which is the same question asked by status alone for a
+  // panel that only exists on that status. Either establishes that the row is
+  // still owing BEFORE the column is read, which is the whole property.
+  const lines = stripped.split('\n');
+  for (const [i, line] of lines.entries()) {
+    if (!line.includes('appointment.payment_due_at')) continue;
+    const before = lines.slice(Math.max(0, i - 12), i).join('\n');
+    check(
+      /\b(owes|isAwaitingPayment) &&/.test(before),
+      `payment_due_at on page line ${i + 1} is read inside a still-owing guard, never as the guard itself`,
+    );
+  }
+
+  // THE PAID-VS-SETTLED LINE. New behaviour on a money screen, and the first
+  // implementation shipped it with no assertion at all: it must be guarded on
+  // the payment having happened, or it fires on every unpaid row where
+  // `paid_amount_cents` is null.
+  const mismatch = stripped.slice(
+    stripped.indexOf('paid_amount_cents'),
+    stripped.indexOf('arrived against'),
+  );
+  check(
+    mismatch.includes('!== null') && mismatch.includes('!== appointment.total_amount_cents'),
+    'the paid-vs-settled line fires only on a real payment that differs from the settled total',
   );
 }
 
