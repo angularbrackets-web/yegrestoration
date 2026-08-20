@@ -62,6 +62,23 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **A pin whose MESSAGE describes the claim while its ASSERTION covers half of
+  it.** `verify-booking-email.ts` asserted *"the office subject says REQUEST,
+  not \"New booking\""* — and checked only the subject. The office email's BODY
+  heading was hardcoded `New booking` in both arms, ten lines from the string
+  the message names, so every office notification for a `pending_review` request
+  was titled "NEW REQUEST #35" and opened with "New booking". The one audience
+  that has to act on the distinction was told both things in one email.
+  **Found by the first real end-to-end booking on production (#35, 2026-08-19),
+  not by any of the 23 gates.** Fixed the same day with both arms pinned, and
+  with the mirror pinned too — a fix that made the heading unconditionally
+  "New request" would have broken the confirmed message identically.
+  **The lesson is about the assertion's message, not its logic:** wording a pin
+  as though it covers the claim is how the claim stops being checked, because
+  the next reader greps the message and believes it. Severity: low impact, high
+  recurrence — this is the tenth member of the family this repo records.
+
+
 **`verify:booking:commit` is at the ceiling of its slot supply (found 2026-08-18,
 BK-31; severity: low, owner: unassigned).** The script draws bookable slots from
 the 14-day window minus Fridays — about 60 — and `nextSlot()` spends one per

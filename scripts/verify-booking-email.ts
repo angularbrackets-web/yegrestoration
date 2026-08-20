@@ -1017,6 +1017,34 @@ console.log('\nBK-23 — a request must never claim a booking');
     office.subject.includes('REQUEST'),
     'the office subject says REQUEST, not "New booking" — it is a decision to make, not news',
   );
+  // AND THE BODY, IN BOTH ARMS. The assertion above is worded as though it
+  // covers the claim and covers only the subject line — so the office was sent
+  // "NEW REQUEST #35" with "New booking" as its first line, and every gate
+  // stayed green. Caught by the first real booking on production.
+  //
+  // The office is the ONE audience that has to act on request-vs-booking, and
+  // an email that contradicts itself about which it is, is worse than one that
+  // is merely stale.
+  for (const [label, body] of [
+    ['html', office.html],
+    ['text', office.text],
+  ] as const) {
+    check(
+      !/New booking/i.test(body),
+      `the office ${label} body does not call a request a "New booking" — the subject already says REQUEST, and the two must not disagree`,
+    );
+    check(
+      /needs review/i.test(body),
+      `and the office ${label} body says it needs review, which is the action it is asking for`,
+    );
+  }
+  // The confirmed message is the other half: there "New booking" is TRUE, and a
+  // fix that made the heading unconditional would be the same defect mirrored.
+  const confirmedOffice = planBookingNotifications({ ...INSURANCE, messageType: 'confirmed' }).internal;
+  check(
+    /New booking/i.test(confirmedOffice.html) && /New booking/i.test(confirmedOffice.text),
+    'while a CONFIRMED booking still reads "New booking" to the office — the branch cuts both ways',
+  );
 
   // --- the confirmed message is unchanged in the ways that matter
   check(

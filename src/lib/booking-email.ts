@@ -966,9 +966,22 @@ function internalNotification(input: BookingNotificationInput): Message {
     row('SMS consent', input.smsConsent ? 'Yes' : 'No'),
   );
 
+  // THE HEADING BRANCHES, AND IT DID NOT UNTIL 2026-08-19.
+  //
+  // BK-23 branched the SUBJECT and left both bodies saying "New booking". So
+  // the office received a message titled "NEW REQUEST #35" whose first line
+  // said "New booking" — telling the one audience that has to act on the
+  // distinction the opposite of what the subject told them, in the same email.
+  // Found by the first real end-to-end booking on production, not by a gate.
+  //
+  // The pin that should have caught it read `the office subject says REQUEST,
+  // not "New booking"` — wording that describes the claim while asserting only
+  // half of it, ten lines from the string it names. Both bodies are pinned now.
+  const heading = isRequest ? 'New request — needs review' : 'New booking';
+
   const html = [
     WRAP_OPEN,
-    '<h1 style="font-size:20px;margin:0 0 16px;">New booking</h1>',
+    `<h1 style="font-size:20px;margin:0 0 16px;">${escapeHtml(heading)}</h1>`,
     table(rows),
     input.filesAttached > 0
       ? '<p style="margin:16px 0 0;color:#666;font-size:13px;">Uploaded files are in the admin panel — the Blob store is private, so there is no direct link.</p>'
@@ -977,7 +990,7 @@ function internalNotification(input: BookingNotificationInput): Message {
   ].join('');
 
   const text = [
-    `New booking #${input.id}`,
+    `${heading} #${input.id}`,
     '',
     `When:        ${input.slotLabel} (${TIMEZONE_NOTE})`,
     `Name:        ${input.name}`,
