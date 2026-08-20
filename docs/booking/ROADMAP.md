@@ -148,6 +148,30 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   lies in the alarming direction. **Owner: nobody — the probe is documentation,
   not code.**
 
+- **A refund issued in Stripe does not reach this system, and BK-46 just made
+  that visible.** There is no refund code anywhere — `refunds.create` appears
+  nowhere in `src/`, and the webhook handles no refund event — so a refund taken
+  in the Stripe dashboard leaves `payment_status = 'paid'`, `paid_at` stamped
+  and `paid_amount_cents` unchanged. **The appointment screen therefore states
+  "Payment received — Paid by card" on a booking that was refunded in full.**
+
+  This is not new, but its severity changed on 2026-08-20: until BK-46 those
+  columns were rendered by nothing, so the screen was silent rather than wrong.
+  Giving them their first reader also gave the stale state its first voice.
+  Observed while planning the refund of live test booking #36.
+
+  **Operationally**, until BK-33 lands: a refunded booking must be cancelled
+  through the admin panel as well, and the office should treat "Payment
+  received" on a `cancelled` row as meaning *money was taken at some point*,
+  not *money is still ours*. **Refund in Stripe FIRST, then cancel** — the
+  cancellation email says "nothing further is needed from you" and mentions no
+  money, so cancelling first tells a customer their booking is off while the
+  refund is still unstarted.
+
+  Severity: moderate, and it is a record-truth failure rather than a money one —
+  the money is correct in Stripe, which is the system of record for it.
+  **Owner: BK-33**, which already scopes the reconciliation webhook.
+
 - **RESOLVED 2026-08-20 by BK-46 — kept for the shape, not as open work.**
   **A column written by a proven route and read by no surface passes every test
   in the suite.** `markPaid()` writes `paid_at` and `payment_method` — the
