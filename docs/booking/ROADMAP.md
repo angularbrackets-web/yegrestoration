@@ -1303,9 +1303,17 @@ together or the site tells a lie between deploys.
 
    | # | Step | Why it is safe here and nowhere else |
    | --- | --- | --- |
-   | 1 | `migrate --target prod` applies **007 and 008** | Additive and widening only. 008 does NOT touch the unique index and does NOT move the column default, so the code still live keeps working unchanged. Its CHECK permits `booked` *and* the new statuses precisely so the old code can keep inserting during the window |
+   | 1 | `migrate --target prod --only 007-assessment-tier,008-review-lifecycle,010-payments` | Additive and widening only. 008 does NOT touch the unique index and does NOT move the column default, so the code still live keeps working unchanged. Its CHECK permits `booked` *and* the new statuses precisely so the old code can keep inserting during the window |
    | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
-   | 3 | `migrate --target prod` applies **009** | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
+   | 3 | `migrate --target prod` (bare — 009 is all that is left) | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
+
+   **`--only` IS NOT OPTIONAL IN STEP 1, and this was found during the rollout
+   itself on 2026-08-19.** `migrate.ts` applies every pending migration in
+   order and had no way to apply a subset — so a bare `--target prod` at step 1
+   would have applied **009 as well**, which is the contract half, under the
+   old code. That is the 2026-08-18 outage, reproduced by following this table.
+   The flag was added for exactly this and refuses unknown names rather than
+   silently applying nothing.
 
    **BK-32's migration (now 010) has no such constraint** — it only adds columns
    and a table — so it goes with step 1. The general rule this replaces the old

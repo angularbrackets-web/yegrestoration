@@ -3,6 +3,24 @@
 //   npx tsx scripts/migrate.ts --target dev            apply pending migrations to DATABASE_URL_DEV
 //   npx tsx scripts/migrate.ts --target prod           apply them to DATABASE_URL
 //   npx tsx scripts/migrate.ts --target dev --status   list applied and pending
+//   npx tsx scripts/migrate.ts --target prod --only 007-assessment-tier,010-payments
+//                                                      apply ONLY those, in file order
+//
+// **`--only` EXISTS BECAUSE SOME DEPLOYS MUST SPLIT A MIGRATION SET IN HALF,
+// AND WITHOUT IT THE DOCUMENTED PROCEDURE WAS UNPERFORMABLE.**
+//
+// P9's rollout is expand/deploy/contract: 007, 008 and 010 are additive and go
+// BEFORE the code, while 009 rebuilds the slot index, narrows the CHECK and
+// moves the column default — so only the new code survives it and it must go
+// AFTER. A bare `--target prod` applies every pending migration in order, 009
+// included. Following ROADMAP step 1 with this script would therefore have
+// reproduced the 2026-08-18 outage exactly: the contract half landing under
+// code that cannot resolve against it.
+//
+// The general rule: **a migration that only ADDS may go before the deploy; one
+// that RENAMES, NARROWS a CHECK, or REBUILDS an index that live code names must
+// go after it.** When a pending set contains both kinds, `--only` is how the
+// two halves are separated.
 //
 // **`--target` IS REQUIRED, AND THAT IS THE WHOLE POINT OF THIS BLOCK.**
 //
@@ -59,6 +77,41 @@ loadEnv(resolve(root, '.env.local'));
 loadEnv(resolve(root, '.env'));
 
 const statusOnly = process.argv.includes('--status');
+
+// ── --only ─────────────────────────────────────────────────────────────────
+// A comma-separated list of migration names. Pending migrations NOT named are
+// left pending; named ones already applied are reported and skipped, so the
+// flag is idempotent in the same way a bare run is.
+//
+// UNKNOWN NAMES ARE A REFUSAL, NOT A NO-OP. A typo that silently applied
+// nothing would print "Schema up to date." — the single most reassuring thing
+// this script can say — while the migration the operator believed they had just
+// applied was still pending, and the deploy that follows assumes otherwise.
+const onlyArg = process.argv.indexOf('--only');
+const only =
+  onlyArg === -1
+    ? null
+    : (process.argv[onlyArg + 1] ?? '')
+        .split(',')
+        .map((n) => n.trim())
+        .filter(Boolean);
+
+if (only !== null) {
+  if (only.length === 0) {
+    console.error('Refusing to run: --only needs a comma-separated list of migration names.');
+    process.exit(1);
+  }
+  const known = new Set(migrations.map((m) => m.name));
+  const unknown = only.filter((n) => !known.has(n));
+  if (unknown.length > 0) {
+    console.error(`Refusing to run: --only names ${unknown.length} migration(s) that do not exist:`);
+    for (const n of unknown) console.error(`  ${n}`);
+    console.error('');
+    console.error('Known migrations:');
+    for (const m of migrations) console.error(`  ${m.name}`);
+    process.exit(1);
+  }
+}
 
 // ── Target selection ───────────────────────────────────────────────────────
 const targetArg = process.argv.indexOf('--target');
@@ -132,10 +185,28 @@ if (statusOnly) {
   process.exit(0);
 }
 
+// THE PLAN, PRINTED BEFORE THE FIRST STATEMENT. Same reasoning as the host
+// line above: what distinguishes the safe run from the unsafe one has to be on
+// screen BEFORE it happens, not inferable from what scrolls past afterwards.
+const selected = migrations.filter((m) => !applied.has(m.name) && (only === null || only.includes(m.name)));
+const heldBack = migrations.filter((m) => !applied.has(m.name) && only !== null && !only.includes(m.name));
+
+console.log(selected.length === 0 ? 'Nothing to apply.' : `Will apply ${selected.length}:`);
+for (const m of selected) console.log(`  → ${m.name}`);
+if (heldBack.length > 0) {
+  console.log(`Leaving pending (not named by --only):`);
+  for (const m of heldBack) console.log(`  · ${m.name}`);
+}
+console.log('');
+
 let ran = 0;
 for (const m of migrations) {
   if (applied.has(m.name)) {
     console.log(`· ${m.name} (already applied)`);
+    continue;
+  }
+  if (only !== null && !only.includes(m.name)) {
+    console.log(`· ${m.name} (pending — not named by --only)`);
     continue;
   }
   try {
@@ -150,4 +221,14 @@ for (const m of migrations) {
   ran++;
 }
 
-console.log(ran === 0 ? '\nSchema up to date.' : `\nApplied ${ran} migration${ran === 1 ? '' : 's'}.`);
+// "Schema up to date" is a claim about the WHOLE schema and would be false
+// after a partial run, which is exactly the run an operator most needs to read
+// accurately. Under --only the summary names what is still outstanding instead.
+if (ran === 0 && heldBack.length === 0) {
+  console.log('\nSchema up to date.');
+} else {
+  console.log(`\nApplied ${ran} migration${ran === 1 ? '' : 's'}.`);
+  if (heldBack.length > 0) {
+    console.log(`${heldBack.length} still pending: ${heldBack.map((m) => m.name).join(', ')}`);
+  }
+}
