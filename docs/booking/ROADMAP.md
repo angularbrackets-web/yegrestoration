@@ -335,11 +335,23 @@ rework of every call site. Not worth doing until the next ticket needs slots.
 - **A `GST_REGISTRATION_NUMBER` env var cannot put the number on a Stripe
   receipt.** Stripe renders business and tax info on Checkout receipts from
   Dashboard settings (or through Stripe Tax / Invoicing), not from anything
-  passed into the session. The env var correctly drives *our* emails; the
-  receipt needs a Dashboard configuration step that no amount of code will
-  cover. **Severity: low technically, high operationally** — it is the kind of
-  thing found at go-live, by an accountant. **Owner: BK-32**, recorded as a
-  rollout task rather than an implementation one.
+  passed into the session. The receipt needs a Dashboard configuration step
+  that no amount of code will cover. **Severity: low technically, high
+  operationally** — it is the kind of thing found at go-live, by an accountant.
+  **Owner: BK-32**, recorded as a rollout task rather than an implementation
+  one.
+
+  **Corrected 2026-08-19.** This entry used to add *"the env var correctly
+  drives our emails"*, and BK-32's own rollout note says the same. **It is not
+  true: no code reads `GST_REGISTRATION_NUMBER`, anywhere.** Verified by grep
+  over `src/` and `scripts/` after BK-36. Our emails itemize the GST *amount*
+  (`booking-email.ts`'s approval table) and print no registration number, so
+  after the Dashboard step the number appears on Stripe's receipt and nowhere
+  else. That is very likely sufficient — Stripe's receipt is the tax receipt —
+  but the sentence claiming otherwise was the kind a next reader would rely on
+  while setting an env var that does nothing. **Not a Deploy 2 blocker.** If the
+  client wants the number on *our* approval email too, that is a small ticket
+  and it does not exist yet.
 - **RESOLVED 2026-08-16 by BK-29 — kept for the lesson, not as open work.**
   "Free assessment" was claimed unconditionally in 51 places across 22 files.
   The 2026-08-14 credit model made the claim FALSE rather than merely
