@@ -4,7 +4,10 @@ import AdminLayout from '../../../layouts/AdminLayout.astro';
 import {
   ADMIN_APPOINTMENTS_PATH,
   ADMIN_APPOINTMENT_FILE_DELETE_ENDPOINT,
+  ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT,
+  adminAppointmentPath,
   ADMIN_APPOINTMENT_RESEND_ENDPOINT,
+  ADMIN_APPOINTMENT_REVIEW_ENDPOINT,
   ADMIN_APPOINTMENT_UPDATE_ENDPOINT,
   adminFilePath,
   customerStampState,
@@ -22,7 +25,14 @@ import {
   MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
 } from '../../../lib/booking-admin-entry';
-import { TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import { ASSESSMENT_TIER_NAMES, TIMEZONE_NOTE } from '../../../lib/booking-copy';
+import {
+  ASSESSMENT_TIERS,
+  assessmentQuote,
+  formatCents,
+} from '../../../lib/booking-pricing';
+import { paymentDeadline, amountField, parseAmountCents } from '../../../lib/booking-review';
+import { TRAVEL_FEE_CENTS_PER_KM, TRAVEL_FEE_FREE_RADIUS_KM, gstFor } from '../../../lib/booking-pricing';
 import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
   appointmentUploadUrl,
@@ -66,6 +76,24 @@ try {
   dbError = 'Could not load appointment.';
   console.error(e);
 }
+
+/**
+ * What this assessment comes to, if a tier was chosen.
+ *
+ * Recomputed from `(tier, service, slot_start)` rather than read off a column,
+ * because there is no amount column yet — BK-32 adds one, snapshotted at
+ * approval, and at that point this display should read the snapshot instead so
+ * the office sees what the customer was actually quoted rather than what the
+ * table says today.
+ */
+const quote =
+  appointment && appointment.assessment_tier
+    ? assessmentQuote({
+        tier: appointment.assessment_tier,
+        service: appointment.service,
+        slotStart: appointment.slot_start,
+      })
+    : null;
 
 // A row that does not exist is a 404, the same answer a bad id gets. A database
 // that is down is not — that renders the error card below.
@@ -138,7 +166,7 @@ const internalStamp = appointment ? internalStampState(appointment) : 'not-appli
 // re-checks this rather than trusting the button's absence.
 const canResend =
   !!appointment &&
-  appointment.status === 'booked' &&
+  appointment.status === 'confirmed' &&
   typeof appointment.email === 'string' &&
   appointment.email.trim() !== '';
 
@@ -193,16 +221,200 @@ const FILE_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
 
 const filesFlash = Astro.url.searchParams.get('files');
 
+/**
+ * The review outcomes (BK-23).
+ *
+ * Every refusal below leaves the row in `pending_review`, and each message says
+ * what to do about it — a decision screen that reports "that did not work" and
+ * stops is a screen somebody clicks again.
+ */
+const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  approved: {
+    tone: 'ok',
+    text: 'Approved. The customer has been emailed the amount, the deadline and how to pay.',
+  },
+  'approved-nomail': {
+    tone: 'warn',
+    text: 'Approved and the time is held — but the email did not send. Call the customer: they have no way to pay and the reservation is on a clock.',
+  },
+  declined: { tone: 'ok', text: 'Declined, and the time is back on the calendar.' },
+  'declined-nomail': {
+    tone: 'warn',
+    text: 'Declined and the time is released, but the notice did not send. The customer has not been told.',
+  },
+  // Refusals. None of these changed anything.
+  notier: {
+    tone: 'warn',
+    text: 'Choose an assessment first — the amount comes from it. Nothing was approved.',
+  },
+  elapsed: {
+    tone: 'warn',
+    text: 'That time has already passed, so it cannot be approved or paid for. Nothing was approved — decline it, or call the customer to rebook.',
+  },
+  amount: { tone: 'warn', text: 'That assessment amount was not a valid figure. Nothing was approved.' },
+  travel: { tone: 'warn', text: 'That travel fee was not a valid figure. Nothing was approved.' },
+  // Still no "mark it paid" here, even though BK-32 has now built that action.
+  // The Interac button lives on an APPROVED row, and this message is about a
+  // row that could not be approved at all — pointing at it would send the
+  // office to a button that is not on the page. The only move that exists at
+  // this moment is the same one as before: get an address onto the row, from
+  // the edit form directly above.
+  noemail: {
+    tone: 'warn',
+    text: 'This booking has no email address, so there is nowhere to send a payment link and nothing was approved. Add one above — a phone booking still needs an address to be paid for. If the customer has none, call the office before promising a visit.',
+  },
+  nopayment: {
+    tone: 'warn',
+    text: 'No way to take payment is configured, so the customer could not be told how to pay. Nothing was approved.',
+  },
+  // Not an error: somebody else got there first, or a double-click arrived
+  // twice. Said plainly so nobody goes looking for a fault.
+  stale: {
+    tone: 'ok',
+    text: 'This request had already been reviewed, so nothing changed and no second email went out.',
+  },
+  // BK-32. Approved, but the card link could not be minted — Stripe is not
+  // configured, refused, or timed out. NOT a failure: the Interac route is a
+  // complete way to pay and the customer has been told about it.
+  'approved-interac': {
+    tone: 'ok',
+    text: 'Approved. The card link could not be created, so the customer was emailed the e-Transfer details and the amount. They can still pay.',
+  },
+  // BK-32. A $0.00 total: approved and confirmed in one step, with no payment
+  // page and no payment link, because there is nothing to pay.
+  'approved-free': {
+    tone: 'ok',
+    text: 'Approved at no charge and confirmed. The customer has their confirmation and calendar invite; no payment was asked for.',
+  },
+  // BK-32. A re-approval could not kill the previous Checkout Session, so
+  // nothing was changed rather than leaving two live links at two prices.
+  'stale-session': {
+    tone: 'warn',
+    text: 'The previous payment link could not be cancelled, so nothing was approved — approving would have left the customer holding two live links at two different prices. Try again; if it keeps failing, expire the session by hand in the Stripe dashboard.',
+  },
+  invalid: { tone: 'warn', text: 'That request was not valid. Nothing changed.' },
+  error: { tone: 'warn', text: 'The database rejected that decision. Nothing changed.' },
+};
+
+/** BK-32 — the outcomes of "Mark as paid — Interac". */
+const PAID_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  paid: {
+    tone: 'ok',
+    text: 'Marked as paid by e-Transfer. The customer has been sent their confirmation and calendar invite.',
+  },
+  // Not an error, and deliberately quiet: this is a second click, not a second
+  // payment. Saying "already done" beats a puzzling no-op.
+  already: {
+    tone: 'ok',
+    text: 'This payment was already recorded, so nothing changed and no second confirmation went out.',
+  },
+  // The real double-pay race. Never auto-refunded — see the row's attention note.
+  double: {
+    tone: 'warn',
+    text: 'This booking was ALREADY confirmed by a different payment. Nothing was changed and nothing was refunded — read the attention note below and sort the refund out by hand in Stripe.',
+  },
+  late: {
+    tone: 'warn',
+    text: 'The slot for this booking had already been released, so the payment was recorded but the booking was NOT confirmed. Nothing was refunded automatically — read the attention note below.',
+  },
+  notawaiting: {
+    tone: 'warn',
+    text: 'This booking is not awaiting payment, so there was nothing to mark. Nothing changed.',
+  },
+  missing: { tone: 'warn', text: 'That booking no longer exists. Nothing changed.' },
+  error: { tone: 'warn', text: 'The database rejected that. Nothing changed.' },
+};
+
+const reviewFlash = Astro.url.searchParams.get('review');
+const paidFlash = Astro.url.searchParams.get('paid');
+
 const flashes = [
   emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
   savedFlash ? SAVED_MESSAGES[savedFlash] : null,
   filesFlash ? FILE_MESSAGES[filesFlash] : null,
+  reviewFlash ? REVIEW_MESSAGES[reviewFlash] : null,
+  paidFlash ? PAID_MESSAGES[paidFlash] : null,
 ].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
+/**
+ * The suggested amounts for the approval screen.
+ *
+ * Computed from the row's own `(tier, service, slot)`, so the office sees the
+ * weekend rate and the mould price without doing anything. They are a
+ * PRE-FILL, not a decision: the server recomputes the suggestion and accepts
+ * an override, and nothing on this page is trusted on the way back.
+ */
+const suggestedQuote =
+  appointment && appointment.assessment_tier
+    ? assessmentQuote({
+        tier: appointment.assessment_tier,
+        service: appointment.service,
+        slotStart: appointment.slot_start,
+      })
+    : null;
+
+const isPendingReview = appointment?.status === 'pending_review';
+/** BK-32 — the only status the Interac action applies to. */
+const isAwaitingPayment = appointment?.status === 'approved_awaiting_payment';
+
+// ── The confirm step (BK-23 Task 7 guard rail) ─────────────────────────────
+//
+// The office posts `action=preview`, the route parses the typed amounts and
+// bounces back here with them normalised. This block renders what the CUSTOMER
+// will be quoted, computed from those exact values, and the button under it is
+// the one that charges.
+//
+// Recomputed here rather than passed in as a total: the query string carries
+// only the two figures the office typed, so a tampered or stale URL cannot
+// display one number while approving another — everything shown below is
+// derived, and the same two strings are what get re-parsed on approve.
+const confirmRequested = Astro.url.searchParams.get('confirm') === '1';
+const confirmBaseCents = parseAmountCents(Astro.url.searchParams.get('base'));
+const confirmTravelCents = parseAmountCents(Astro.url.searchParams.get('travel'));
+const confirming =
+  confirmRequested && isPendingReview && confirmBaseCents !== null && confirmTravelCents !== null
+    ? (() => {
+        const subtotalCents = confirmBaseCents + confirmTravelCents;
+        const gstCents = gstFor(subtotalCents);
+        return {
+          baseCents: confirmBaseCents,
+          travelCents: confirmTravelCents,
+          subtotalCents,
+          gstCents,
+          totalCents: subtotalCents + gstCents,
+        };
+      })()
+    : null;
+
+// What was actually settled, for a row past review. Without this the office can
+// approve an amount and then have no screen anywhere that shows what it was.
+const settled =
+  appointment && appointment.assessment_amount_cents !== null
+    ? {
+        baseCents: appointment.assessment_amount_cents,
+        travelCents: appointment.travel_fee_cents ?? 0,
+        gstCents: appointment.gst_cents ?? 0,
+        totalCents: appointment.total_amount_cents ?? 0,
+      }
+    : null;
+
+/**
+ * What the customer will be asked to pay if the office approves as suggested.
+ *
+ * Shown beside the fields, and it is the number that matters: the two inputs
+ * are a base and a fee, and nobody approves a base — they approve a total.
+ */
+const suggestedDeadline =
+  appointment && isPendingReview ? paymentDeadline(appointment.slot_start, new Date()) : null;
+
 function statusClasses(status: Appointment['status']) {
+  if (status === 'pending_review') return 'bg-amber-900/40 text-amber-300 border-amber-700';
+  if (status === 'approved_awaiting_payment') return 'bg-amber-900/25 text-amber-200/90 border-amber-800';
   if (status === 'completed') return 'bg-green-900/40 text-green-300 border-green-800';
-  if (status === 'cancelled') return 'bg-zinc-800 text-zinc-500 border-zinc-700';
   if (status === 'no_show') return 'bg-red-900/40 text-red-300 border-red-800';
+  if (status === 'cancelled' || status === 'declined' || status === 'payment_expired') {
+    return 'bg-zinc-800 text-zinc-500 border-zinc-700';
+  }
   return 'bg-blue-900/40 text-blue-300 border-blue-800';
 }
 ---
@@ -225,6 +437,30 @@ function statusClasses(status: Appointment['status']) {
       {flash.text}
     </div>
   ))}
+
+  {/*
+    MONEY LANDED SOMEWHERE IT SHOULD NOT HAVE (BK-32).
+
+    Above everything, in red, and unmissable. `needs_attention` is written by
+    `markPaid()` and the webhook for the cases nobody can automate away: a
+    double payment, a payment that arrived after the slot was released, an
+    amount Stripe charged that disagrees with what was approved, a Checkout
+    Session that outlived its row. Every one of them is a customer with money
+    gone and a human decision to make.
+
+    NOTHING CLEARS IT, which is BK-32's scope decision rather than an
+    oversight: an acknowledge-and-clear action is separate admin UX. It appends,
+    so a second problem on the same row never overwrites the first.
+  */}
+  {appointment?.needs_attention && (
+    <div class="bg-red-950/60 border-2 border-red-700 rounded-lg px-4 py-3 mb-5">
+      <h2 class="text-red-300 font-semibold text-sm mb-1">Payment needs attention</h2>
+      <p class="text-red-200/90 text-sm whitespace-pre-line">{appointment.needs_attention}</p>
+      <p class="text-red-300/70 text-xs mt-2">
+        Nothing has been refunded automatically. Issue any refund by hand in the Stripe dashboard.
+      </p>
+    </div>
+  )}
 
   {dbError && (
     <div class="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-300 text-sm">{dbError}</div>
@@ -250,6 +486,23 @@ function statusClasses(status: Appointment['status']) {
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Service</dt>
             <dd class="text-white">{SERVICE_LABELS[appointment.service] ?? appointment.service}</dd>
+          </div>
+          <div>
+            <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Assessment</dt>
+            <dd class="text-white">
+              {appointment.assessment_tier ? (
+                <>
+                  {ASSESSMENT_TIER_NAMES[appointment.assessment_tier]}
+                  <span class="text-zinc-400"> · {formatCents(quote!.baseCents)} + GST</span>
+                  <span class="block text-zinc-500 text-xs mt-0.5">
+                    {formatCents(quote!.totalCents)} total incl. GST
+                    {quote!.afterHours ? ' · weekend rate, 1.5×' : ''}
+                  </span>
+                </>
+              ) : (
+                <span class="text-zinc-500">Not chosen — phone booking, settle with the customer</span>
+              )}
+            </dd>
           </div>
           <div>
             <dt class="text-zinc-500 text-xs uppercase tracking-wide mb-1">Pipeline stage</dt>
@@ -670,6 +923,331 @@ function statusClasses(status: Appointment['status']) {
         button, and cancelling never deletes the row. Rescheduling is not here:
         it is cancel + re-enter (see the ticket's Out of scope).
       -->
+      <!--
+        THE REVIEW PANEL (BK-23). Only for `pending_review`, and it posts to its
+        own route rather than to the update form's.
+
+        The separation is deliberate and it is a safety property, not tidiness.
+        `update.ts` is a whitelist editor: it sets a status and nothing else.
+        Approving has to compute a deadline, snapshot four amounts and send the
+        customer a message they will act on — so if the status dropdown could
+        also produce `approved_awaiting_payment`, the office would be one
+        careless selection away from an approved booking with no amount, no
+        deadline and no email. It cannot: `review.ts` is the only path that
+        performs the transition, and it guards on `status = 'pending_review'`.
+      -->
+      {/*
+        WHAT WAS SETTLED, for a row past review.
+        <br />
+        Without this the office could approve an amount and then have no screen
+        anywhere that showed what it was — `assessment_amount_cents` and its
+        siblings were written by the approval and read by nothing. The figure a
+        customer is disputing has to be visible to the person taking the call.
+      */}
+      {settled && (
+        <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6">
+          <h2 class="text-white font-semibold mb-1">Amount settled at approval</h2>
+          <p class="text-zinc-500 text-xs mb-4">
+            Snapshotted when this was approved — not recomputed from today's prices.
+          </p>
+          <dl class="text-sm max-w-sm">
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Assessment</dt>
+              <dd class="text-zinc-200">{formatCents(settled.baseCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Travel</dt>
+              <dd class="text-zinc-200">{formatCents(settled.travelCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">GST (5%)</dt>
+              <dd class="text-zinc-200">{formatCents(settled.gstCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-2.5 font-semibold">
+              <dt class="text-white">Total</dt>
+              <dd class="text-white">{formatCents(settled.totalCents)}</dd>
+            </div>
+          </dl>
+          {appointment.payment_due_at && (
+            <p class="text-zinc-500 text-xs mt-3">
+              Payment due by {formatSlot(appointment.payment_due_at)} ({TIMEZONE_NOTE}).
+            </p>
+          )}
+        </section>
+      )}
+
+      {/*
+        "MARK AS PAID — INTERAC" (BK-32).
+
+        The office reading their own inbox and asserting that an e-Transfer
+        arrived. There is no inbox parsing and no auto-matching anywhere in this
+        system, deliberately — which is exactly why this button records WHO said
+        so and WHEN: it is a human claim about money, so it needs an author.
+
+        THE AMOUNT IS NOT A FIELD. The office is asserting that the amount the
+        approval settled arrived, and giving them a box to type a different one
+        would make this screen a second place money is decided. BK-23's whole
+        approval design exists so that there is exactly one. A partial payment
+        is a conversation, not a form field.
+
+        Everything this does happens inside `markPaid()` — the same function the
+        Stripe webhook calls. One transition, one confirmation email, one ics,
+        so a booking paid by e-Transfer and one paid by card are
+        indistinguishable afterwards, and whichever payment arrives second
+        no-ops and flags rather than confirming twice.
+      */}
+      {isAwaitingPayment && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT}
+          class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+
+          <h2 class="text-white font-semibold mb-1">Payment</h2>
+          <p class="text-zinc-500 text-xs mb-4">
+            Waiting on {settled ? formatCents(settled.totalCents) : 'payment'}
+            {appointment.payment_due_at
+              ? ` by ${formatSlot(appointment.payment_due_at)} (${TIMEZONE_NOTE})`
+              : ' — pay-now booking, no deadline. Chase it by phone.'}.
+            {appointment.stripe_session_id
+              ? ' A card link has been sent.'
+              : ' No card link was created; the customer has the e-Transfer details.'}
+          </p>
+
+          <label class="block text-zinc-400 text-xs mb-1" for="interac-reference">
+            e-Transfer reference <span class="text-zinc-600">(optional)</span>
+          </label>
+          <input
+            id="interac-reference"
+            type="text"
+            name="reference"
+            maxlength="200"
+            placeholder="Reference number from the e-Transfer notice"
+            class="w-full max-w-sm bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 mb-1"
+          />
+          {/*
+            Optional, and that is deliberate. Requiring it would push somebody
+            into inventing one, and an invented reference is worse than none:
+            the reference is what tells a redelivered payment from a genuinely
+            second one, so a fabricated value turns a silent no-op into a false
+            "double payment — issue a refund" alert.
+          */}
+          <p class="text-zinc-600 text-xs mb-4">
+            Helps tell one payment arriving twice from two real payments. Leave it blank if you do
+            not have it.
+          </p>
+
+          <label class="block text-zinc-400 text-xs mb-1" for="interac-actor">Your name</label>
+          <input
+            id="interac-actor"
+            type="text"
+            name="actor"
+            maxlength="120"
+            placeholder="Who is confirming this"
+            class="w-full max-w-sm bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 mb-4"
+          />
+
+          <button
+            type="submit"
+            class="bg-green-600 hover:bg-green-500 text-white font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+          >
+            Mark as paid — Interac
+          </button>
+          <p class="text-zinc-600 text-xs mt-3">
+            This confirms the booking and sends the customer their confirmation and calendar
+            invite. If they have already paid the card link, this will say so and change nothing.
+          </p>
+        </form>
+      )}
+
+      {/*
+        THE CONFIRM STEP. Rendered from the amounts the office actually typed,
+        server-side, with no script keeping it honest — see `isReviewAction`'s
+        note for why this is a round trip rather than a live field.
+
+        The button in here is the one that charges. Everything above it is the
+        same itemisation the customer receives, in the same order, so what is
+        approved and what is quoted cannot be two different numbers.
+      */}
+      {confirming && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REVIEW_ENDPOINT}
+          class="bg-zinc-900 border border-amber-500 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+          {/*
+            The SAME strings the route just normalised, re-posted into the same
+            fields `approve` parses. The office confirms a number produced by
+            one parser and that same parser produces the number charged.
+          */}
+          <input type="hidden" name="assessment_amount" value={amountField(confirming.baseCents)} />
+          <input type="hidden" name="travel_fee" value={amountField(confirming.travelCents)} />
+
+          <h2 class="text-white font-semibold mb-1">Confirm the amount</h2>
+          <p class="text-zinc-500 text-xs mb-5">
+            This is what {appointment.name} will be asked to pay. Nothing has been sent yet.
+          </p>
+
+          <dl class="text-sm mb-5 max-w-sm">
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Assessment</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.baseCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Travel</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.travelCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">GST (5%)</dt>
+              <dd class="text-zinc-200">{formatCents(confirming.gstCents)}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-2.5 font-semibold">
+              <dt class="text-white">Total</dt>
+              <dd class="text-amber-400">{formatCents(confirming.totalCents)}</dd>
+            </div>
+          </dl>
+
+          <div class="flex flex-wrap gap-3 items-center">
+            <button
+              type="submit"
+              name="action"
+              value="approve"
+              class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+            >
+              Approve and send — {formatCents(confirming.totalCents)}
+            </button>
+            <a
+              href={adminAppointmentPath(appointment.id)}
+              class="text-zinc-400 hover:text-zinc-200 text-sm underline underline-offset-4"
+            >
+              Change the amounts
+            </a>
+          </div>
+        </form>
+      )}
+
+      {isPendingReview && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REVIEW_ENDPOINT}
+          class="bg-zinc-900 border border-amber-800/60 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+          <h2 class="text-white font-semibold mb-1">Review this request</h2>
+          <p class="text-zinc-500 text-xs mb-5">
+            The time is held while this sits here. Approving emails the customer an
+            amount, a deadline and how to pay; declining releases the slot and tells
+            them we are at capacity.
+          </p>
+
+          {appointment.assessment_tier && suggestedQuote ? (
+            <>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="assessment_amount">
+                    Assessment ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    id="assessment_amount"
+                    name="assessment_amount"
+                    value={amountField(suggestedQuote.baseCents)}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  <p class="text-zinc-600 text-xs mt-1.5">
+                    {ASSESSMENT_TIER_NAMES[appointment.assessment_tier]}
+                    {suggestedQuote.afterHours ? ' · weekend rate, 1.5× applied' : ''}
+                  </p>
+                </div>
+                <div>
+                  <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="travel_fee">
+                    Travel fee ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    id="travel_fee"
+                    name="travel_fee"
+                    value="0.00"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  {/*
+                    The rule, not a computed number. There is no distance API in
+                    this infrastructure and the client asked not to block on
+                    adding one, so the office reads the rule, uses the
+                    directions link above, and types the figure. Never applied
+                    automatically — the field defaults to zero.
+                  */}
+                  <p class="text-zinc-600 text-xs mt-1.5">
+                    ${(TRAVEL_FEE_CENTS_PER_KM / 100).toFixed(2)}/km round trip beyond {TRAVEL_FEE_FREE_RADIUS_KM} km. Leave at 0 if none.
+                  </p>
+                </div>
+              </div>
+
+              <p class="text-zinc-400 text-sm mb-1">
+                GST and the total are worked out from these — there is no field for either.
+              </p>
+              {/*
+                NO TOTAL HERE, deliberately. This panel used to print one from
+                the suggestion, which stopped being true the moment either field
+                was edited — correct only in the case where it did not matter.
+                The itemised figure now lives on the confirm step below, where it
+                is computed from what was actually typed.
+              */}
+              <p class="text-zinc-500 text-xs mb-4">
+                Suggested {formatCents(suggestedQuote.baseCents)} before GST. You will see the
+                itemised total, as the customer gets it, before anything is sent.
+                {suggestedDeadline && suggestedDeadline.dueAt
+                  ? ` Payment due by ${formatSlot(suggestedDeadline.dueAt)} (${TIMEZONE_NOTE}).`
+                  : ' This slot is close, so the link will be sent to be paid right away rather than on a deadline.'}
+              </p>
+
+              <div class="flex flex-wrap gap-3">
+                <button
+                  type="submit"
+                  name="action"
+                  value="preview"
+                  class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+                >
+                  Review the amount →
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="decline"
+                  class="border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+                >
+                  Decline — at capacity
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/*
+                No tier means no amount to charge, so approval is impossible
+                rather than merely awkward. Declining still works — a request
+                the office cannot price is one they may well want to turn down.
+              */}
+              <p class="text-amber-300/90 text-sm mb-4">
+                This booking has no assessment chosen, so there is no amount to charge.
+                Set one in Update below, then approve.
+              </p>
+              <button
+                type="submit"
+                name="action"
+                value="decline"
+                class="border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+              >
+                Decline — at capacity
+              </button>
+            </>
+          )}
+        </form>
+      )}
+
       <form method="POST" action={ADMIN_APPOINTMENT_UPDATE_ENDPOINT} class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <input type="hidden" name="id" value={String(appointment.id)} />
         <h2 class="text-white font-semibold mb-1">Update</h2>
@@ -709,6 +1287,34 @@ function statusClasses(status: Appointment['status']) {
               ))}
             </select>
           </div>
+        </div>
+
+        <div class="mb-5">
+          <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="assessment_tier">
+            Assessment
+          </label>
+          <select
+            id="assessment_tier"
+            name="assessment_tier"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+          >
+            <option value="" selected={appointment.assessment_tier === null}>Not chosen</option>
+            {ASSESSMENT_TIERS.map(value => (
+              <option value={value} selected={value === appointment.assessment_tier}>
+                {ASSESSMENT_TIER_NAMES[value]}
+              </option>
+            ))}
+          </select>
+          {/*
+            BK-31. The office must be able to change this when a customer
+            upgrades on site — and must be told what changing it does NOT do.
+            Under P9 this row may already have been paid against, and an edit
+            that silently looked like it triggered a charge is how somebody gets
+            billed twice.
+          */}
+          <p class="text-zinc-500 text-xs mt-1.5">
+            Changing this does not charge anything. Collect any difference on site or add it to the invoice.
+          </p>
         </div>
 
         <div class="mb-5">

@@ -45,6 +45,10 @@ function base(overrides: Record<string, unknown> = {}) {
     // and a base that 422s on this one would make all of them pass for the
     // wrong reason. The arms that test the acknowledgment itself override it.
     terms_ack: true,
+    // BK-31's tier, in the base for exactly the reason `terms_ack` is: it is
+    // required by the public door, and a base that 422s on it would make every
+    // other assertion in this file pass for the wrong reason.
+    assessment_tier: 'standard',
     ...overrides,
   };
 }
@@ -292,6 +296,87 @@ console.log('\nAssessment fee terms (BK-27)');
     'while a non-boolean is still rejected at the office door',
   );
   console.log('  required on the public form, exempt for admin, boolean-only either way');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-31 — the assessment tier');
+// ---------------------------------------------------------------------------
+{
+  // Required on the public door, with NO default. A missing tier is an error
+  // rather than a fallback, because a pre-selected $399 charges someone for a
+  // tier they never looked at.
+  check(
+    errorsFor(base({ assessment_tier: undefined })).includes('assessment_tier'),
+    'a public booking with no tier is rejected',
+  );
+  check(
+    errorsFor(base({ assessment_tier: '' })).includes('assessment_tier'),
+    'and an empty string is not a tier either',
+  );
+
+  // The closed set. The DB CHECK is the backstop; this is the message.
+  for (const bogus of ['premium', 'STANDARD', 'sketch ', 0, true, {}, []]) {
+    check(
+      errorsFor(base({ assessment_tier: bogus })).includes('assessment_tier'),
+      `a tier of ${JSON.stringify(bogus)} is rejected`,
+    );
+  }
+
+  for (const tier of ['standard', 'report', 'sketch']) {
+    const parsed = parseBookingPayload(base({ assessment_tier: tier }), opts);
+    check(parsed.ok, `${tier} is accepted`);
+    if (parsed.ok) {
+      check(parsed.payload.assessmentTier === tier, `and ${tier} reaches the payload`);
+    }
+  }
+
+  // The office exemption, structurally the same as email / photos / terms.
+  check(
+    !adminErrorsFor(base({ assessment_tier: undefined })).includes('assessment_tier'),
+    'an admin entry with no tier is accepted — the office settles it on the phone',
+  );
+  const adminNoTier = parseBookingPayload(base({ assessment_tier: undefined }), adminOpts);
+  check(
+    adminNoTier.ok && adminNoTier.payload.assessmentTier === null,
+    'and stores NULL rather than an invented default',
+  );
+
+  // The SHAPE check still runs on both doors: an unknown tier is a malformed
+  // request whichever door it came through. Only the REQUIREMENT is public-only.
+  check(
+    adminErrorsFor(base({ assessment_tier: 'premium' })).includes('assessment_tier'),
+    'an unknown tier is rejected on the office door too',
+  );
+
+  // ── PRICE INTEGRITY ──────────────────────────────────────────────────────
+  //
+  // THE ATTACK THIS CLOSES: a hand-built request naming the sketch tier and its
+  // own amount. The parser must not read an amount at all — not validate it,
+  // not store it, not echo it. The price is computed server-side from the tier
+  // key plus the stored service and slot.
+  const tampered = parseBookingPayload(
+    base({
+      assessment_tier: 'sketch',
+      amount: 100,
+      amount_cents: 100,
+      price: 1,
+      total_cents: 1,
+      assessment_amount_cents: 1,
+    }),
+    opts,
+  );
+  check(tampered.ok, 'a payload carrying an amount still parses');
+  if (tampered.ok) {
+    const keys = Object.keys(tampered.payload);
+    check(
+      !keys.some((k) => /amount|price|cents|total/i.test(k)),
+      'and NO amount-shaped field survives into the payload — the price never comes from a request',
+    );
+    check(
+      tampered.payload.assessmentTier === 'sketch',
+      'only the tier key is carried through',
+    );
+  }
 }
 
 if (failures > 0) {

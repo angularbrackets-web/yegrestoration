@@ -1,0 +1,42 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.svelte';
+import Footer from '../../components/Footer.astro';
+import BookingConfirmation from '../../components/BookingConfirmation.svelte';
+
+/**
+ * Where the booking form lands (BK-23).
+ *
+ * NOT "confirmed", and the title and description are as load-bearing as the
+ * heading: a submitted request is not an appointment, and a browser tab reading
+ * "Booking confirmed" is the claim P9 removed from the page body reappearing in
+ * the one place nobody re-reads. `/book/confirmed/` still exists and still says
+ * "confirmed" — it is reached from the payment redirect, where that is true.
+ */
+const title = 'Request received | YEG Restoration Edmonton';
+const description = 'We have your assessment request and will review it shortly.';
+---
+
+<!--
+  noindex here, excluded from the sitemap in astro.config.mjs — and unlike
+  /book/, PERMANENTLY. This page has nothing to rank for and renders nothing at
+  all to a crawler, which arrives with no session.
+-->
+<Layout title={title} description={description} noindex={true}>
+  <div class="grain-overlay"></div>
+  <div class="concrete-texture"></div>
+
+  <Navbar client:load />
+
+  <main class="pt-28 pb-20">
+    <div class="max-w-2xl mx-auto px-6">
+      <!--
+        client:load, not client:visible: this is the whole page, above the fold,
+        and a visit carrying no request payload redirects from within it.
+      -->
+      <BookingConfirmation client:load variant="received" />
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

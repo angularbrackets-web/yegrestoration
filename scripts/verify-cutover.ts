@@ -35,6 +35,12 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { dirname, extname, join, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+// The ONE import from `src/` in this file, and it earns its place: the `dist/`
+// pins below have to find the built chunk that carries the terms copy, and
+// naming that chunk by filename is what made an earlier version of those pins
+// inert. Matching on the constant's own text follows the copy wherever Vite
+// puts it.
+import { FEE_TERMS_HEADING as FEE_TERMS_HEADING_TEXT } from '../src/lib/booking-copy';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -338,6 +344,33 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   //
   // The lookbehind-free fix: only treat `//` as a comment when it is not
   // preceded by `:`. Keeps the frontmatter behaviour, drops the hole.
+  // The terms block, in render order. BK-36 split FEE_TERMS_OUTRO into the last
+  // three; the order they appear in this array IS the constraint every surface
+  // is held to.
+  const TERMS_CONSTANTS = [
+    'FEE_TERMS_HEADING',
+    'FEE_TERMS_INTRO',
+    'FEE_TERMS_ITEMS',
+    'FEE_TERMS_PAYMENT',
+    'FEE_TERMS_REFUND',
+    'FEE_TERMS_CREDIT',
+  ] as const;
+
+  // Asserts the chain rather than the pair. Reads the STRIPPED source, so an
+  // import line listing the constants alphabetically cannot satisfy it — that
+  // is the BK-14 trap, and the alphabetical import in every one of these files
+  // would otherwise pass this check while the template rendered them backwards.
+  const checkTermsOrder = (code: string, label: string) => {
+    for (let i = 1; i < TERMS_CONSTANTS.length; i++) {
+      const prev = code.indexOf(TERMS_CONSTANTS[i - 1]);
+      const here = code.indexOf(TERMS_CONSTANTS[i]);
+      check(
+        prev >= 0 && here > prev,
+        `${label}: renders ${TERMS_CONSTANTS[i]} after ${TERMS_CONSTANTS[i - 1]} — the block must end on the credit`,
+      );
+    }
+  };
+
   const stripForUse = (s: string) =>
     s
       .replace(/<!--[\s\S]*?-->/g, '')
@@ -350,21 +383,36 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // renders identically to `Free Assessment` and would slip a `\s`-based regex.
   const normalise = (s: string) => s.replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ');
 
+  // Rendered template only — frontmatter stripped. Defined here rather than
+  // beside its first prose pin because three separate blocks below need it.
+  const templateOf = (src: string, file: string) => {
+    const lines = src.split('\n');
+    const fences = lines.reduce<number[]>((a, l, i) => (l.trim() === '---' ? [...a, i] : a), []);
+    check(fences.length >= 2 && fences[0] === 0, `${file}: frontmatter fences are where this file expects them`);
+    return lines.slice(fences[1] + 1).join('\n');
+  };
+
   for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
     const code = stripForUse(readFileSync(resolve(root, file), 'utf8'));
-    // FEE_TERMS_OUTRO is in this list, not appended to it as an afterthought:
-    // it carries "nothing is charged when you book" and "not refundable if you
-    // decide not to go ahead". A surface that renders the tiers but drops the
-    // outro shows a customer three prices and none of the terms attached to
-    // them, which is worse than showing nothing.
-    for (const constant of [
-      'FEE_TERMS_HEADING',
-      'FEE_TERMS_INTRO',
-      'FEE_TERMS_ITEMS',
-      'FEE_TERMS_OUTRO',
-    ]) {
+    // PAYMENT, REFUND and CREDIT are in this list, not appended to it as an
+    // afterthought: between them they carry when the money moves, the 24-hour
+    // refund window, and the credit. A surface that renders the tiers but drops
+    // one of them shows a customer three prices and only part of the terms
+    // attached to them, which is worse than showing nothing.
+    //
+    // (They were one constant, FEE_TERMS_OUTRO, until BK-36. It was split
+    // rather than edited because its second line ENDED the block on
+    // non-refundability, and the block has to end on the credit.)
+    for (const constant of TERMS_CONSTANTS) {
       check(code.includes(constant), `${file} renders ${constant}`);
     }
+
+    // ORDER, not just presence. "The block ends on the credit" is an ordering
+    // claim — refund and no-refund language sits in the MIDDLE so the last
+    // thing read is the good news — and a presence loop cannot tell that apart
+    // from the reverse. Same chain is pinned on the island below and in both
+    // arms of both customer emails by `verify-booking-email.ts`.
+    checkTermsOrder(code, file);
   }
 
   // …and `/contact/` does not. It renders the message form, not a booking
@@ -389,11 +437,12 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   const section = stripForUse(readFileSync(resolve(root, 'src/sections/ContactSection.astro'), 'utf8'));
   const boundary = section.indexOf(') : (');
   check(boundary > 0, "the ternary's form/CTA arm boundary is where this file expects it");
-  // BOTH constants, not just ITEMS. The first version tested `FEE_TERMS_ITEMS`
-  // alone, so `FEE_TERMS_OUTRO` — which carries the non-refundable term — could
-  // be rendered in the form arm and appear on `/contact/` beside "Send Us a
-  // Message" with this gate green.
-  for (const constant of ['FEE_TERMS_ITEMS', 'FEE_TERMS_OUTRO']) {
+  // EVERY terms constant, not just ITEMS. The first version tested
+  // `FEE_TERMS_ITEMS` alone, so the constant carrying the non-refundable term
+  // could be rendered in the form arm and appear on `/contact/` beside "Send Us
+  // a Message" with this gate green. BK-36 split that constant into three, so
+  // the list is the whole block rather than a pair.
+  for (const constant of TERMS_CONSTANTS) {
     check(
       section.slice(boundary).includes(constant),
       `${constant} sits in the CTA-card arm, which only the homepage renders`,
@@ -431,8 +480,9 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // Under the old model "free assessment" was conditionally true — free for the
   // customers who went ahead — and the CTA button and headings that said it were
   // parked for the client (BK-27 Q9). Under the credit model NOBODY gets a free
-  // assessment at the point of sale: every customer pays on the day and the fee
-  // is credited back afterwards. So these strings are now false, and two of them
+  // assessment at the point of sale: every customer pays — under P9 on a link
+  // before the visit rather than at it — and the fee is credited back
+  // afterwards. So these strings are now false, and two of them
   // sat in the same card as the box that prices the visit.
   //
   // RENDERED TEMPLATE ONLY, and the boundary is the point. `book.astro`'s
@@ -458,12 +508,6 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // wrong and the kind of wrong that gets copied forward, so: this pin stops
   // these two FILES from reintroducing the phrase. Whole-page coverage is
   // BK-29's, and it will need to read `dist/`, not source.
-  const templateOf = (src: string, file: string) => {
-    const lines = src.split('\n');
-    const fences = lines.reduce<number[]>((a, l, i) => (l.trim() === '---' ? [...a, i] : a), []);
-    check(fences.length >= 2 && fences[0] === 0, `${file}: frontmatter fences are where this file expects them`);
-    return lines.slice(fences[1] + 1).join('\n');
-  };
   for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
     const raw = readFileSync(resolve(root, file), 'utf8');
     const template = normalise(stripForUse(templateOf(raw, file)));
@@ -489,29 +533,230 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
   // ORDER IS ASSERTED, not just presence: a box rendered BELOW the checkbox
   // satisfies every `includes` while making the label's "above" a lie.
   const island = stripForUse(readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8'));
-  for (const constant of [
-    'FEE_TERMS_HEADING',
-    'FEE_TERMS_INTRO',
-    'FEE_TERMS_ITEMS',
-    'FEE_TERMS_OUTRO',
-    'FEE_TERMS_ACK_LABEL',
-  ]) {
+  for (const constant of [...TERMS_CONSTANTS, 'FEE_TERMS_ACK_LABEL']) {
     check(island.includes(constant), `the booking island renders ${constant}`);
   }
+  checkTermsOrder(island, 'the booking island');
   const boxAt = island.indexOf('FEE_TERMS_HEADING');
   const ackAt = island.indexOf('FEE_TERMS_ACK_LABEL');
-  const outroAt = island.indexOf('FEE_TERMS_OUTRO');
+  const outroAt = island.indexOf('FEE_TERMS_CREDIT');
   check(
     boxAt > 0 && ackAt > boxAt,
     'the island\'s terms box renders ABOVE its acknowledgment label, which is what that label claims',
   );
   check(
     outroAt > 0 && ackAt > outroAt,
-    'and the outro — the non-refundable term — is above it too, not stranded below the checkbox',
+    'and the credit — the LAST line of the terms prose — is above it too, not stranded below the checkbox',
   );
   check(
     island.includes('values.termsAck'),
     'and the checkbox is still bound to the field the server enforces',
+  );
+
+  // BK-31, and the same gate for the same reason one step later.
+  //
+  // The tier picker went in with NO assertion anywhere: a review deleted the
+  // whole fieldset and the quote block and typecheck plus four verify scripts
+  // stayed green. That failure is worse than the terms-box one above, because
+  // the server REQUIRES the tier — a public booking with the control missing
+  // 422s with `field: assessment_tier`, `FIELD_STEPS` routes the visitor to
+  // step 3, and step 3 no longer contains anything that can set it. The funnel
+  // is 100% dead with every gate passing.
+  //
+  // These are presence-and-order pins, deliberately not a recomputation of the
+  // price: an assertion that calls `assessmentQuote` to check a number
+  // `assessmentQuote` produced moves both sides together and cannot go red.
+  // What is pinned instead is that the island's figures COME FROM that function
+  // and from nowhere else, which is the property a wrong number would break.
+  for (const constant of [
+    'ASSESSMENT_TIER_LEGEND',
+    'ASSESSMENT_TIERS',
+    'ASSESSMENT_TIER_NAMES',
+    'QUOTE_HEADING',
+    'AFTER_HOURS_NOTE',
+  ]) {
+    check(island.includes(constant), `the booking island renders ${constant}`);
+  }
+  check(
+    island.includes('values.assessmentTier'),
+    'the tier radios are bound to the field the server enforces',
+  );
+  const tierAt = island.indexOf('ASSESSMENT_TIER_LEGEND');
+  check(
+    tierAt > 0 && tierAt > outroAt && ackAt > tierAt,
+    'the tier picker renders inside the terms box and ABOVE the acknowledgment label, which is what "the terms above" claims of it',
+  );
+
+  // AC10 — the displayed figure is `assessmentQuote`'s, not a second
+  // calculation. Every rendered amount goes through `formatCents` over a field
+  // of a quote object; a hand-rolled multiply or a hard-coded price in the
+  // island would be a number that can disagree with the charge.
+  check(
+    island.includes('formatCents(quote.totalCents)') &&
+      island.includes('formatCents(quote.gstCents)') &&
+      island.includes('formatCents(tierQuotes[tier].baseCents)'),
+    'the island prints its amounts from quote fields through formatCents, never from its own arithmetic',
+  );
+  check(
+    !/\*\s*3\s*\/\s*2|\*\s*1\.5|GST_RATE_PERCENT/.test(island),
+    'and the island contains no price arithmetic of its own — the multiplier and the GST rate live in booking-pricing.ts',
+  );
+
+  // AC11 — a weekend price must be EXPLAINED where it is shown. The radio
+  // prices are multiplied before any tier is selected, so the note has to be
+  // gated on the same value they are; gating it on `quote` (which needs a tier)
+  // showed three inflated figures against a terms box quoting the standard ones
+  // with nothing on the page saying why.
+  const noteAt = island.indexOf('AFTER_HOURS_NOTE');
+  const radiosAt = island.indexOf('bind:group={values.assessmentTier}');
+  check(
+    /\{#if tierQuotes\?\.\[ASSESSMENT_TIERS\[0\]\]\.afterHours\}/.test(island),
+    'the weekend note is gated on the same tierQuotes the radio prices are computed from, so it cannot render later than the number it explains',
+  );
+  check(
+    noteAt > 0 && radiosAt > noteAt,
+    'and it renders ABOVE the radio list, where the comparison actually happens',
+  );
+
+  // BK-36 — THE TERMS MOVED BELOW THE PICKER ON /book/.
+  //
+  // They used to render inside the page <header>, so the first screen was the
+  // friction and the converting element — the calendar — was below it. The
+  // order was backwards: the terms are the qualification on an offer that has
+  // not been made yet.
+  //
+  // This is pinned rather than left to layout because the move is only SAFE if
+  // the island's own box stays above its checkbox: `FEE_TERMS_ACK_LABEL` says
+  // "the terms above", which is a claim about the acknowledged copy, not about
+  // this informational block. Both halves are asserted — here, and in the
+  // island section below — because either one alone reads like the pair.
+  {
+    const raw = readFileSync(resolve(root, 'src/pages/book.astro'), 'utf8');
+    const template = stripForUse(templateOf(raw, 'src/pages/book.astro'));
+    const islandAt = template.indexOf('<BookingForm');
+    const termsAt = template.indexOf('FEE_TERMS_HEADING');
+    check(islandAt > 0, '/book/ still mounts the booking island');
+    check(
+      termsAt > islandAt,
+      '/book/ renders the terms box BELOW the booking island, not in the page header above it',
+    );
+  }
+
+  // AND THE INSURER-BILLING PROHIBITION, on the two files that author the terms.
+  //
+  // Nothing may state or imply that the ASSESSMENT is billed to an insurer —
+  // the $699/$1,199 language describes documentation the CUSTOMER receives and
+  // hands to their adjuster, and it never says who pays. The constants are
+  // pinned in `verify-booking-email.ts`; this is the prose AROUND them, which
+  // no constant covers. The live risk is concrete: `ContactSection.astro`'s
+  // "Insurance claim? We document it the way your adjuster needs" is one edit
+  // away from "your insurance pays for it", one screen above the priced box.
+  //
+  // DELIBERATELY TWO FILES, not site-wide. The site says it bills insurers for
+  // restoration WORK in a dozen places — `insurance-claims.astro` is an entire
+  // page about it — and that is a different claim on a different page, with a
+  // client behind it and no ticket to change it. A sweep that failed on all of
+  // them would be turned off within a day, which is the same reasoning the
+  // "free assessment" pin above records.
+  const INSURER_BILLING_SHAPES = [
+    /billed to your insur\w+/i,
+    /your insurance (?:pays|covers|is billed)/i,
+    /we bill your (?:insurance|insurer)/i,
+    /(?:covered|paid) by your insurance/i,
+    /insurance (?:pays|covers) (?:for )?(?:the |this )?assessment/i,
+  ];
+  for (const file of ['src/pages/book.astro', 'src/sections/ContactSection.astro']) {
+    const raw = readFileSync(resolve(root, file), 'utf8');
+    const template = normalise(stripForUse(templateOf(raw, file)));
+    const hit = INSURER_BILLING_SHAPES.find((r) => r.test(template));
+    check(
+      hit === undefined,
+      `${file}: says the assessment is billed to an insurer (${hit?.source ?? ''}) — the terms it renders never name who pays`,
+    );
+  }
+
+  // BK-36 — THE ISLAND MAKES NO BOOKED/CONFIRMED CLAIM AT SUBMISSION.
+  //
+  // Not a constant, which is why no pin caught it for two tickets. The island's
+  // fallback card — the branch taken when `storeConfirmation()` fails, which is
+  // ordinary private-mode browsing — rendered "You're booked" under a checkmark
+  // beside a reference number, for a row sitting in `pending_review`. The
+  // submit button said "Confirm booking" and the SMS consent line said "you're
+  // booked either way".
+  //
+  // BK-23 swept `/book/confirmed/`, `BookingConfirmation.svelte` and both
+  // messages, and `verify-booking-email.ts` pins the claim out of the request
+  // EMAIL. Nothing pinned the island, which is how three sentences survived the
+  // flip inside the component that submits it.
+  //
+  // THE GENERAL RULE THIS ENFORCES: a copy inventory built from "where does the
+  // constant render" misses every sentence that describes the same mechanism in
+  // its own words.
+  //
+  // ── AND IT IS APPLIED TO EVERY PUBLIC SURFACE THAT DESCRIBES THE MECHANISM,
+  //    not only to the island ─────────────────────────────────────────────────
+  //
+  // The first version read `BookingForm.svelte` alone, which is how the
+  // implementation review found the claim still live in three more places on
+  // the day this ticket was meant to remove it: `/contact/`'s hero said "Pick a
+  // time and you're confirmed on the spot", `llms.txt` said "confirmed
+  // instantly" AND "paid at the end of the visit" in one sentence, and the
+  // homepage bullet this ticket had just rewritten was pinned by nothing at
+  // all. Two of those are on surfaces no constant renders, and `llms.txt` is
+  // the file an AI assistant quotes with no page around it to qualify the
+  // claim.
+  //
+  // So the grammars are pinned, over every file that can carry them. Both
+  // shapes of the claim: the ADJECTIVAL ("instant confirmation") and the
+  // PREDICATIVE ("you're confirmed on the spot"), plus the payment-timing claim
+  // the flip falsified.
+  const BOOKED_CLAIM_SHAPES = [
+    /\byou'?re booked\b/i,
+    /\bconfirm booking\b/i,
+    /\bbooking confirmed\b/i,
+    /\byour booking is confirmed\b/i,
+    /\binstant(?:ly)?\s+confirm/i,
+    /\bconfirmation\b[^.<>]{0,20}\binstant/i,
+    /\bconfirmed\s+(?:instantly|immediately|on the spot|right away)\b/i,
+  ];
+  // The pre-prepay payment claim, anchored to a payment verb for the same
+  // reason `verify-booking-email.ts` anchors its own: a bare `on site` fires on
+  // "the on-site assessment" and survives only by a hyphen.
+  const ONSITE_PAYMENT_SHAPE =
+    /pa(?:id|y|yable|ying)\b[^.<>]{0,40}(?:end of the visit|at the visit|on site|on the day)/i;
+
+  const CLAIM_SURFACES = [
+    'src/components/BookingForm.svelte',
+    'src/sections/ContactSection.astro',
+    'src/pages/book.astro',
+    'src/pages/contact.astro',
+    'src/pages/llms.txt.ts',
+  ];
+  for (const file of CLAIM_SURFACES) {
+    const text = normalise(stripForUse(readFileSync(resolve(root, file), 'utf8')));
+    const bookedHit = BOOKED_CLAIM_SHAPES.find((r) => r.test(text));
+    check(
+      bookedHit === undefined,
+      `${file}: claims the request is booked or confirmed at submission (${bookedHit?.source ?? ''}) — under prepay it produces a REQUEST, and neither the review nor the payment has happened`,
+    );
+    check(
+      !ONSITE_PAYMENT_SHAPE.test(text),
+      `${file}: says the assessment is paid on site or on the day — the pre-prepay claim, which must not survive the flip by even one deploy`,
+    );
+  }
+
+  const islandRaw = stripForUse(readFileSync(resolve(root, 'src/components/BookingForm.svelte'), 'utf8'));
+  check(
+    islandRaw.includes('RECEIVED_HEADING') && islandRaw.includes('RECEIVED_LEAD'),
+    'and the island\'s post-submit card renders the request wording from the same constants /book/received/ and the request email use',
+  );
+  // The fourth sibling, and it hid inside a constant NAME rather than in a
+  // sentence: `EMAILED_LINE` reads "a copy of this confirmation" and
+  // `RECEIVED_EMAILED_LINE` reads "a copy of this request". No shape above can
+  // tell them apart at the call site, so the call site is asserted directly.
+  check(
+    islandRaw.includes('RECEIVED_EMAILED_LINE') && !/\bEMAILED_LINE\b(?<!RECEIVED_EMAILED_LINE)/.test(islandRaw),
+    'and it names the emailed copy a REQUEST, not a confirmation — RECEIVED_EMAILED_LINE, never EMAILED_LINE',
   );
 
   // NOT a check on `contact.astro`. The first version asserted that file
@@ -657,6 +902,120 @@ console.log('\nWhat actually reaches the browser (AC5)');
     offenders.length === 0
       ? 'no built page or bundle claims a "free assessment"'
       : `"free assessment" reaches the browser in ${offenders.length} built file(s): ${offenders
+          .map((f) => relative(root, f))
+          .join(', ')}`,
+  );
+
+  // -------------------------------------------------------------------------
+  // BK-36: the two prohibitions, read from `dist/` AFTER the build.
+  //
+  // SAME LESSON AS THE SWEEP ABOVE, and it is why these are here rather than
+  // only at the constants: BK-27 pinned the booking surfaces at SOURCE level and
+  // `/book/` rendered "free assessment" seven times without `book.astro`
+  // containing it once, because `<Navbar />` does. What a page SAYS is a
+  // property of the built page, not of the file that names it.
+  //
+  // ── SCOPE, STATED RATHER THAN DISCOVERED LATER ───────────────────────────
+  //
+  // The ticket says "no `deductible`, anywhere". Taken literally that is red on
+  // arrival: the word appears 16 times in `src/` — `insurance-claims.astro` is
+  // an entire page explaining what one is, plus `about.astro`,
+  // `TrustStrip.astro` and four service entries — and reaches seven built
+  // files. Deleting it site-wide is a marketing rewrite with no ticket and no
+  // client behind it, and it is not what the constraint is about: the
+  // prohibition is that the ASSESSMENT TERMS never name what the customer's
+  // share is called, because deductible rebating by contractors is illegal in
+  // several US jurisdictions and reads as claims-fraud territory to Canadian
+  // insurers. So the scope is the surfaces that price and acknowledge the
+  // assessment, where it is green today and where it catches the real failure
+  // mode — a shared component putting the word onto `/book/`.
+  //
+  // The insurer-billing shapes are narrower again, for a harder reason.
+  // `Navbar.svelte` says "We bill your insurer directly" and its bundle is
+  // loaded by BOTH booking surfaces; `HeroSection` and `TestimonialsSection`
+  // put the same claim in the homepage's own HTML. Those are claims about
+  // restoration WORK, they are the client's, and no ticket touches them — so
+  // this pin covers `/book/**` and the booking island's bundle, which is where
+  // a customer chooses and acknowledges an assessment. The homepage's own card
+  // is covered at source instead, in the section above.
+  //
+  // AND ONE MORE EXCLUSION WORTH NAMING because it looks like coverage and is
+  // not: `/book/` carries "direct insurance billing" inside its `LocalBusiness`
+  // JSON-LD (`data/services.ts`). This pin is green partly because none of its
+  // shapes match that string — not because `/book/` is clean of every insurer
+  // claim. Stated so the next reader does not mistake the pin's scope for its
+  // subject.
+  // ── HOW THE SURFACE LIST IS BUILT, AND WHY IT IS NOT A FILENAME GUESS ─────
+  //
+  // The first version named `_astro/BookingForm.*.js` as the island's bundle.
+  // That chunk contains NONE of this copy: Vite splits `booking-copy.ts` into a
+  // shared chunk (`booking-handoff.*.js` today, and the name is a build
+  // artifact that will change), so the arm the comment described as "where a
+  // customer chooses and acknowledges an assessment" matched zero fee-terms
+  // strings. Coverage survived only through the SSR'd HTML — a different
+  // property than the one claimed, and one that would vanish the day any of
+  // this copy became client-only. Neither red row noticed, because both fired
+  // on HTML.
+  //
+  // So the JS arm is found by CONTENT, not by filename: any built chunk that
+  // carries the terms copy is a booking surface, whatever it ends up called.
+  // And the guard below is a presence probe rather than a count — a count of
+  // four is satisfied by the `/book/**` HTML alone, which is exactly how the
+  // inert arm went unnoticed.
+  const TERMS_MARKER = FEE_TERMS_HEADING_TEXT;
+  const termsBundles = bundles.filter(
+    (f) => f.endsWith('.js') && readFileSync(f, 'utf8').includes(TERMS_MARKER),
+  );
+  const bookingSurfaces = [
+    ...bundles.filter(
+      (f) => /dist\/client\/book\/.*\.html$/.test(f) || /dist\/client\/index\.html$/.test(f),
+    ),
+    ...termsBundles,
+  ];
+  check(
+    termsBundles.length > 0,
+    `at least one built JS chunk carries the terms copy, so the bundle arm of these pins is live, got ${termsBundles.length}`,
+  );
+  check(
+    bookingSurfaces.filter((f) => f.endsWith('.html')).length >= 2,
+    `and the built booking pages were found, got ${bookingSurfaces.filter((f) => f.endsWith('.html')).length}`,
+  );
+  const deductibleOffenders = bookingSurfaces.filter((f) =>
+    /deductible/i.test(readFileSync(f, 'utf8')),
+  );
+  check(
+    deductibleOffenders.length === 0,
+    deductibleOffenders.length === 0
+      ? 'no built booking surface says "deductible"'
+      : `"deductible" reaches a booking surface in ${deductibleOffenders.length} built file(s): ${deductibleOffenders
+          .map((f) => relative(root, f))
+          .join(', ')}`,
+  );
+
+  // The insurer pin, on `/book/**` and the island bundle only — see the scope
+  // note above for why the homepage is not in this list.
+  const DIST_INSURER_SHAPES = [
+    /billed to your insur\w+/i,
+    /your insurance (?:pays|covers|is billed)/i,
+    /we bill your (?:insurance|insurer)/i,
+    /(?:covered|paid) by your insurance/i,
+    /insurance (?:pays|covers) (?:for )?(?:the |this )?assessment/i,
+  ];
+  // The homepage HTML is dropped here and only here: its hero and testimonials
+  // carry the site-wide direct-billing claim about restoration WORK, which is
+  // the client's, has no ticket, and is a different claim from "the assessment
+  // is billed to an insurer". The JS chunks stay in — they carry the terms copy
+  // and are loaded by /book/.
+  const bookOnly = bookingSurfaces.filter((f) => !/dist\/client\/index\.html$/.test(f));
+  const insurerOffenders = bookOnly.filter((f) => {
+    const source = readFileSync(f, 'utf8');
+    return DIST_INSURER_SHAPES.some((r) => r.test(source));
+  });
+  check(
+    insurerOffenders.length === 0,
+    insurerOffenders.length === 0
+      ? 'and no built /book/ surface says the assessment is billed to an insurer'
+      : `an insurer-billing claim reaches ${insurerOffenders.length} built /book/ file(s): ${insurerOffenders
           .map((f) => relative(root, f))
           .join(', ')}`,
   );

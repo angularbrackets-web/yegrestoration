@@ -59,6 +59,9 @@ import {
   CANCELLED_LEAD,
   CANCELLED_REBOOK_LINE,
   RESTORED_CALENDAR_LINE,
+  CONFIRMED_HEADING,
+  CONFIRMED_LEAD,
+  CONFIRMED_CALENDAR_LINE,
   RESTORED_HEADING,
   RESTORED_LEAD,
   TIMEZONE_NOTE,
@@ -68,6 +71,7 @@ import {
   headerSafe,
   planBookingNotifications,
   type Message,
+  type BookingMessageType,
   type NotificationPlan,
 } from './booking-email';
 import {
@@ -97,9 +101,16 @@ export function planForPayload(
   serviceLabel: string,
   now: Date,
   filesAttached = 0,
+  /**
+   * Which transition this send is (BK-43). Defaults to the one message this
+   * builder has ever produced; BK-23 passes 'payment-link' here when the admin
+   * create path stops confirming on save.
+   */
+  messageType: BookingMessageType = 'confirmed',
 ): NotificationPlan {
   return planBookingNotifications({
     id,
+    messageType,
     // Server-formatted in Edmonton time, exactly as the public path does it.
     // The message must never re-derive a zone from a raw instant.
     slotLabel: formatSlot(payload.slotStart),
@@ -109,6 +120,8 @@ export function planForPayload(
     phone: payload.phone,
     email: payload.email,
     serviceLabel,
+    service: payload.service,
+    assessmentTier: payload.assessmentTier,
     description: payload.description,
     address: payload.address,
     city: payload.city,
@@ -137,9 +150,12 @@ export function planForAppointment(
   serviceLabel: string,
   now: Date,
   filesAttached = 0,
+  /** See `planForPayload`. The resend button re-sends the confirmation. */
+  messageType: BookingMessageType = 'confirmed',
 ): NotificationPlan {
   return planBookingNotifications({
     id: row.id,
+    messageType,
     slotLabel: formatSlot(row.slot_start),
     slotStart: row.slot_start,
     now,
@@ -147,6 +163,8 @@ export function planForAppointment(
     phone: row.phone,
     email: row.email,
     serviceLabel,
+    service: row.service,
+    assessmentTier: row.assessment_tier,
     description: row.description,
     address: row.address,
     city: row.city,
@@ -265,13 +283,20 @@ export function planCalendarInvite(event: IcsEvent, kind: IcsKind, now: Date): M
 // did receive the booking confirmation email but not the cancelled
 // notification email". These two are that email, plus the restore direction —
 // which is not a flourish. The resend button cannot restore a customer's
-// calendar: `sendCustomerConfirmation` keys idempotency on `booking-<id>`,
-// byte-identical to the booking-time confirmation, so within Resend's dedupe
-// window the restore is silently collapsed into a send from days ago and the
-// customer's calendar shows "cancelled" forever, with the flash reading
-// "sent". So un-cancel mails the restore itself, through the per-transition
-// key. (The resend button's fixed key is recorded in the ticket's Mechanism
-// and deliberately NOT changed here.)
+// calendar: `sendCustomerConfirmation` keys idempotency on the CONFIRMATION
+// transition, byte-identical to the booking-time confirmation, so within
+// Resend's dedupe window the restore is silently collapsed into a send from
+// days ago and the customer's calendar shows "cancelled" forever, with the
+// flash reading "sent". So un-cancel mails the restore itself, through its own
+// transition key.
+//
+// BK-43 changed the shape of that key (`booking-<id>-confirmed`, not
+// `booking-<id>`) but NOT this hazard: `planForAppointment` defaults
+// `messageType` to 'confirmed', so the resend button still collides with the
+// booking-time confirmation. Under P9 that button is the office's only manual
+// recovery for exactly the silent-loss failure BK-43 exists to prevent.
+// Recorded in ROADMAP's Known traps with a severity and an owner rather than
+// left in this comment; deliberately NOT changed here.
 //
 // CANCELLATION IS STILL PHONE-IN (locked). Neither message carries a URL, a
 // cancel link, or a token — they are the WRITTEN CONFIRMATION of something a
@@ -372,6 +397,26 @@ export function planCancellationEmail(event: IcsEvent, email: string, now: Date)
 }
 
 /** "It is back on" — plus a fresh METHOD:REQUEST, same UID, later SEQUENCE. */
+/**
+ * The other inward crossing: a FIRST confirmation, not a reinstatement.
+ *
+ * See `CONFIRMED_HEADING`'s note for why this exists. `sendBoundaryMail` picks
+ * between the two on whether the row is coming back from `cancelled` — the only
+ * status for which "reinstated" is a true description of what happened.
+ */
+export function planFirstConfirmationEmail(
+  event: IcsEvent,
+  email: string,
+  now: Date,
+): Message {
+  return planBoundaryEmail(event, email, now, 'request', {
+    heading: CONFIRMED_HEADING,
+    lead: CONFIRMED_LEAD,
+    calendarLine: CONFIRMED_CALENDAR_LINE,
+    phoneLine: CANCEL_LINE,
+  });
+}
+
 export function planRestoreEmail(event: IcsEvent, email: string, now: Date): Message {
   return planBoundaryEmail(event, email, now, 'request', {
     heading: RESTORED_HEADING,
@@ -404,12 +449,19 @@ export function planRestoreEmail(event: IcsEvent, email: string, now: Date): Mes
 export async function sendConfirmationAndStamp(
   sql: Sql,
   plan: NotificationPlan,
+  /**
+   * The attempt, for the idempotency prefix (BK-32). Required rather than a
+   * fresh `new Date()` here: the resend button's whole job is that a SECOND
+   * click delivers, and a clock this function owned would be a clock a verify
+   * script could not drive.
+   */
+  now: Date,
   deps: NotifyDeps = {},
 ): Promise<SendOutcome> {
   try {
     return await withDeadline(
       (async (): Promise<SendOutcome> => {
-        const outcome = await sendCustomerConfirmation(plan, deps);
+        const outcome = await sendCustomerConfirmation(plan, now, deps);
         if (outcome === 'sent') {
           try {
             // Fresh clock: this is when the send returned, not when the request

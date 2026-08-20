@@ -16,7 +16,7 @@
 import {
   CLOSED_WEEKDAYS,
   MAX_ADVANCE_DAYS,
-  MIN_NOTICE_HOURS,
+  MIN_NOTICE_DAYS,
   SLOT_START_TIMES,
   TIMEZONE,
 } from './booking-config';
@@ -153,20 +153,48 @@ export function isClosedWeekday(key: DateKey): boolean {
   return CLOSED_WEEKDAYS.includes(weekdayOfDateKey(key));
 }
 
-/** The earliest instant a public booking may start, given the minimum-notice rule. */
-export function earliestBookableInstant(now: Date = new Date()): Date {
-  return new Date(now.getTime() + MIN_NOTICE_HOURS * HOUR_MS);
+/** The earliest local DATE a public booking may fall on. Next-day earliest (BK-23). */
+export function earliestBookableDate(now: Date = new Date()): DateKey {
+  return addDays(localDateKey(now), MIN_NOTICE_DAYS);
 }
+
+/*
+ * `earliestBookableInstant` was here and is deliberately GONE (BK-23 review).
+ *
+ * BK-23's own text called it "the single chokepoint both the picker and the
+ * availability filter already read" — and by the time that sentence shipped it
+ * was false. Moving the rule from a rolling window to a calendar one turned
+ * both callers into date-key comparisons: `booking-form.ts` compares keys
+ * directly and `booking-availability.ts` calls `isWithinBookingWindow`. Nothing
+ * called it, and an exported instant-cutoff sitting beside a calendar rule is
+ * an invitation to reintroduce the rolling comparison it replaced.
+ *
+ * `earliestBookableDate` is the real chokepoint. Use that.
+ *
+ * The name stays on `verify-booking-admin-entry.ts`'s banned-import list on
+ * purpose: a banned name that no longer exists costs nothing and catches a
+ * reintroduction.
+ */
 
 /** The last local date the public calendar offers. */
 export function latestBookableDate(now: Date = new Date()): DateKey {
   return addDays(localDateKey(now), MAX_ADVANCE_DAYS);
 }
 
-/** Minimum-notice and booking-horizon check. Does not consider blackouts or existing bookings. */
+/**
+ * Minimum-notice and booking-horizon check. Does not consider blackouts or
+ * existing bookings.
+ *
+ * BOTH BOUNDS ARE NOW CALENDAR COMPARISONS, which is what makes them agree.
+ * The upper bound always was one (`latestBookableDate` returns a date); the
+ * lower bound was a rolling instant until BK-23, so the two ends of the same
+ * window were expressed in different units. Comparing date keys at both ends
+ * means "next-day earliest, 14 days out" is one sentence in the code as well as
+ * in the copy.
+ */
 export function isWithinBookingWindow(slotStart: Date, now: Date = new Date()): boolean {
-  if (slotStart.getTime() < earliestBookableInstant(now).getTime()) return false;
-  return localDateKey(slotStart) <= latestBookableDate(now);
+  const date = localDateKey(slotStart);
+  return date >= earliestBookableDate(now) && date <= latestBookableDate(now);
 }
 
 /** Every local date the public calendar covers, closed weekdays included (caller filters). */

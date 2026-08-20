@@ -75,21 +75,33 @@ export const POST: APIRoute = async ({ request }) => {
     const appointment = rows[0];
     if (!appointment) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
 
+    // BK-23: `booked` became `confirmed`, and the guard stays NARROW on purpose.
+    // This button re-sends the "you're booked" confirmation with its calendar
+    // invite. A `pending_review` or `approved_awaiting_payment` row has not been
+    // paid for, so re-sending that message would tell a customer they have an
+    // appointment they have not bought — the single claim this whole flow
+    // exists to stop making. The other statuses get the payment link or the
+    // decline notice through their own paths, not through this one.
     const hasEmail = typeof appointment.email === 'string' && appointment.email.trim() !== '';
-    if (appointment.status !== 'booked' || !hasEmail) {
+    if (appointment.status !== 'confirmed' || !hasEmail) {
       return redirect(`${detail}?email=refused`);
     }
 
+    // ONE CLOCK FOR BOTH USES, AND THE SECOND USE IS WHAT MAKES THIS BUTTON
+    // WORK AT ALL (BK-32). It reaches the ICS on `plan.internal`, which this
+    // route never delivers — and, since the idempotency prefix gained an
+    // attempt component, it is also what makes a SECOND click a different
+    // Resend key. Before that, clicking Resend inside Resend's 24-hour window
+    // delivered nothing, flashed "sent", and logged nothing — on the one button
+    // that exists to recover a message the customer never got.
+    const now = new Date();
     const plan = planForAppointment(
       appointment,
       SERVICE_LABELS[appointment.service] ?? appointment.service,
-      // Reaches only the ICS on `plan.internal`, which this route never
-      // delivers — see `planForAppointment`. A real clock rather than a
-      // placeholder for the same reason the file count is real.
-      new Date(),
+      now,
       appointment.file_count,
     );
-    const outcome = await sendConfirmationAndStamp(sql, plan);
+    const outcome = await sendConfirmationAndStamp(sql, plan, now);
     // 'skipped' here can only be the mute flag — the gate above already
     // established there is a customer message to send. Reported as "none sent"
     // rather than as a failure, so the office is not sent back to a button

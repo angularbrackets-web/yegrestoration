@@ -34,7 +34,8 @@ import {
   isPlausiblePhone,
   type FieldError,
 } from './booking-payload';
-import { earliestBookableInstant, slotStartsForDate } from './booking-time';
+import type { AssessmentTier } from './booking-pricing';
+import { earliestBookableDate } from './booking-time';
 import { EXTENSION_TO_TYPE, formatBytes, isAllowedContentType } from './booking-uploads';
 
 export type Step = 1 | 2 | 3;
@@ -61,6 +62,12 @@ export type FormValues = {
   smsConsent: boolean;
   /** BK-27's fee-terms acknowledgment. Unlike `smsConsent`, this one blocks. */
   termsAck: boolean;
+  /**
+   * BK-31's chosen assessment. `null` until the visitor picks one — there is no
+   * default, deliberately: a pre-selected tier charges someone for a choice
+   * they never made.
+   */
+  assessmentTier: AssessmentTier | null;
 };
 
 export function emptyFormValues(): FormValues {
@@ -82,6 +89,8 @@ export function emptyFormValues(): FormValues {
     // False, and never anything else. A default of true would tick the box for
     // the visitor, which is not an acknowledgment of anything.
     termsAck: false,
+    // Null for the same reason, and it matters more: this one becomes a charge.
+    assessmentTier: null,
   };
 }
 
@@ -151,6 +160,9 @@ export const FIELD_STEPS: Readonly<Record<string, Step>> = {
   // degrades to the generic form message beside an unticked box nobody is told
   // to tick. Different reason, same conclusion.
   terms_ack: 3,
+  // Same reason as `terms_ack` — step ROUTING. A 422 whose only field is the
+  // tier must land the visitor on the step that asks for one.
+  assessment_tier: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +267,12 @@ export function validateStep(
   // complaints in the order the page presents them. BK-27: this one mirrors the
   // server's public arm exactly — an unticked box is a 422 either way, and the
   // point of checking it here is that the visitor finds out before submitting.
+  // BK-31, BEFORE the acknowledgment: the ack label says "the terms above",
+  // and the radios sit above the checkbox, so complaining in that order matches
+  // what the visitor is looking at.
+  if (values.assessmentTier === null) {
+    add('assessment_tier', 'Choose which assessment you would like.');
+  }
   if (values.termsAck !== true) {
     add('terms_ack', 'Please confirm you understand the assessment terms.');
   }
@@ -300,6 +318,11 @@ export function assembleBookingPayload(
     // this field is the correct reading, but it should be the visitor's, not a
     // side effect of how the payload was assembled.
     terms_ack: values.termsAck === true,
+    // The tier KEY and nothing else. No amount is assembled here, ever — the
+    // server computes the price from this key plus the service and the slot it
+    // stored. `verify-booking-payload.ts` asserts the server ignores an amount
+    // if one is sent anyway; this is the near side of the same rule.
+    assessment_tier: values.assessmentTier,
   };
 
   const optional: [string, string][] = [
@@ -478,11 +501,22 @@ export type DayChipKind = 'open' | 'closed' | 'elapsed' | 'full';
  * `closed` is tested before `elapsed` because a Friday that is also in the past
  * is a Friday: the policy is the durable reason and the clock is incidental.
  *
- * `elapsed` is a PROOF, not a guess. Every one of the day's five grid instants
- * is earlier than the earliest instant the notice rule permits, so no booking
- * is involved in the day being empty and no disclosure is made by saying so.
- * A day with even one slot still inside the window that is nonetheless empty is
- * genuinely taken, and falls through to `full` correctly.
+ * `elapsed` is a PROOF, not a guess: the date is before the first date the
+ * notice rule permits, so no booking is involved in the day being empty and no
+ * disclosure is made by saying so. An empty day that IS bookable is genuinely
+ * taken, and falls through to `full` correctly. That distinction is the whole
+ * reason this function exists — "Full" on a day nobody could have booked would
+ * be a lie about the office's calendar.
+ *
+ * **BK-23 made this a date comparison rather than an instant one**, following
+ * the notice rule from rolling hours to calendar days. The consequence is worth
+ * stating because it changed what the chips say: TODAY IS NOW ALWAYS
+ * `elapsed`, at every hour, including first thing in the morning. It is not
+ * bookable online at all, so "Full" would misdescribe it. Under the old rule a
+ * day could be partly elapsed, and this function had to prove that EVERY slot
+ * was past the cutoff before claiming it; under a calendar rule a date is
+ * wholly before the cutoff or wholly after it, and there is no partial case
+ * left to get wrong.
  */
 export function dayChipKind(
   date: string,
@@ -492,8 +526,7 @@ export function dayChipKind(
 ): DayChipKind {
   if (slotCount > 0) return 'open';
   if (CLOSED_WEEKDAYS.includes(weekday)) return 'closed';
-  const cutoff = earliestBookableInstant(now).getTime();
-  if (slotStartsForDate(date).every((start) => start.getTime() < cutoff)) return 'elapsed';
+  if (date < earliestBookableDate(now)) return 'elapsed';
   return 'full';
 }
 

@@ -14,6 +14,7 @@
 // The guard order below is load-bearing and is the same one BK-02 established:
 // refuse without DATABASE_URL_DEV, assert it differs from production, SWAP
 // DATABASE_URL, and only then start anything that reaches a database.
+import { SLOT_HOLD_PREDICATE } from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { spawn } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
@@ -400,6 +401,13 @@ try {
       // it to false — deliberately, so an unticked box fails closed — which
       // makes this line the difference between a smoke run and a 422.
       termsAck: true,
+      // Required on the public door since BK-31, for the same fail-closed
+      // reason as `termsAck`: `emptyFormValues()` leaves it null, and the
+      // payload refuses a public booking without it. Deliberately NOT
+      // 'standard' — that is the first tier in the list and the one a
+      // careless default would produce, so a wrong value could not be told
+      // from a missing one. 'report' can only arrive by being sent.
+      assessmentTier: 'report',
     },
     draft.draftToken,
   );
@@ -497,12 +505,28 @@ try {
   // Scoped to this slot: the dev branch is a copy-on-write snapshot of
   // production plus BK-02's hammer rows, so it is nowhere near empty.
   const rows = (await sql`
-    SELECT id, sms_consent_at, policy_number FROM appointments
-    WHERE slot_start = ${slot.start} AND status <> 'cancelled'
-  `) as { id: number; sms_consent_at: Date | null; policy_number: string | null }[];
+    SELECT id, sms_consent_at, policy_number, assessment_tier FROM appointments
+    WHERE slot_start = ${slot.start} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+  `) as {
+    id: number;
+    sms_consent_at: Date | null;
+    policy_number: string | null;
+    assessment_tier: string | null;
+  }[];
   check(rows.length === 1, `exactly one appointment must exist for that slot (got ${rows.length})`);
   check(rows[0]?.id === createdId, "the row's id must be the one the endpoint returned");
   check(rows.length === 1 && rows[0].sms_consent_at !== null, 'consent given must be stamped');
+  // BK-31, through the real route rather than through `parseBookingPayload`.
+  // The tier the customer picked is what BK-32 charges, so the column is the
+  // last link in that chain and the only one no pure script can observe: the
+  // value has to survive the island, the JSON body, the parse, the INSERT's
+  // column list and the CHECK. The literal is spelled out rather than read
+  // back from the payload — an assertion that compares the row against the
+  // thing that wrote it cannot go red.
+  check(
+    rows[0]?.assessment_tier === 'report',
+    `the chosen tier must reach the column (got ${JSON.stringify(rows[0]?.assessment_tier)})`,
+  );
 
   const claimed = (await sql`
     SELECT id, pathname FROM appointment_files WHERE appointment_id = ${createdId}

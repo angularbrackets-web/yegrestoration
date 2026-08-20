@@ -45,17 +45,20 @@ import {
   type FieldError,
   type ParseOptions,
 } from './booking-payload';
+import { isAssessmentTier, type AssessmentTier } from './booking-pricing';
+import { APPOINTMENT_STATUSES, isAppointmentStatus } from './booking-status';
 import type { AppointmentStatus, PipelineStage } from './db';
 
 export type { FieldError, ParseOptions };
 
 /** The closed sets the update form validates against. Mirrors the DB CHECKs. */
-export const APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
-  'booked',
-  'completed',
-  'cancelled',
-  'no_show',
-];
+/**
+ * Re-exported, not redeclared (BK-23). This list is what the admin dropdown
+ * renders AND what it validates against, and keeping a second copy here is how
+ * the enum, the CHECK and the dropdown drifted into three lists that had to be
+ * moved by hand together.
+ */
+export { APPOINTMENT_STATUSES } from './booking-status';
 
 export const PIPELINE_STAGES: readonly PipelineStage[] = [
   'assessment',
@@ -182,6 +185,7 @@ export const ADMIN_ENTRY_FIELD_LABELS: Record<string, string> = {
   slot_time: 'Time',
   slot_start: 'Time',
   admin_notes: 'Office notes',
+  assessment_tier: 'Assessment',
 };
 
 export type AdminEntryResult =
@@ -283,6 +287,13 @@ export function parseAdminEntry(
       insurer_name: raw.insurer_name,
       policy_number: raw.policy_number,
       claim_number: raw.claim_number,
+      // BK-31. Optional on this door — the office may not know the tier while
+      // typing — but it has to be LISTED, or the select on the entry form posts
+      // into a whitelist that drops it and the row saves with no tier at all.
+      // That is not a hypothetical: it is how this shipped for one red pass,
+      // and the symptom was the review panel refusing to approve a booking the
+      // office had already chosen an assessment for.
+      assessment_tier: raw.assessment_tier,
       slot_start: (slotStart ?? PLACEHOLDER_SLOT).toISOString(),
       sms_consent: checked(raw.sms_consent),
     },
@@ -328,6 +339,15 @@ export type AppointmentUpdate = {
   pipeline_stage?: PipelineStage;
   /** Present when the notes field was submitted at all; null clears them. */
   admin_notes?: string | null;
+  /**
+   * Present when the tier select was submitted at all; null is the "Not chosen"
+   * option and clears it (BK-31).
+   *
+   * Editable because a customer who upgrades on site has to be recordable. It
+   * does NOT re-charge anything — the control says so beside itself, because
+   * under P9 this row may already have been paid against.
+   */
+  assessment_tier?: AssessmentTier | null;
 };
 
 export type UpdateParseResult =
@@ -362,8 +382,8 @@ export function parseAppointmentUpdate(input: unknown): UpdateParseResult {
 
   const status = str(raw.status);
   if (status !== null) {
-    if ((APPOINTMENT_STATUSES as readonly string[]).includes(status)) {
-      update.status = status as AppointmentStatus;
+    if (isAppointmentStatus(status)) {
+      update.status = status;
     } else {
       errors.push({ field: 'status', message: 'Choose one of the listed statuses.' });
     }
@@ -375,6 +395,21 @@ export function parseAppointmentUpdate(input: unknown): UpdateParseResult {
       update.pipeline_stage = stage as PipelineStage;
     } else {
       errors.push({ field: 'pipeline_stage', message: 'Choose one of the listed stages.' });
+    }
+  }
+
+  // Same absent-vs-empty distinction as the notes below: the select always
+  // posts, and its empty option means "not chosen" rather than "leave alone".
+  // A tier is never invented here — an unrecognised value is an error, not a
+  // fallback, on the same reasoning as the public door's.
+  if (typeof raw.assessment_tier === 'string') {
+    const tier = str(raw.assessment_tier);
+    if (tier === null) {
+      update.assessment_tier = null;
+    } else if (isAssessmentTier(tier)) {
+      update.assessment_tier = tier;
+    } else {
+      errors.push({ field: 'assessment_tier', message: 'Choose one of the listed assessments.' });
     }
   }
 

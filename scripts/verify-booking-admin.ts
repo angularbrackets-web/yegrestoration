@@ -48,6 +48,9 @@ import {
   type NotifiableAppointment,
   type PartitionableAppointment,
 } from '../src/lib/booking-admin';
+// LIVE_STATUSES is deliberately NOT imported: this script's expectation is a
+// literal, and importing the constant is how it stopped being one.
+import { APPOINTMENT_STATUSES } from '../src/lib/booking-status';
 import { SUPPORT_PHONE } from '../src/lib/booking-config';
 import type { Appointment, AppointmentStatus, Lead } from '../src/lib/db';
 import { fillTemplate, REPLY_TEMPLATES, SERVICE_FALLBACK } from '../src/lib/reply-templates';
@@ -317,15 +320,58 @@ const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 {
-  const STATUSES: AppointmentStatus[] = ['booked', 'completed', 'cancelled', 'no_show'];
+  // BK-23: all eight, not the old four. The three LIVE ones are upcoming-
+  // eligible now, so this grid is 24 cells rather than 12 and three of the
+  // future rows are upcoming rather than one.
+  const STATUSES: AppointmentStatus[] = [...APPOINTMENT_STATUSES];
   const OFFSETS: [string, number][] = [
     ['past', -3 * DAY],
     ['boundary', 0],
     ['future', 3 * DAY],
   ];
 
-  // Exhaustive: every status against every side of the cutoff. Only one of the
-  // twelve cells is upcoming-eligible per offset, and only for `booked`.
+  // WHICH STATUSES ARE UPCOMING-ELIGIBLE, SPELLED OUT AS DATA.
+  //
+  // This list used to be `LIVE_STATUSES.includes(status)` — the same constant
+  // `partitionAppointments` reads to make the decision under test. Both sides
+  // then moved together: adding 'completed' to LIVE_STATUSES put finished jobs
+  // back in the office's upcoming column and **every assertion here stayed
+  // green**. Found while logging red rows for this section, 2026-08-18.
+  //
+  // Seventh instance of the family in ROADMAP's Known traps, and the rule it
+  // already states: an assertion must never call the function — or read the
+  // constant — it is asserting about. The expectation is a literal now, so
+  // changing the production list is a diff someone has to make here too, on
+  // purpose, with this comment in front of them.
+  const UPCOMING_ELIGIBLE = new Set<string>([
+    'pending_review',
+    'approved_awaiting_payment',
+    'confirmed',
+  ]);
+
+  // The complement, stated rather than computed, so a status added to the enum
+  // and forgotten fails LOUDLY here instead of being silently absent from both
+  // sides of the comparison.
+  const PAST_ONLY = new Set<string>([
+    'completed',
+    'cancelled',
+    'declined',
+    'payment_expired',
+    'no_show',
+  ]);
+  check(
+    UPCOMING_ELIGIBLE.size + PAST_ONLY.size === STATUSES.length,
+    `every status is classified here (${UPCOMING_ELIGIBLE.size} + ${PAST_ONLY.size} vs ${STATUSES.length}) — a new status must be added to one of these two lists`,
+  );
+  for (const status of STATUSES) {
+    check(
+      UPCOMING_ELIGIBLE.has(status) !== PAST_ONLY.has(status),
+      `${status} is in exactly one of the two lists`,
+    );
+  }
+
+  // Exhaustive: every status against every side of the cutoff. Only the three
+  // LIVE statuses are upcoming-eligible, and only at or after the boundary.
   let id = 0;
   const rows: Row[] = [];
   const expected = new Map<number, 'upcoming' | 'past'>();
@@ -333,7 +379,7 @@ const DAY = 24 * HOUR;
     for (const [, offset] of OFFSETS) {
       id++;
       rows.push(row(id, status, offset));
-      expected.set(id, status === 'booked' && offset >= 0 ? 'upcoming' : 'past');
+      expected.set(id, UPCOMING_ELIGIBLE.has(status) && offset >= 0 ? 'upcoming' : 'past');
     }
   }
 
@@ -364,9 +410,9 @@ const DAY = 24 * HOUR;
   // Ordering. Built shuffled, since a list that arrives sorted cannot tell a
   // working sort from no sort at all.
   const rows: Row[] = [
-    row(1, 'booked', 5 * HOUR),
-    row(2, 'booked', 1 * HOUR),
-    row(3, 'booked', 3 * HOUR),
+    row(1, 'confirmed', 5 * HOUR),
+    row(2, 'confirmed', 1 * HOUR),
+    row(3, 'confirmed', 3 * HOUR),
     row(4, 'completed', -1 * HOUR),
     row(5, 'cancelled', -5 * HOUR),
     row(6, 'no_show', -3 * HOUR),
@@ -387,7 +433,7 @@ const DAY = 24 * HOUR;
   check(past.some((r) => r.id === 5), 'a cancelled appointment is still listed');
 
   // Pure: the input array is not reordered under the caller.
-  const original: Row[] = [row(1, 'booked', 5 * HOUR), row(2, 'booked', 1 * HOUR)];
+  const original: Row[] = [row(1, 'confirmed', 5 * HOUR), row(2, 'confirmed', 1 * HOUR)];
   const before = original.map((r) => r.id).join(',');
   partitionAppointments(original, NOW);
   check(original.map((r) => r.id).join(',') === before, 'the caller’s array is left untouched');

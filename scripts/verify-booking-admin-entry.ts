@@ -48,6 +48,17 @@ import {
 } from '../src/lib/booking-notify';
 import { isClosedWeekday, localDateKey, weekdayOfDateKey } from '../src/lib/booking-time';
 
+/**
+ * ONE FROZEN CLOCK FOR EVERY SEND IN THIS FILE (BK-32).
+ *
+ * The notification idempotency prefix now carries an attempt component, so
+ * `new Date()` at each call site would make every prefix in this file unique
+ * for a reason that has nothing to do with what is being asserted — and the
+ * distinctness checks would then pass with the message TYPE dropped from the
+ * key entirely. A fixed instant is what keeps those assertions able to fail.
+ */
+const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
+
 let failures = 0;
 function check(condition: boolean, message: string) {
   if (!condition) {
@@ -382,7 +393,7 @@ console.log('\nparseAppointmentUpdate — the whitelist (AC2)');
   // that is not here cannot reach an UPDATE.
   const hostile = parseAppointmentUpdate({
     id: '12',
-    status: 'booked',
+    status: 'confirmed',
     slot_start: '2026-01-01T00:00:00Z',
     duration_minutes: '90',
     policy_number: 'POLICYSENTINEL-77Q',
@@ -529,7 +540,7 @@ console.log('\nsendCustomerConfirmation — count and audience (AC5)');
     return { ok: true };
   };
 
-  const outcome = await sendCustomerConfirmation(plan, { send: record });
+  const outcome = await sendCustomerConfirmation(plan, SEND_NOW, { send: record });
   check(outcome === 'sent', 'a successful send reports sent');
   check(seen.length === 1, `exactly one message is delivered, got ${seen.length}`);
   check(seen[0]?.to === 'dana@example.com', 'and it is addressed to the customer');
@@ -554,7 +565,7 @@ console.log('\nsendCustomerConfirmation — count and audience (AC5)');
   // "exactly one" assertion above would also pass for a module that had stopped
   // sending anything at all.
   const both: Message[] = [];
-  await sendBookingNotifications(plan, {
+  await sendBookingNotifications(plan, SEND_NOW, {
     send: async (m) => {
       both.push(m);
       return { ok: true };
@@ -634,7 +645,7 @@ console.log('\nThe narrowed invariant: the office gets a calendar artifact, neve
   // other field, which is asserted above and is a property of the code.
   const plan = planForPayload(4816, parsed.payload, 'Water Damage Restoration', NOW);
   const resent: Message[] = [];
-  await sendCustomerConfirmation(plan, {
+  await sendCustomerConfirmation(plan, SEND_NOW, {
     send: async (m) => {
       resent.push(m);
       return { ok: true };
@@ -680,6 +691,9 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
 
   const withEmail = planBookingNotifications({
     id: 4813,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: 'standard',
     slotLabel: 'Mon, Aug 24 · 1:30 p.m.',
     slotStart: new Date('2026-08-24T19:30:00.000Z'),
     now: NOW,
@@ -700,6 +714,9 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   });
   const noEmail = planBookingNotifications({
     id: 4814,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: null,
     slotLabel: 'Mon, Aug 24 · 2:30 p.m.',
     slotStart: new Date('2026-08-24T20:30:00.000Z'),
     now: NOW,
@@ -730,23 +747,23 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
     throw new Error('socket hang up');
   };
 
-  check(await sendCustomerConfirmation(withEmail, { send: sent }) === 'sent', 'success → sent');
+  check(await sendCustomerConfirmation(withEmail, SEND_NOW, { send: sent }) === 'sent', 'success → sent');
   check(
-    (await sendCustomerConfirmation(withEmail, { send: failed })) === 'failed',
+    (await sendCustomerConfirmation(withEmail, SEND_NOW, { send: failed })) === 'failed',
     'a resolved error response is failed, never sent',
   );
   check(
-    (await sendCustomerConfirmation(withEmail, { send: threw })) === 'failed',
+    (await sendCustomerConfirmation(withEmail, SEND_NOW, { send: threw })) === 'failed',
     'a throwing sender is caught rather than escaping into the route',
   );
   check(
-    (await sendCustomerConfirmation(noEmail, { send: sent })) === 'skipped',
+    (await sendCustomerConfirmation(noEmail, SEND_NOW, { send: sent })) === 'skipped',
     'no email address → skipped, and nothing is delivered',
   );
 
   // No customer message means no send at all — not an unaddressed one.
   const attempts: Message[] = [];
-  await sendCustomerConfirmation(noEmail, {
+  await sendCustomerConfirmation(noEmail, SEND_NOW, {
     send: async (m) => {
       attempts.push(m);
       return { ok: true };
@@ -768,7 +785,7 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   ] as const) {
     process.env.BOOKING_NOTIFY_DISABLED = value;
     const calls: Message[] = [];
-    const outcome = await sendCustomerConfirmation(withEmail, {
+    const outcome = await sendCustomerConfirmation(withEmail, SEND_NOW, {
       send: async (m) => {
         calls.push(m);
         return { ok: true };
@@ -787,7 +804,7 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
   delete process.env.RESEND_API_KEY;
   try {
     check(
-      (await sendCustomerConfirmation(withEmail)) === 'failed',
+      (await sendCustomerConfirmation(withEmail, SEND_NOW)) === 'failed',
       'an unset RESEND_API_KEY reports failed rather than throwing',
     );
   } finally {

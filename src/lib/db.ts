@@ -1,5 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 
+import type { AssessmentTier } from './booking-pricing';
+import type { AppointmentStatus } from './booking-status';
 import { readEnv } from './env';
 
 export type Lead = {
@@ -49,7 +51,15 @@ export type Lead = {
 export type PipelineStage = 'assessment' | 'mitigation' | 'restoration';
 
 /** Lifecycle of the booking itself. Only 'cancelled' releases the slot. */
-export type AppointmentStatus = 'booked' | 'completed' | 'cancelled' | 'no_show';
+/**
+ * Re-exported from `booking-status.ts`, which owns the lifecycle and the
+ * slot-hold predicate together — they are one decision, and separating the
+ * enum from the rule that reads it is how the two drifted before BK-23.
+ */
+export type { AppointmentStatus };
+
+/** Re-exported from the pricing module so a row type does not import a price table. */
+export type { AssessmentTier };
 
 export type Appointment = {
   id: number;
@@ -69,6 +79,15 @@ export type Appointment = {
   claim_number: string | null;
   pipeline_stage: PipelineStage;
   status: AppointmentStatus;
+  /**
+   * Which assessment the customer chose (BK-31). NULL for admin entries and for
+   * every row predating migration 007 — see the migration for why that is
+   * permanent rather than a backfill waiting to happen.
+   *
+   * Typed as the union rather than `string` so a render site cannot silently
+   * print an unknown tier; the DB CHECK is what makes the narrowing true.
+   */
+  assessment_tier: AssessmentTier | null;
   /** UTC instant. Compare with `.getTime()`, never against an ISO string. */
   slot_start: Date;
   duration_minutes: number;
@@ -88,8 +107,115 @@ export type Appointment = {
   internal_notified_at: Date | null;
   admin_notes: string | null;
   cancelled_at: Date | null;
+
+  // ── The review lifecycle's own columns (BK-23, migration 008) ────────────
+  //
+  // These were added to the TABLE by migration 008 and read by the admin
+  // detail page from the day it shipped, but never declared here — so
+  // `astro check` had eight errors against `[id].astro` and the ticket's gate
+  // table recorded "typecheck: pass". `npm run build` cannot catch it: Vite
+  // strips types without checking them, so the gate that would have failed is
+  // the only one that was misread. Same family as the ROADMAP's
+  // `verify:booking:admin:db` trap — a gate reported green while red.
+
+  /** Stamped by the approve transition. NULL for anything never approved. */
+  approved_at: Date | null;
+  /** Stamped by the decline transition and by the stale-request expiry sweep. */
+  declined_at: Date | null;
+  /** For BK-25's alert timers. Nothing writes it yet. */
+  escalated_at: Date | null;
+  /** For BK-23 Task 6's unseen-files badge. Nothing writes it yet. */
+  files_reviewed_at: Date | null;
+
+  // The amounts as the office SETTLED them at approval — a snapshot, never
+  // recomputed. Prices change under live rows, and the figure the approval
+  // email quoted is the figure the receipt has to match. All NULL until the row
+  // is approved; `travel_fee_cents` is the exception, `NOT NULL DEFAULT 0`,
+  // because a travel fee is never computed and never auto-charged.
+  assessment_amount_cents: number | null;
+  travel_fee_cents: number;
+  gst_cents: number | null;
+  total_amount_cents: number | null;
+
+  /**
+   * When payment is due, or NULL on the PAY-NOW branch.
+   *
+   * NULL is an answer, not a missing value, and the expiry cron's predicate
+   * depends on it being one — see `isPaymentOverdue` and
+   * `api/cron/expire-payments.ts`. Never COALESCE it to a date.
+   */
+  payment_due_at: Date | null;
+  /**
+   * `not_required` is correct and permanent ONLY for rows predating migration
+   * 008. Everything since starts `pending` at approval.
+   */
+  payment_status:
+    | 'not_required'
+    | 'pending'
+    | 'paid'
+    | 'refunded'
+    | 'partially_refunded'
+    | 'failed';
+
+  // ── The payment block (BK-32, migration 010) ────────────────────────────
+
+  /**
+   * How the money arrived. NULL until it does.
+   *
+   * `'none'` is a $0.00 approval confirmed through the same `markPaid()` as
+   * every other payment — a booking with no payment STEP. It is not
+   * `payment_status = 'not_required'`, which means the older and different
+   * thing: a row predating prepay entirely.
+   */
+  payment_method: 'stripe' | 'interac' | 'onsite' | 'none' | null;
+  /**
+   * WHAT ACTUALLY ARRIVED — never `total_amount_cents`, which is the snapshot
+   * the approval settled and the approval email quoted. The two are separate
+   * columns precisely so a disagreement between them is a fact somebody can
+   * query rather than a number that quietly overwrote the other.
+   */
+  paid_amount_cents: number | null;
+  /**
+   * The reference for whatever kind of payment it was — an e-Transfer
+   * reference the office typed, or the Stripe reference on the card path.
+   * Separate from `stripe_payment_intent_id` below, which BK-33 refunds from.
+   */
+  payment_reference: string | null;
+  /** Who asserted the e-Transfer arrived, and when. The audit trail. */
+  interac_marked_by: string | null;
+  interac_marked_at: Date | null;
+  /**
+   * Money landed somewhere it should not have — a double pay, a payment after
+   * the slot was released, a session we minted but could not record. Read by
+   * the admin list and the detail page.
+   *
+   * **Appended to, never overwritten**, and nothing clears it (BK-32 scope).
+   */
+  needs_attention: string | null;
+  /** At most one live Checkout Session at a time; a re-approval expires the old one. */
+  stripe_session_id: string | null;
+  /** Card path only. BK-33 issues its refund from this. */
+  stripe_payment_intent_id: string | null;
+  paid_at: Date | null;
+
   created_at: Date;
   updated_at: Date;
+};
+
+/**
+ * One Stripe webhook delivery (BK-32, migration 010).
+ *
+ * `processed_at` is the load-bearing column: the insert CLAIMS an event, the
+ * stamp records that it was handled, and an unstamped event is claimed again on
+ * retry. Without it "already present" would mean "already handled", and a
+ * handler dying between the two would let the expiry cron release the slot of a
+ * booking the customer had paid for.
+ */
+export type StripeEvent = {
+  event_id: string;
+  type: string;
+  received_at: Date;
+  processed_at: Date | null;
 };
 
 export type AppointmentFile = {

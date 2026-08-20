@@ -7,20 +7,8 @@ import {
   adminAppointmentPath,
 } from '../../../../lib/booking-admin';
 import { appendUntickedNote, parseAdminEntry } from '../../../../lib/booking-admin-entry';
-import {
-  inviteEventFromPayload,
-  planCalendarInvite,
-  planForPayload,
-  sendConfirmationAndStamp,
-} from '../../../../lib/booking-admin-notify';
+import { planForPayload, sendConfirmationAndStamp } from '../../../../lib/booking-admin-notify';
 import { insertBooking } from '../../../../lib/booking-commit';
-import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
-import {
-  sendCalendarInvite,
-  withDeadline,
-  type SendOutcome,
-} from '../../../../lib/booking-notify';
-import type { BookingPayload } from '../../../../lib/booking-payload';
 import { getDb, SERVICE_LABELS } from '../../../../lib/db';
 
 /**
@@ -117,31 +105,34 @@ export const POST: APIRoute = async ({ request }) => {
   // exists so the two cannot drift into an `undefined` in a subject line.
   const serviceLabel = SERVICE_LABELS[payload.service] ?? payload.service;
 
-  // The two post-commit sends run CONCURRENTLY, each under the same budget,
-  // rather than one after the other. Serially they would stack to two full
-  // POST_COMMIT_BUDGET_MS windows on a request that has already run an insert,
-  // and the platform's function limit is what a stacked pair blows through —
-  // the same reasoning `sendBookingNotifications` uses for its `Promise.all`.
-  const [emailOutcome, inviteOutcome] = await Promise.all([
+  // ── BK-23: A PHONE BOOKING IS A REQUEST TOO ──────────────────────────────
+  //
+  // What the customer gets is the ACKNOWLEDGEMENT, not a confirmation, and
+  // there is no office calendar invite. Under prepay nothing is confirmed until
+  // it is paid — client decision 2026-08-16, "payment always precedes dispatch,
+  // no exceptions", and phone customers pay by link like everybody else.
+  //
+  // The row lands in `pending_review` (the column default) and the office
+  // approves it from the review panel, which is where the amount is set. See
+  // the note in BK-23 on why this is `pending_review` rather than the
+  // `approved_awaiting_payment` P9 first sketched: an approval needs an amount,
+  // an amount needs a tier, and the tier is optional on this form by the same
+  // exemption that makes email optional. Landing here means one screen sets the
+  // amount instead of two, and nothing is ever approved without one.
+  //
+  // The office invite is GONE from this path, not merely conditional. It used
+  // to fire here unconditionally, and it would have filled the calendar with
+  // slots that may be declined or never paid — with no CANCEL to clear them,
+  // because a row that reaches `declined` from `pending_review` never had an
+  // invite issued.
+  const emailOutcome =
     sendConfirmation && payload.email
-      ? sendConfirmationAndStamp(
+      ? await sendConfirmationAndStamp(
           sql,
-          planForPayload(created.id, payload, serviceLabel, now, created.files),
+          planForPayload(created.id, payload, serviceLabel, now, created.files, 'request'),
+          now,
         )
-      : Promise.resolve<SendOutcome | null>(null),
-    // Independent of the confirmation checkbox on purpose: that box is about
-    // the CUSTOMER, and this invite is the office's own calendar. Best-effort —
-    // the entry has saved, and a missed invite is an inconvenience the office
-    // fixes by adding the event by hand. The flash below does not mention it.
-    sendOfficeInvite(created.id, payload, serviceLabel, now),
-  ]);
-
-  // `deliver` already logs a failed send with its error. This line is here for
-  // the one outcome it cannot see: a send that never settles and is answered by
-  // the deadline, which returns 'failed' with nothing written anywhere.
-  if (inviteOutcome === 'failed') {
-    console.error(`Admin entry ${created.id}: no calendar invite went out.`);
-  }
+      : null;
 
   // 'skipped' is the mute flag, not a failure. Telling the office "it did not
   // send — try again" would send them to a resend button that will also do
@@ -161,39 +152,21 @@ export const POST: APIRoute = async ({ request }) => {
   return redirect(`${adminAppointmentPath(created.id)}?email=${email}`);
 };
 
-/**
- * The office's calendar invite for an entry it just typed in.
+/*
+ * `sendOfficeInvite` lived here until BK-23 and is deliberately gone rather
+ * than left behind a flag.
  *
- * **Cannot fail its caller**, on the same terms as everything else past the
- * insert: the appointment exists, and no calendar artifact may turn a saved
- * entry into a 500 that sends the office to retype it into a slot that is now
- * taken. `sendCalendarInvite` already swallows a resolved error and a throwing
- * client; the deadline covers a send that never settles, and the try/catch
- * covers the plan-building above it.
+ * It sent the office a calendar invite the moment a phone booking was typed in.
+ * Under prepay that is an invite for a slot nobody has paid for, and there is
+ * no CANCEL to clear it if the request is later declined or the payment lapses
+ * — a row reaching `declined` from `pending_review` never had an invite issued,
+ * which is exactly the property that makes the decline path a clean no-op.
+ *
+ * The office still sees the booking immediately: in the admin list, on this
+ * page, and in the internal email. What their CALENDAR carries is only work
+ * that has been paid for. BK-32 issues both invites from the payment
+ * confirmation, which is the one place that knows the money moved.
  */
-async function sendOfficeInvite(
-  id: number,
-  payload: BookingPayload,
-  serviceLabel: string,
-  now: Date,
-): Promise<SendOutcome> {
-  try {
-    const event = inviteEventFromPayload(id, payload, serviceLabel);
-    return await withDeadline(
-      sendCalendarInvite(planCalendarInvite(event, 'request', now), {
-        id,
-        kind: 'request',
-        now,
-        audience: 'office',
-      }),
-      POST_COMMIT_BUDGET_MS,
-      'failed',
-    );
-  } catch (err) {
-    console.error(`Admin entry ${id} calendar invite failed:`, err);
-    return 'failed';
-  }
-}
 
 function back(path: string, params: Record<string, string>): Response {
   const query = new URLSearchParams(params).toString();

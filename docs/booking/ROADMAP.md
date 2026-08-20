@@ -22,7 +22,11 @@ appointments with a mandatory 30-minute gap, which collapses to an hourly grid:
 11:30, 12:30, 13:30, 14:30, 15:30. Last start 15:30, day ends 16:00. "Max 5/day"
 falls out of the grid rather than being enforced separately. Open every day
 **including Sunday, except Friday** (Friday is config, not a blackout row).
-Booking window: 4 hours minimum notice, 14 days maximum. The public calendar is
+Booking window: **next-day earliest** (no same-day web bookings), 14 days
+maximum — client 2026-08-18, superseding the 4-hour rule this line carried and
+the 24-hour value P9 first recorded; BK-23 implements it. The 4-hour floor
+survives only as `ADMIN_MIN_NOTICE_HOURS`, and the admin path bypasses the
+window entirely anyway. The public calendar is
 **initial assessments only** — follow-ups and emergencies are phone-in and entered
 manually via admin. Uploads: 100 MB/file, 10 files, 300 MB total, all enforced
 when the token is minted.
@@ -32,12 +36,19 @@ when the token is minted.
 indefinitely** — it is the message inbox, not an archive. Migration 004 made
 `leads.service` nullable, because a message form cannot demand a service.
 
-- `pipeline_stage` (assessment|mitigation|restoration) and `status`
-  (booked|completed|cancelled|no_show) are independent columns. Neither derives
-  from the other.
+- `pipeline_stage` (assessment|mitigation|restoration) and `status` are
+  independent columns. Neither derives from the other. `status` is
+  booked|completed|cancelled|no_show until BK-23, which renames `booked` to
+  `confirmed` and adds `pending_review`, `approved_awaiting_payment`,
+  `declined` and `payment_expired`.
 - Double-booking guard is a partial unique index: `UNIQUE(slot_start) WHERE status
   <> 'cancelled'`. Cancelling frees the slot but keeps the record. **Assumes a
   single crew**; becomes `(slot_start, technician_id)` if that ever changes.
+  BK-23 widens the predicate to the deny-list
+  `status NOT IN ('cancelled','declined','payment_expired')`. **Whatever it
+  says, the `ON CONFLICT` predicate in `insertBooking` must match it
+  byte-for-byte** — Postgres resolves the arbiter by matching predicates, and a
+  mismatch is error 42P10 on every booking, not a subtle drift.
 - That index only catches *identical* start times, so admin entries must snap to
   the same grid, and `duration_minutes` carries `CHECK (duration_minutes = 30)`.
   A longer visit is two consecutive slots. Widening the CHECK requires real
@@ -51,6 +62,48 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+**`verify:booking:commit` is at the ceiling of its slot supply (found 2026-08-18,
+BK-31; severity: low, owner: unassigned).** The script draws bookable slots from
+the 14-day window minus Fridays — about 60 — and `nextSlot()` spends one per
+CALL, including on the many arms that deliberately 422 or 409 and therefore book
+nothing. By the end of a run the cursor has walked off the end of a pool that is
+still largely unbooked, and **any new arm needing a real slot aborts the whole
+script mid-run**. Its own error message said "raise SLOTS_NEEDED", which cannot
+help: that is a precondition check, not the supply.
+
+BK-31 worked around it with `recycleSlot()`, which asks the database which slots
+are actually free rather than trusting the cursor, and corrected the error
+message. **The underlying waste is untouched** — the cursor still burns a slot
+on every failed arm. The real fix is for `nextSlot()` to stop advancing when a
+request did not commit, which means it has to know the outcome, which is a
+rework of every call site. Not worth doing until the next ticket needs slots.
+
+
+- **`npm run typecheck` was red from the day BK-23 shipped until BK-32 opened,
+  and BK-23's gate table recorded it as "pass — 0 errors" (found 2026-08-19).**
+  Migration 008 added ten columns to `appointments`, and
+  `admin/appointments/[id].astro` reads five of them — but `Appointment` in
+  `src/lib/db.ts` was never widened, and `adminAppointmentPath` was used at
+  `:961` without being imported. Eight `astro check` errors, all in one file,
+  all present at `444135a`.
+
+  **The reason it was reported green is the interesting half.** `npm run build`
+  passes with all eight: Vite strips TypeScript without checking it, so the
+  build gate is structurally incapable of failing on a type error. Two gates ran
+  and only one of them could see this, and the one that could was the one whose
+  output was mis-copied. **A build is not a typecheck, and "gates green" has to
+  name which gate.**
+
+  It is also the BK-35 lesson one column-family later, from the other end: that
+  entry says a ticket which changes what a column STORES must grep for
+  assertions on it. This says a ticket which ADDS a column must widen the row
+  type in the same commit — the migration and the TypeScript record of the
+  schema are one change, and nothing in the process pairs them. Severity:
+  **medium** — a permanently red gate stops being read, and the next real type
+  error hides behind eight known ones. Fixed in BK-32's opening fixup
+  (`Appointment` widened with 008's columns and their reasoning, missing import
+  restored); BK-32's own migration-010 columns land on the same type with the
+  rest of that ticket.
 - **A GSAP `from()` tween cannot reveal an element that has a CSS transition on
   the property being tweened.** The tween sets the start state, then re-reads the
   element to learn its destination; on a transitioning element that read lands
@@ -182,6 +235,92 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   side; `inviteIdempotencyPrefix` (`booking-ics.ts:156`) exists precisely
   because a fixed prefix collapsed CANCEL into REQUEST. **Owner: BK-23, and it
   is the first task of Deploy 2** — the prefix must carry the transition.
+- **The "assertion that cannot fail" family has a SEVENTH instance, and it was
+  found by logging a red row rather than by a review.** BK-23's should-fix S6
+  asked only that the arbiter and hold/release assertions get red rows, since
+  they had none. Driving one of the breaks — adding `'completed'` to
+  `LIVE_STATUSES` — produced **no failure at all**. The reason:
+  `verify-booking-admin.ts` built its upcoming/past expectation as
+  `LIVE_STATUSES.includes(status)`, reading the same constant
+  `partitionAppointments` reads to make the decision under test. Both sides moved
+  together, so putting finished jobs into the office's *upcoming* column kept
+  every assertion green.
+
+  The sixth instance's rule already covered it — *an assertion must never call
+  the function it is asserting about* — and this widens it by one word:
+  **never call the function OR READ THE CONSTANT it is asserting about.** A
+  shared list is a shared function with the parentheses left off.
+
+  The expectation is a literal now, `LIVE_STATUSES` is deliberately not imported
+  there, and a completeness check fails loudly if a status is added to the enum
+  and to neither list. **The transferable part is the method, not the fix:**
+  every one of the seven was found by breaking the production target and
+  watching, and this one was invisible to two fresh-agent reviews that read the
+  code. Severity: **medium** — it silently converts a gate into decoration;
+  owner: fixed in BK-23's should-fix pass.
+
+- **A bare `npm run migrate` meant PRODUCTION, and on 2026-08-18 it took the
+  booking funnel down.** `scripts/migrate.ts` read `DATABASE_URL` with no
+  argument; `DATABASE_URL_DEV` was only ever reached by scripts that opted into
+  it. A migration intended for the dev branch was applied to production, which
+  renamed 10 live rows and rebuilt `appointments_slot_unique` on the new
+  deny-list predicate while the deployed code still arbitrated on
+  `status <> 'cancelled'`. **Postgres resolves an `ON CONFLICT ... WHERE`
+  arbiter by proving it implies the index predicate, and that relation is
+  directional** — the wider old arbiter does not imply the narrower new
+  predicate, so every booking, public and admin, raised 42P10. Restored by hand:
+  index predicate reverted, `confirmed` → `booked` on 10 rows, default and CHECK
+  restored, the three `schema_migrations` rows deleted. The added columns were
+  deliberately left in place — `main` never names them, they all default, and
+  `ADD COLUMN IF NOT EXISTS` re-adds them cleanly.
+
+  **Three fixes, all landed:** `migrate.ts` now requires `--target dev|prod`
+  with no default, proves the dev host differs from production before touching
+  anything, and prints the resolved host on every run including `--status`; the
+  rollout instruction in the build order above was rewritten (it prescribed the
+  order that caused this); and `verify:booking:commit` carries a permanent
+  both-arbiter probe so the directional rule is an assertion rather than
+  something relearned from an outage.
+
+  **The lesson worth keeping is about the guard, not the command.** The
+  comparison that would have caught this already existed — `verify-booking-smoke.ts`
+  has always proved dev ≠ prod before writing a row, and the ad-hoc reset script
+  written minutes earlier that day made the same check and refused correctly.
+  **A guard that lives on the paths someone was already being careful about is
+  not a guard.** It belongs in the tool everything goes through. Severity:
+  **high** (live outage, manual recovery); owner: fixed here.
+
+- ~~**The admin Resend button still collides with the booking-time
+  confirmation.**~~ **CLOSED in BK-32 — and the diagnosis above was wrong, which
+  is the part worth keeping.** This entry claimed `resend.ts:90` collided with
+  "the payment-time confirmation" because `planForAppointment` defaults
+  `messageType` to `'confirmed'`. Checked at BK-32's plan review, against the
+  code rather than against this paragraph:
+
+  - `markPaid()` sends the payment-time confirmation through
+    `sendCalendarInvite` → `inviteIdempotencyPrefix(id, kind, now)`, which has
+    carried a clock since BK-16. It never produces `booking-<id>-confirmed`.
+  - Since BK-23 both create paths pass `messageType: 'request'` explicitly
+    (`api/booking/create.ts:223`, `api/admin/appointments/create.ts:132`).
+
+  So `resend.ts` was the **only** producer of that key in the whole codebase,
+  and there was nothing for it to collide *with*. The real defect was one step
+  simpler and just as bad: **clicked twice inside Resend's 24-hour window, the
+  button delivers once and reports "sent" both times** — on the office's only
+  manual recovery for a message that went missing.
+
+  Fixed by `notifyIdempotencyPrefix` gaining an attempt component
+  (`booking-<id>-<type>-<epoch s>`), mirroring `inviteIdempotencyPrefix`. The
+  same clause closes BK-23's S2, which was real as written.
+
+  **The transferable part is not the fix.** This entry was written from a
+  reading of the code and was wrong about which pair of things collided; it then
+  survived into two tickets' plans as a premise nobody re-derived, and BK-32's
+  first plan restated it verbatim. **A Known trap is a claim with a shelf life,
+  and one that names specific call sites should be re-checked against them
+  before it is inherited** — the codebase moved underneath this one twice
+  (BK-16, then BK-23) and the paragraph did not.
+
 - **`update.ts`'s ICS boundary is keyed on the literal `'cancelled'`, and P9
   gives it three exits instead of one.** `update.ts:209-213` computes
   `wasCancelled` / `isCancelled` and derives the ICS kind from them. With
@@ -196,11 +335,23 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 - **A `GST_REGISTRATION_NUMBER` env var cannot put the number on a Stripe
   receipt.** Stripe renders business and tax info on Checkout receipts from
   Dashboard settings (or through Stripe Tax / Invoicing), not from anything
-  passed into the session. The env var correctly drives *our* emails; the
-  receipt needs a Dashboard configuration step that no amount of code will
-  cover. **Severity: low technically, high operationally** — it is the kind of
-  thing found at go-live, by an accountant. **Owner: BK-32**, recorded as a
-  rollout task rather than an implementation one.
+  passed into the session. The receipt needs a Dashboard configuration step
+  that no amount of code will cover. **Severity: low technically, high
+  operationally** — it is the kind of thing found at go-live, by an accountant.
+  **Owner: BK-32**, recorded as a rollout task rather than an implementation
+  one.
+
+  **Corrected 2026-08-19.** This entry used to add *"the env var correctly
+  drives our emails"*, and BK-32's own rollout note says the same. **It is not
+  true: no code reads `GST_REGISTRATION_NUMBER`, anywhere.** Verified by grep
+  over `src/` and `scripts/` after BK-36. Our emails itemize the GST *amount*
+  (`booking-email.ts`'s approval table) and print no registration number, so
+  after the Dashboard step the number appears on Stripe's receipt and nowhere
+  else. That is very likely sufficient — Stripe's receipt is the tax receipt —
+  but the sentence claiming otherwise was the kind a next reader would rely on
+  while setting an env var that does nothing. **Not a Deploy 2 blocker.** If the
+  client wants the number on *our* approval email too, that is a small ticket
+  and it does not exist yet.
 - **RESOLVED 2026-08-16 by BK-29 — kept for the lesson, not as open work.**
   "Free assessment" was claimed unconditionally in 51 places across 22 files.
   The 2026-08-14 credit model made the claim FALSE rather than merely
@@ -786,6 +937,12 @@ resume after P7 with the amendments noted in their rows.
 
 ### P8 — Fee terms + homepage availability (client change request 2026-08-13)
 
+> **⚠ P8's payment narrative is SUPERSEDED by P9 (2026-08-16/18).** The fee
+> figures, the three tiers and the credit stand. "Paid at the end of the visit",
+> "nothing is charged at booking", "tell the tech on the day" and blanket
+> non-refundability do not — see P9 below and `prepay-flow-spec.md` §6 item 4,
+> which recorded this marker as outstanding. **BK-36** rewrote the copy.
+
 Client decisions relayed 2026-08-13: (1) new assessment fee conditions — free
 when the customer proceeds with us; otherwise $699 for a cause-of-loss report
 and estimate, or up to $1,200 including an insurance sketch/diagram — shown on
@@ -894,14 +1051,21 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
   are exempt from the whole gate.
 - **Payment deadline** = `min(approved_at + 12h, slot_start − 4h)`.
 - **Timers, all three** — auto-decline stops being slot−24h and becomes
-  submission- and escalation-relative:
-  | Trigger | Action |
-  | --- | --- |
-  | unreviewed 2h after submission | owner SMS (Twilio-gated; email until then) |
-  | still unreviewed at slot−12h | second escalation |
-  | still `pending_review` at slot−4h | auto-decline + apology email |
+  submission- and escalation-relative. **Split across two deploys, 2026-08-19:**
+  | Trigger | Action | Ticket / deploy |
+  | --- | --- | --- |
+  | unreviewed 2h after submission | owner SMS (Twilio-gated; email until then) | BK-25, Deploy 3 |
+  | still unreviewed at slot−12h | second escalation | BK-25, Deploy 3 |
+  | still `pending_review` at slot−4h | **expire: release the slot + apology email** | **BK-23 Task 4, Deploy 2** |
   The last one is forced rather than arbitrary: past slot−4h the payment
-  deadline has expired, so a confirmation can no longer complete.
+  deadline has expired, so a confirmation can no longer complete. **It moved
+  into Deploy 2 on 2026-08-19** because it is the only automatic exit from
+  `pending_review`, which holds its slot — and BK-23's review added a guard
+  refusing to approve an elapsed slot, so without the sweep a lapsed request is
+  stuck in a slot-holding status with its only transition out blocked. It lands
+  in BK-32's cron handler as a second sweep rather than a second schedule. The
+  two *alert* timers stay in Deploy 3: they want Twilio, and nothing breaks
+  without them.
 - **ICS: customer AND office invites both move to payment-confirmed.** The
   admin panel is the pending view; the calendar only ever shows money-confirmed
   work. CANCEL goes out on decline/expire/cancel **for any invite already
@@ -952,16 +1116,147 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
   not in the table — never `out-of-area`. A missing postal code must not read
   as grounds to decline.
 
+**Amendments — client answers 2026-08-18 (WhatsApp), and the external-spec merge**
+
+An independently-written spec (`deploy-2-prepay-spec.md`, authored outside the
+repo, dropped 2026-08-18) was audited against the codebase before any of it was
+adopted. **P9 is authoritative wherever the two conflict** — the user's
+instruction, 2026-08-18. Two of its items were genuinely new and are folded in
+below (Interac e-Transfer, the refund baseline); five of its assumptions were
+wrong about this codebase and were corrected rather than adopted. The full
+audit and the merge record are in `prepay-flow-spec.md` section 8.
+
+**New client answers, all final, all merged into the tickets below:**
+
+- **Minimum notice becomes NEXT-DAY EARLIEST for web** — not the "4h to 24h"
+  wording the 2026-08-12 decision was recorded in above. **These are different
+  rules and the difference is real:** 24 rolling hours would block a Wednesday
+  11:30 slot for a customer booking Tuesday at 15:00; next-day-earliest allows
+  it. Next-day-earliest is the looser of the two and it is what the client
+  asked for on 2026-08-18, so it is what ships. The 2026-08-12 decision is
+  superseded in its *value*, not in its intent — the intent was always "no
+  same-day web bookings", which both rules satisfy.
+
+  Consequence, and the reason this is safe: the worst case under
+  next-day-earliest is a booking made at 15:29 for the next day's 11:30, which
+  is ~20h of notice but can leave only ~30 minutes between an 07:00 approval
+  and the `slot - 4h` deadline. **That case is already handled** by the pay-now
+  branch (`PAY_NOW_THRESHOLD_HOURS = 8`, settled in planning above): at
+  approval, if `slot_start - now < 8h` the deferred deadline is skipped
+  entirely and the link is sent to be paid immediately. No new mechanism is
+  needed; the constant simply now earns its keep on the web path too, not only
+  on 2am emergencies.
+
+  Admin/phone entries keep their existing total bypass — same-day allowed.
+  Implemented as a **calendar-day** rule, not an hours rule: BK-23 replaces
+  `MIN_NOTICE_HOURS` with `MIN_NOTICE_DAYS = 1` and makes
+  `isWithinBookingWindow` compare date keys. `earliestBookableInstant` stays as
+  the single chokepoint both the picker and the availability filter already
+  read, so the change lands in one function rather than at every call site.
+
+- **Mould gets its own tier prices** (client: "we have to be a bit more
+  competitive with mold estimation"). The pricing table is therefore keyed
+  **`(tier, service) -> amount_cents`**, with a default row per tier and a
+  mould override row per tier — *not* `service_type -> amount` as the external
+  spec assumed, and not a flat per-tier table as BK-31 originally specified.
+
+  | Tier | Default | `mold` override |
+  | --- | --- | --- |
+  | `standard` | $399 + GST | **$385 + GST** |
+  | `report` | $699 + GST | **$645 + GST** |
+  | `sketch` | $1,199 + GST | **$1,185 + GST** |
+
+  "For now" per the client — so the override table is a literal map with one
+  entry, and a price move stays a one-line change. Every other service falls
+  through to the default row; a service with no override is not a special case
+  in the code.
+
+- **After-hours multiplier: 1.5x, and it applies to ordinary weekend bookings
+  made online** (client: "Yes weekend is extra"). Saturday and Sunday are
+  already open — `CLOSED_WEEKDAYS = [5]` closes Fridays only — so this is a
+  live path, not a hypothetical. **The form must show the multiplied price
+  before the customer sends the request**, which makes price display a BK-31
+  deliverable rather than a BK-32 one.
+
+  **Stat holidays are out of scope for the online form in v1** (deferred, not
+  forgotten): the client can blackout the date or take the booking by phone.
+  Recorded as a deferred item on BK-31 so the next reader does not mistake the
+  omission for an oversight.
+
+- **Travel fee: $1.15/km round trip, beyond 30 km from the office.** Shown to
+  the admin at review time as a *suggestion* only — **never auto-charged**.
+  There is no distance API anywhere in this infrastructure today (confirmed by
+  audit: no maps key, no geo code, no billed third party), and the client's
+  instruction is explicitly not to block on adding one. So v1 ships the
+  constants and the field, computes nothing, and leaves a TODO. The admin types
+  the number, which the adjustable-amount control below already accepts.
+
+- **Admin-adjustable amount at approval** (new scope, small, and it absorbs a
+  lot). The approval screen pre-fills the amount from the pricing table
+  including the weekend multiplier; the admin may edit it before the Stripe
+  Checkout Session is created. This is what makes travel fees, extra lab
+  samples and case-by-case pricing work with no extra calculators anywhere.
+
+  Two fields, not one, because the approval email has to **itemize
+  `base + travel + GST = total`** and a single edited number cannot be
+  itemized: `assessment_amount_cents` (pre-filled, editable) and
+  `travel_fee_cents` (default 0, editable). GST is computed, never typed.
+
+  **The public write path is unchanged by this and must stay unchanged:** the
+  customer's payload carries a tier *key* and never an amount, and the server
+  recomputes from the table. The override is an authenticated admin action at
+  approval time, on the server, after the request exists. A verify assertion
+  pins that a posted amount is ignored.
+
+- **Refund baseline — fills BK-36's placeholder, answering open question #4:**
+  *full refund if cancelled 24+ hours before the appointment; no refund within
+  24 hours of it.* Case-by-case exceptions stay manual in the Stripe dashboard;
+  **no refund code changes** — BK-33's mechanism is unaffected, it just stops
+  rendering `[PLACEHOLDER]`.
+
+- **Interac e-Transfer, manual path (new scope, from the external spec).**
+  Folds into BK-32's `markPaid()` seam as a **second entry point to the same
+  `approved_awaiting_payment -> confirmed` transition** — one confirmation code
+  path, two callers. The approval email offers the Stripe link and the Interac
+  address with the booking number as the message. Admin gets a
+  "Mark as paid — Interac" action on approved rows. `payment_method` records
+  which. A Stripe payment landing on an already-Interac-confirmed row is the
+  race: the second attempt **no-ops** (the guarded update returns zero rows)
+  and the row is flagged for a manual refund. **No inbox parsing, no
+  auto-matching** — deliberately deferred.
+
+- **All three tiers stay bookable online** (client-confirmed). Tier 3's copy
+  **must state that lab results take 3-5 business days** — BK-31 and BK-36.
+
+- **GST registration number: still pending from the client.** Ships as a
+  clearly-marked placeholder behind `GST_REGISTRATION_NUMBER`; does not block.
+
+**Corrections applied to the external spec rather than adopted from it** (each
+verified against the code on 2026-08-18; see `prepay-flow-spec.md` section 8):
+
+| The external spec assumed | Actual, and what ships |
+| --- | --- |
+| Next-day notice already live | `MIN_NOTICE_HOURS = 4`; same-day web booking is possible today. BK-23 implements the rule. |
+| A client "Yes" email creates the calendar event | No such flow exists. Booking auto-confirms at commit and mails two ICS-bearing emails. There is nothing to repoint — approve/decline is built from nothing. |
+| Google Calendar API (service account / calendar id) | **None.** Calendar events are `.ics` attachments on emails. Confirmation is ONE send carrying a `REQUEST` ics; cancellation is a `CANCEL` ics under the same UID with a byte-identical `ORGANIZER`; decline/expiry must never have sent a `REQUEST` in the first place. Reuse `inviteIdempotencyPrefix`. |
+| Pricing keyed `service_type -> amount` | Prices are **assessment tiers**, orthogonal to service, and no customer can pick one yet. Keyed `(tier, service)` per the mould answer above. |
+| Manual booking respects blackout dates | It bypasses blackouts, Fridays, the horizon and the notice rule — deliberately, documented at `api/admin/appointments/create.ts:34-38`. **Keep as-is** (user, 2026-08-18). |
+
+Nothing in the external spec's "out of scope" list is honoured where it
+conflicts with the above: it put minimum-notice changes out of scope, and the
+minimum-notice change is a prerequisite for its own payment deadline.
+
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), server-side price table, `entry`-seam validation, both emails, admin display + edit | Reviewed | draft — prerequisite for BK-32 |
-| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migration 008**), 24h notice, request-received page/email, admin Approve/Decline, decline email, approve → payment link, escalation timers, service-area badge, **Resend idempotency-prefix fix**, ICS boundary rewrite | Reviewed | draft |
-| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 009**), GST line item, expiry cron | Reviewed | draft |
-| BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook, policy values as placeholders | Reviewed | draft |
+| BK-43 | **Resend idempotency prefix carries the message type** — `booking-<id>:<to>` becomes `booking-<id>-<type>:<to>`. Split out of BK-23 on 2026-08-18 so the build order does not need one ticket to span two commits. No migration | Reviewed | ✅ **implemented 2026-08-18** — gates green, 4 red rows; awaiting review |
+| BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
+| BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
+| BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
+| BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
 | BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | ✅ **DEPLOYED 2026-08-16** (`5a2fe4a`) — reviewed, all findings resolved. Left `verify:booking:admin:db` red (see Known traps); repaired 2026-08-16 |
-| BK-36 | Terms rewrite — constants restructured, five surfaces, `dist/`-reading pins for "deductible" and insurer-billing shapes | Reviewed (copy) | draft |
+| BK-36 | Terms rewrite — `FEE_TERMS_OUTRO` split into PAYMENT/REFUND/CREDIT, five renders, terms moved below the picker on `/book/`, `dist/`-reading pins for "deductible" and insurer-billing shapes. **Refund placeholder filled (24h rule) plus the walk-away term; tier 3 states lab results take 3-5 business days; weekend surcharge disclosed; standard-rates sentence reconciles the mould and weekend prices** | Reviewed (copy) | ✅ **implemented and REVIEWED 2026-08-19** — plan-reviewed first (4 blockers / 8 should-fix / 4 nits), then implementation-reviewed (3 blockers / 4 should-fix / 7 nits). **All 30 findings accepted, none refused, all resolved.** 23 gates green, 36 red rows. Also discharges **BK-31's refused blocker B3** and three sibling claims the constant-based inventory could not see: `/contact/`'s hero, `/llms.txt`, and the island's own post-submit card |
 
 **Build order — grouped by DEPLOY, not by commit.** Several tickets must land
 together or the site tells a lie between deploys.
@@ -969,14 +1264,96 @@ together or the site tells a lie between deploys.
 1. **Deploy 1 — unblocked prep, no flow change, no migration.** BK-35, then
    BK-34a. Delivers the client's photo problem immediately, without Twilio and
    without touching the booking flow.
-2. **Deploy 2 — the flip.** BK-23's idempotency-prefix fix **first** (it is a
-   blocker and it is invisible in dev), then BK-31 → BK-23 → BK-32 → BK-36.
-   Commit separately, one ticket per commit; deploy as one release. Migrations
-   007/008/009 apply to **production first**, in order, before the code ships —
-   `insertBooking` will name the new columns, so new code against the old
-   schema 500s every booking. Same rollout shape as BK-27's.
-3. **Deploy 3 — safety net and office UX.** BK-25 (timers, re-spaced per the
-   table above), BK-24 (one-click approve/decline), BK-33.
+2. **Deploy 2 — the flip.** **BK-43 first** (the idempotency prefix — it is a
+   blocker on every new email in this deploy and it is invisible in dev), then
+   BK-31 → BK-23 → BK-32 → BK-36.
+
+   **Progress, 2026-08-19.** BK-43, BK-31 and BK-23's Tasks 1/2/3/7 are
+   implemented, **reviewed by fresh agents, and their blockers fixed** — 7
+   blockers, 11 should-fix and 8 nits across the three tickets; one blocker
+   (BK-31 B3) refused in writing as BK-36's, two should-fix handed to BK-32.
+   The branch is `deploy-2-prepay`.
+
+   **Deploy 2 is CODE-COMPLETE as of 2026-08-19.** Everything below is built,
+   reviewed by fresh agents, and has every finding resolved. What remains is the
+   user's rollout, in the recorded order — see ROLLOUT below.
+
+   **The record of what was built:**
+
+   | | |
+   | --- | --- |
+   | **BK-32** | ✅ **implemented 2026-08-19** — Checkout Session at approval (transition first, then Stripe), webhook with a three-layer claim, `markPaid()` with its two callers, the Interac admin action, migration 010, the conversion moved onto the payment, and `verify:stripe:webhook` simulating the generated route table. 23 gates green, 49 red rows. **The open item is closed:** the expiry sweep now cancels the Checkout Session of every row it expires. **Reviewed 2026-08-19** together with the Task 4 cron commit — 2 blockers / 7 should-fix / 7 nits, all resolved |
+   | **BK-36** | ✅ **implemented and REVIEWED 2026-08-19** — the release gate is discharged. `FEE_TERMS_OUTRO` split into PAYMENT/REFUND/CREDIT across five renders; the terms moved below the picker on `/book/`; BK-31's refused blocker B3 gone. The Saturday-mould case is closed by one sentence saying the listed figures are standard rates and pointing at the form. Two review rounds, 30 findings, all accepted and resolved. **The three the constant-based inventory could not see are worth recording:** `/llms.txt` published *"confirmed instantly"* AND *"paid at the end of the visit"* in one sentence, `/contact/`'s hero said *"you're confirmed on the spot"*, and the island's own fallback card said *"You're booked"* under a checkmark for a `pending_review` row. None is a constant; all three are now pinned by claim shape rather than by constant name |
+   | **BK-23 Task 4** | ✅ **built and REVIEWED 2026-08-19** — the stale-request expiry sweep, in BK-32's cron handler. Reviewed inside BK-32's implementation review, which confirmed every item on Task 4's "Verification it owes" table is delivered, including its amendment |
+
+   BK-23's Tasks 5 and 6 stay out of Deploy 2; both are additive UI and nothing
+   built depends on them. Commit separately, one ticket per commit; deploy as one
+   release.
+
+   **ROLLOUT — THREE STEPS, AND THE ORDER IS NOT BK-27's.** This paragraph used
+   to read "migrations 007/008/009 apply to production first, in order, before
+   the code ships", copying BK-27's shape. **That instruction was wrong and it
+   caused a production outage on 2026-08-18** — see Known traps. Migration 008
+   rebuilt the slot index, and the code then live could not resolve its
+   `ON CONFLICT ... WHERE status <> 'cancelled'` against the new predicate, so
+   every booking raised 42P10 until the schema was restored by hand.
+
+   BK-23 therefore split its migration into an **expand** half and a **contract**
+   half, and the deploy goes between them:
+
+   | # | Step | Why it is safe here and nowhere else |
+   | --- | --- | --- |
+   | 1 | `migrate --target prod --only 007-assessment-tier,008-review-lifecycle,010-payments` | Additive and widening only. 008 does NOT touch the unique index and does NOT move the column default, so the code still live keeps working unchanged. Its CHECK permits `booked` *and* the new statuses precisely so the old code can keep inserting during the window |
+   | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
+   | 3 | `migrate --target prod` (bare — 009 is all that is left) | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
+
+   **ROLLOUT PROGRESS — step 1 DONE, 2026-08-19.** `007`, `008` and `010` are
+   applied to production; `009` is correctly still pending. Verified immediately
+   after: the slot index is untouched (`status <> 'cancelled'`, so the live
+   code's arbiter still resolves), the column default is still `'booked'`, and
+   the new CHECK permits `'booked'` **and** the seven new statuses — the three
+   properties the deploy window depends on. 008's rename moved 8 past rows from
+   `booked` to `confirmed`. The live funnel was smoke-tested read-only
+   afterwards: `/api/booking/availability/` 200 with real slots, `/book/` 200.
+
+   Two test appointments (ids 31, 33 — the user's own, "123 Test" / "1 test",
+   both Sun 2026-08-23) were deleted first, on the user's instruction and by
+   explicit id, taking the table 13 → 11. **No future-dated rows remain**, which
+   is why 008's rename had no operational effect at all: the admin panel's
+   `Upcoming` list is built from `status === 'booked'` on the live code, so a
+   future-dated row would have dropped into `Past` with a blank status badge for
+   the length of the window.
+
+   **STEP 4'S URL CARRIES `www.`** — see BK-32. The apex 307-redirects, and
+   Stripe treats any redirect as a delivery failure.
+
+   **`--only` IS NOT OPTIONAL IN STEP 1, and this was found during the rollout
+   itself on 2026-08-19.** `migrate.ts` applies every pending migration in
+   order and had no way to apply a subset — so a bare `--target prod` at step 1
+   would have applied **009 as well**, which is the contract half, under the
+   old code. That is the 2026-08-18 outage, reproduced by following this table.
+   The flag was added for exactly this and refuses unknown names rather than
+   silently applying nothing.
+
+   **BK-32's migration (now 010) has no such constraint** — it only adds columns
+   and a table — so it goes with step 1. The general rule this replaces the old
+   one with: **a migration that only ADDS may go before the deploy; a migration
+   that RENAMES, NARROWS a CHECK, or REBUILDS an index that live code names must
+   go after it.** BK-27's "production first" was correct for BK-27 because 005
+   only added a column.
+
+   `insertBooking` names `status` explicitly rather than leaning on the column
+   default, which is what makes step 2 sit between the halves at all — during
+   the window the default is still the pre-P9 one.
+
+   The fix was BK-23's until 2026-08-18. It moved to its own ticket because the
+   build order needed it committed *before* BK-31 while BK-23 lands *after* —
+   one ticket spanning two commits either side of another ticket is exactly the
+   shape the one-ticket-per-commit rule exists to prevent.
+3. **Deploy 3 — safety net and office UX.** BK-25 (the two **alert** timers per
+   the table above — the slot−4h expiry left for BK-23 Task 4 in Deploy 2 on
+   2026-08-19), BK-24 (one-click approve/decline), BK-33, plus BK-23's Tasks 5
+   (service-area badge) and 6 (photo gallery + unseen-files badge).
 4. **Twilio-gated.** BK-34b; BK-06 with the reminder query filtered to
    `status = 'confirmed'`; escalation transport swaps email → owner SMS.
 5. **Independent, pull in anytime.** BK-26, BK-28.
@@ -984,10 +1361,13 @@ together or the site tells a lie between deploys.
 Dependency edges: `BK-32 → BK-31` (needs a tier to charge), `BK-32 → BK-23`
 (needs `approved_awaiting_payment` to transition out of), `BK-36 → BK-32` (the
 copy describes the link), `BK-33 → BK-32` (needs a payment intent),
-`BK-34b → BK-34a`, `BK-24 → BK-23`.
+`BK-34b → BK-34a`, `BK-24 → BK-23`, `BK-31 → BK-43`, `BK-23 → BK-43` (every
+new email in the deploy needs the prefix fixed first).
 
 **Locked lines P9 moves, and who moves them.** "Booking window: 4 hours minimum
-notice" is BK-23's to rewrite when it lands (the arrangement P7 already made).
+notice" is BK-23's to rewrite when it lands, to **next-day earliest** (client,
+2026-08-18 — see the amendments above; the 4h floor survives only on the admin
+path).
 The data-model bullets on `status` and on the partial unique index are BK-23's
 too. `assessment_tier` is BK-31's to add; the payment columns are BK-32's.
 Nothing else in Locked moves — the grid, Fridays, phone-in cancellation and the
@@ -997,8 +1377,11 @@ PII rules all stand.
 
 - **BK-24** — mechanism unchanged, but Approve now means "approve and send the
   payment link". Its POST-not-GET rule matters more, not less.
-- **BK-25** — owns the re-spaced timers in the table above, not P7's
-  slot−24h auto-decline, which is withdrawn.
+- **BK-25** — owns the two **alert** timers in the table above (+2h and
+  slot−12h), not P7's slot−24h auto-decline, which is withdrawn, and **no longer
+  the slot−4h expiry**: that became BK-23 Task 4 and moved into Deploy 2 on
+  2026-08-19. What is left here is notification only, which is why it can wait
+  for Twilio.
 - **BK-06** — acceptance criterion added while blocked: the reminder query
   filters `status = 'confirmed'`, never `status <> 'cancelled'`. A
   `pending_review` or `approved_awaiting_payment` row must never be reminded of
@@ -1044,6 +1427,14 @@ This is the second time P9's numbering has shifted (the spec's §6 item 12 was
 the first); the lesson is that a migration number is worth nothing until it is
 applied, and the ROADMAP row is the only place it is real.
 
+**Third shift, 2026-08-18: BK-32 → 010.** BK-23's migration 008 was split into
+an expand half (008) and a contract half (**009**) after the rollout outage, so
+BK-32's payment migration moves to **010**. The lesson above holds and gained a
+corollary: a number is worth nothing until applied, and **an applied number is
+not worth reusing** — 007/008/009 were briefly applied to production and rolled
+back by hand, and the reason it was safe to re-number afterwards is that the
+`schema_migrations` rows were deleted in the same operation.
+
 **Deployed as "Deploy 1.5"** — after Deploy 1, before the Deploy 2 flip, with
 no coupling to either. BK-40's migration applies to production first, matching
 BK-27's and Deploy 2's rollout shape.
@@ -1081,10 +1472,14 @@ These are the client's to answer and **must not be resolved in planning or by a
 fresh agent.** Each names what it blocks, so nothing waits on an answer it does
 not actually need.
 
-4. **Refund values** — the customer-cancel cutoff (how many hours before the
-   slot, and full / partial / none after it) and whether a no-show forfeits.
-   Blocks BK-36's terms copy shipping without `[PLACEHOLDER]` markers. Does
-   **not** block BK-33's mechanism, which is policy-free by design.
+4. ~~**Refund values** — the customer-cancel cutoff and whether a no-show
+   forfeits.~~ **ANSWERED 2026-08-18: full refund if cancelled 24+ hours before
+   the appointment; no refund within 24 hours of it.** Exceptions stay manual in
+   the Stripe dashboard — no refund code. BK-36's terms copy therefore ships
+   **without** `[PLACEHOLDER]` markers for customer cancellation. No-show is not
+   separately addressed by the client's answer; it falls under the within-24h
+   rule (no refund), and BK-36 says so in those words rather than using the term
+   "forfeit".
 5. ~~**Office-created bookings: does the crew dispatch before payment?**~~
    **ANSWERED 2026-08-16: payment always first, no exceptions — emergencies and
    office-created phone bookings included.** Folded into the P9 decisions above.
@@ -1104,6 +1499,20 @@ not actually need.
 9. ~~**Phone customers: pay by link, or exempt?**~~ **ANSWERED 2026-08-16: pay
    by link, same as web.**
 
-**Still open after 2026-08-16: #4 (refund values), #6 (insurance credit
-settlement), #7 (GST number), #8 (FSA list).** Only #4 blocks anything — BK-36's
-terms copy ships with `[PLACEHOLDER]` markers until it is answered.
+10. **Stat holidays and the after-hours multiplier.** The 1.5x weekend rule is
+    answered; whether a stat holiday is also 1.5x online is **deferred out of
+    v1** by the client's own route (blackout the date, or take it by phone).
+    Not a blocker, and not a question anyone is waiting on — recorded so the
+    gap in the form is legible as a decision rather than an oversight.
+
+**Still open after 2026-08-18: #6 (insurance credit settlement), #7 (GST
+number), #8 (FSA list), #10 (stat holidays, deferred).** **None of them block
+Deploy 2.** #7 ships as a marked placeholder behind `GST_REGISTRATION_NUMBER`;
+#8 ships with the Edmonton-metro default; #6 decides only whether BK-36's
+closing sentence is true, and the client has not disputed it.
+
+**Answered 2026-08-18 (WhatsApp), all folded into P9's amendments:** #4 above,
+plus next-day-earliest minimum notice, mould tier prices, the 1.5x weekend
+multiplier, the $1.15/km travel fee, admin-adjustable amounts at approval,
+Interac e-Transfer as a payment path, and all three tiers staying bookable
+online with tier 3 disclosing 3-5 business days for lab results.

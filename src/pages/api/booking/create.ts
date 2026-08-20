@@ -12,6 +12,7 @@ import { countUnclaimedFiles, insertBooking, stampNotifications } from '../../..
 import { planBookingNotifications } from '../../../lib/booking-email';
 import { notifyAndStamp, withDeadline } from '../../../lib/booking-notify';
 import { parseBookingPayload, type BookingPayload } from '../../../lib/booking-payload';
+import { SLOT_HOLD_PREDICATE } from '../../../lib/booking-status';
 import { formatSlot, type DateKey } from '../../../lib/booking-time';
 import { verifyDraftToken } from '../../../lib/draft-token';
 import { getDb, SERVICE_LABELS } from '../../../lib/db';
@@ -100,7 +101,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
       sql`
         SELECT slot_start
         FROM appointments
-        WHERE status <> 'cancelled'
+        WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)}
           AND slot_start >= ${slots.from.toISOString()}
           AND slot_start <  ${slots.to.toISOString()}
       `,
@@ -214,6 +215,12 @@ async function notify(
   try {
     const plan = planBookingNotifications({
       id,
+      // BK-23: submitting the form produces a REQUEST, not a booking. This
+      // single value decides three things at once — the copy in both messages,
+      // whether a calendar invite is attached, and the idempotency key the send
+      // goes out under. Flipping it back to 'confirmed' would tell a customer
+      // they have an appointment nobody has approved or paid for.
+      messageType: 'request',
       slotLabel,
       // The instant as well as the label: the internal message carries the
       // calendar invite (BK-14), and an ICS carries instants. The payload has
@@ -230,6 +237,10 @@ async function notify(
       // a key here. Kept so the two cannot drift into a `undefined` in a subject
       // line, not because raw user input can reach one.
       serviceLabel: SERVICE_LABELS[payload.service] ?? payload.service,
+      // The KEY as well as the label: the price depends on the service (mould
+      // has its own figures) and a label cannot be looked up in the table.
+      service: payload.service,
+      assessmentTier: payload.assessmentTier,
       description: payload.description,
       address: payload.address,
       city: payload.city,
@@ -248,8 +259,8 @@ async function notify(
       // inline, that post-response work is not guaranteed to run — and its
       // failure is swallowed inside `notifyAndStamp`, where it is asserted.
       // 'skipped' and 'failed' both leave NULL, which reads as "nobody was told".
-      notifyAndStamp(plan, {
-        stamp: (sent) =>
+      notifyAndStamp(plan, now, {
+        stamp: (sent: { customer: boolean; internal: boolean }) =>
           // Fresh clock, not the request's: this is when the send returned, and
           // BK-07/BK-08 read these columns as timestamps.
           stampNotifications(sql, id, sent, new Date()),

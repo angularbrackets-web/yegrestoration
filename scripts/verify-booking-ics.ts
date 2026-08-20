@@ -27,8 +27,9 @@ import {
   planCalendarInvite,
   planCancellationEmail,
   planRestoreEmail,
+  planFirstConfirmationEmail,
 } from '../src/lib/booking-admin-notify';
-import { CANCEL_LINE, CANCELLED_REBOOK_LINE } from '../src/lib/booking-copy';
+import { CANCEL_LINE, CANCELLED_REBOOK_LINE, CONFIRMED_HEADING } from '../src/lib/booking-copy';
 import {
   BOOKING_EMAIL_FROM,
   BOOKING_EMAIL_REPLY_TO,
@@ -642,16 +643,74 @@ console.log('\nThe attachment, and the message that carries it');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nA first confirmation must not claim a reinstatement (BK-23)');
+// ---------------------------------------------------------------------------
+//
+// Before BK-23 the only inward crossing of the invite boundary was
+// `cancelled -> booked`, so the restore copy was true of every one of them. P9
+// makes `pending_review -> confirmed` and `approved_awaiting_payment ->
+// confirmed` reachable, and until BK-32 lands the status dropdown is the ONLY
+// route to `confirmed` — so the restore copy was what a customer received on
+// the first booking they ever paid for, telling them it "was cancelled and has
+// now been reinstated".
+//
+// The words are the assertion. A shape check would not have caught this: the
+// message was correctly addressed, correctly attached and correctly sequenced,
+// and every one of those passed while the sentence was false.
+{
+  const CUSTOMER = 'dana@example.com';
+  const firstConfirm = planFirstConfirmationEmail(EVENT, CUSTOMER, LATER);
+  const restore = planRestoreEmail(EVENT, CUSTOMER, LATER);
+  const bodies = [firstConfirm.html ?? '', firstConfirm.text ?? '', firstConfirm.subject];
+
+  for (const [i, body] of bodies.entries()) {
+    const where = ['html', 'text', 'subject'][i];
+    check(
+      !/reinstat|back on|was cancelled/i.test(body),
+      `the first-confirmation ${where} claims no reinstatement`,
+    );
+  }
+  check(
+    (firstConfirm.html ?? '').includes(CONFIRMED_HEADING),
+    'and says the assessment is confirmed',
+  );
+
+  // The restore copy must KEEP saying it, or the fix has merely moved the lie.
+  check(
+    /reinstated/i.test(restore.html ?? ''),
+    'while a genuine restore still describes itself as a reinstatement',
+  );
+  check(
+    (restore.html ?? '') !== (firstConfirm.html ?? ''),
+    'the two inward crossings do not render the same body',
+  );
+
+  // The branch itself, in the route that picks between them. The planners can
+  // both be perfect and the wrong one still be called.
+  const updateSrc = readFileSync('src/pages/api/admin/appointments/update.ts', 'utf8');
+  check(
+    /prev_status === 'cancelled'[\s\S]{0,200}planRestoreEmail/.test(updateSrc),
+    "update.ts picks the restore copy on prev_status === 'cancelled', not on the direction of the crossing",
+  );
+  check(
+    /planFirstConfirmationEmail\(/.test(updateSrc),
+    'and has a first-confirmation branch for the other inward crossings',
+  );
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nThe customer boundary emails (BK-16)');
 // ---------------------------------------------------------------------------
 {
   const CUSTOMER = 'dana@example.com';
   const cancellation = planCancellationEmail(EVENT, CUSTOMER, NOW);
   const restore = planRestoreEmail(EVENT, CUSTOMER, LATER);
+  const firstConfirm = planFirstConfirmationEmail(EVENT, CUSTOMER, LATER);
 
   for (const [label, message, method] of [
     ['cancellation', cancellation, 'CANCEL'],
     ['restore', restore, 'REQUEST'],
+    ['first confirmation', firstConfirm, 'REQUEST'],
   ] as const) {
     check(message.to === CUSTOMER, `the ${label} is addressed to the customer, got ${message.to}`);
     check(message.from === BOOKING_EMAIL_FROM, 'from the shared sender identity');
@@ -948,13 +1007,37 @@ console.log('\nSource pins (weak by construction — see the header)');
       .replace(/^import[\s\S]*?from '[^']*';$/gm, '');
   const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 
-  for (const [label, file, helper, needles] of [
-    [
-      'the admin entry route',
-      'src/pages/api/admin/appointments/create.ts',
+  // BK-23 REMOVED THE ADMIN ENTRY ROUTE FROM THIS LIST, and inverted what is
+  // pinned about it.
+  //
+  // That route used to send the office a calendar invite the moment a phone
+  // booking was typed in. Under prepay that is an invite for a slot nobody has
+  // paid for, and there is no CANCEL to clear it when the request is later
+  // declined or the payment lapses — a row reaching `declined` from
+  // `pending_review` never had one issued, which is the property that makes
+  // the decline path a clean no-op.
+  //
+  // So the assertion below is the OPPOSITE of the one it replaced: the entry
+  // route must call none of these. Kept rather than deleted, because "no invite
+  // at entry" is exactly the kind of property somebody restores by accident
+  // while fixing something else, and the route-level log assertion in
+  // `verify-booking-admin-db.ts` cannot tell "removed" from "muted".
+  {
+    const entrySource = strip('src/pages/api/admin/appointments/create.ts');
+    for (const needle of [
+      'planCalendarInvite(',
+      'sendCalendarInvite(',
+      'inviteEventFromPayload(',
       'sendOfficeInvite(',
-      ['planCalendarInvite(', 'sendCalendarInvite(', 'inviteEventFromPayload('],
-    ],
+    ]) {
+      check(
+        !entrySource.includes(needle),
+        `the admin entry route no longer calls ${needle} — invites issue at payment, not at entry`,
+      );
+    }
+  }
+
+  for (const [label, file, helper, needles] of [
     [
       'the status-edit route',
       'src/pages/api/admin/appointments/update.ts',

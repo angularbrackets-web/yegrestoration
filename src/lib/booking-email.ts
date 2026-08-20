@@ -36,15 +36,41 @@ import {
 import {
   CALENDAR_ATTACHED_LINE,
   CANCEL_LINE,
+  FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
-  FEE_TERMS_OUTRO,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
   HAVE_READY_HEADING,
   HAVE_READY_ITEMS,
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
+  ASSESSMENT_TIER_NAMES,
+  RECEIVED_HEADING,
+  RECEIVED_HOLD_LINE,
+  RECEIVED_LEAD,
+  RECEIVED_NEXT_STEPS,
+  RECEIVED_TIMING_LINE,
+  APPROVED_DEADLINE_NOTE,
+  APPROVED_HEADING,
+  APPROVED_INTERAC_LEAD,
+  APPROVED_LEAD,
+  APPROVED_PAY_NOW_NOTE,
+  DECLINED_HEADING,
+  EXPIRED_REQUEST_HEADING,
+  EXPIRED_REQUEST_LEAD,
+  EXPIRED_REQUEST_REBOOK_LINE,
+  PAYMENT_ATTENTION_RULE,
+  PAYMENT_EXPIRED_HEADING,
+  PAYMENT_EXPIRED_LEAD,
+  PAYMENT_EXPIRED_REBOOK_LINE,
+  DECLINED_LEAD,
+  DECLINED_REBOOK_LINE,
 } from './booking-copy';
+import { assessmentQuote, formatCents, type AssessmentTier } from './booking-pricing';
+import type { Appointment } from './db';
+import { formatSlot } from './booking-time';
 
 /**
  * A file riding along with a message. Structurally Resend's `Attachment`
@@ -75,9 +101,47 @@ export type Message = {
   attachments?: EmailAttachment[];
 };
 
+/**
+ * WHICH LIFECYCLE TRANSITION A PLAN'S MESSAGES BELONG TO, and it is the whole
+ * of BK-43.
+ *
+ * The Resend idempotency key is `<prefix>:<recipient>`, and until BK-43 the
+ * prefix was a fixed `booking-<id>`. Under the auto-confirm flow that was
+ * correct: one booking sent the customer exactly one message, so a retry
+ * collapsing into the first send is precisely what the key is for.
+ *
+ * Under P9 one booking sends the same address up to five messages. With a fixed
+ * prefix every one of them carries a byte-identical key, Resend collapses all
+ * four later ones into duplicates of the first **and returns success**, and the
+ * customer never sees the payment link. Nothing logs it: the send reports ok,
+ * the stamp records sent, the admin panel shows a notified booking.
+ *
+ * Naming the transition keeps dedupe *within* a transition — a retried approval
+ * must not mail twice — and makes it impossible *across* transitions. Same
+ * treatment, and the same reasoning, as `inviteIdempotencyPrefix` on the
+ * calendar side, which exists because a fixed prefix once collapsed CANCEL into
+ * REQUEST.
+ *
+ * The full set is declared here, including the four nothing sends yet, so BK-23
+ * and BK-32 add a send rather than also having to widen a type.
+ */
+export type BookingMessageType =
+  | 'request'
+  | 'payment-link'
+  | 'payment-reminder'
+  | 'confirmed'
+  | 'declined'
+  | 'expired';
+
 export type NotificationPlan = {
   /** The appointment id, carried so the sender can key idempotency on it. */
   bookingId: number;
+  /**
+   * The transition these messages belong to. Required, never defaulted: the
+   * defect this exists to prevent is precisely a thing someone forgets, so the
+   * type system has to ask.
+   */
+  messageType: BookingMessageType;
   /** Null when the customer gave no email address — booking email is optional. */
   customer: Message | null;
   internal: Message;
@@ -92,6 +156,12 @@ export type NotificationPlan = {
  */
 export type BookingNotificationInput = {
   id: number;
+  /**
+   * Which lifecycle transition this send is. See `BookingMessageType` — it
+   * decides the idempotency key, so getting it wrong silently drops a message
+   * rather than mislabelling one.
+   */
+  messageType: BookingMessageType;
   /** Server-formatted, America/Edmonton. Never re-derived here. */
   slotLabel: string;
   /**
@@ -107,6 +177,18 @@ export type BookingNotificationInput = {
   email: string | null;
   /** Display label, not the key — `SERVICE_LABELS[service]`. */
   serviceLabel: string;
+  /**
+   * The service KEY (`water`, `mold`, …), not the label. Needed because the
+   * price depends on it — mould carries its own figures — and a label cannot be
+   * looked up in the pricing table.
+   */
+  service: string;
+  /**
+   * Which assessment the customer chose (BK-31). Null on an admin entry and on
+   * every booking predating migration 007, and both messages must render that
+   * absence honestly rather than defaulting to the cheapest tier.
+   */
+  assessmentTier: AssessmentTier | null;
   description: string | null;
   address: string;
   city: string;
@@ -228,10 +310,29 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
   const where = fullAddress(input);
   const reference = input.id > 0 ? `Reference #${input.id}` : null;
 
+  /**
+   * WHETHER THIS MESSAGE MAY CLAIM AN APPOINTMENT EXISTS (BK-23).
+   *
+   * A `request` is what submitting the form produces: the office has not looked
+   * at it and nobody has paid. It gets no "you're booked" heading, no calendar
+   * invite, and no line about one. A `confirmed` message is sent from behind
+   * the payment webhook, where every one of those is true.
+   *
+   * Keyed off `messageType` rather than off a separate flag, so the thing that
+   * decides the idempotency key and the thing that decides the claim cannot
+   * disagree — a message that says "booked" under a `request` key would be both
+   * wrong and undeliverable.
+   */
+  const isRequest = input.messageType === 'request';
+
   const html = [
     WRAP_OPEN,
-    `<h1 style="font-size:22px;margin:0 0 16px;">You're booked, ${escapeHtml(input.name)}</h1>`,
-    `<p style="margin:0 0 16px;">Thanks for booking an assessment with YEG Restoration. Here are the details.</p>`,
+    isRequest
+      ? `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(`${RECEIVED_HEADING}, ${input.name}`)}</h1>`
+      : `<h1 style="font-size:22px;margin:0 0 16px;">You're booked, ${escapeHtml(input.name)}</h1>`,
+    isRequest
+      ? `<p style="margin:0 0 16px;">${escapeHtml(RECEIVED_LEAD)}</p>`
+      : `<p style="margin:0 0 16px;">Thanks for booking an assessment with YEG Restoration. Here are the details.</p>`,
     table(
       [
         rawRow('When', `<strong>${escapeHtml(when)}</strong>`),
@@ -241,6 +342,19 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
       ].filter(Boolean),
     ),
     `<p style="margin:16px 0;">${escapeHtml(VISIT_LENGTH_LINE)}</p>`,
+    // What happens next, request only. The confirmed message has no next step
+    // to describe, and the request message is useless without one — "we have
+    // your request" with no account of what follows is the message that
+    // generates the phone call this flow was meant to avoid.
+    ...(isRequest
+      ? [
+          `<p style="margin:16px 0;">${escapeHtml(RECEIVED_HOLD_LINE)}</p>`,
+          '<ol style="margin:0 0 16px;padding-left:20px;">',
+          ...RECEIVED_NEXT_STEPS.map((step) => `<li style="margin:4px 0;">${escapeHtml(step)}</li>`),
+          '</ol>',
+          `<p style="margin:16px 0;">${escapeHtml(RECEIVED_TIMING_LINE)}</p>`,
+        ]
+      : []),
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(HAVE_READY_HEADING)}</h2>`,
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...HAVE_READY_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
@@ -251,27 +365,52 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // submission, not a per-booking value; the acknowledgment itself is the
     // `terms_acked_at` stamp on the row.
     //
-    // Handoff to BK-23: when the confirmation splits into "we have your
-    // request" (at submission) and "you're booked" (at approval), this section
-    // belongs in the FIRST of the two, because that is the message that
-    // corresponds to the moment the box was ticked. Keeping it in both is
-    // recommended and is BK-23's call.
+    // BK-23 made that split, and kept this section in BOTH messages. The
+    // request message carries it because that is the moment the box was ticked;
+    // the confirmed message carries it because it is the one the customer keeps
+    // after paying, and terms that vanish from the record of a completed
+    // purchase are terms nobody can point at afterwards.
+    //
+    // SO THIS IS FOUR RENDERS, NOT TWO — {request, confirmed} x {html, text} —
+    // and until BK-36 the verify script only ever exercised the CONFIRMED one.
+    // Deleting the block from the request arm left every gate green, on the
+    // message every web customer receives first. `verify-booking-email.ts` now
+    // runs the terms assertions over both message types and both arms.
+    //
+    // ORDER IS A CONSTRAINT, not layout: HEADING -> INTRO -> ITEMS -> PAYMENT
+    // -> REFUND -> CREDIT, the same on all five renders across the site. The
+    // block ends on the credit because the last thing read should be the good
+    // news; the refund and no-refund language sits in the middle. Pinned.
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(FEE_TERMS_HEADING)}</h2>`,
     `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`,
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...FEE_TERMS_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
-    ...FEE_TERMS_OUTRO.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
-    `<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`,
+    ...FEE_TERMS_PAYMENT.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    ...FEE_TERMS_REFUND.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_CREDIT)}</p>`,
+    // BK-31. The tier list above is the menu; this is what THIS customer chose
+    // and what it comes to. Written back to them in the message they keep,
+    // because the figure on the form is the one thing they cannot re-check
+    // later — the form is gone and the terms box states standard prices.
+    ...(input.assessmentTier
+      ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(`You chose: ${assessmentSummary(input)}`)}</strong></p>`]
+      : []),
+    // NO INVITE ON A REQUEST. An .ics for an unpaid slot is the "you're booked"
+    // claim in a form the customer's calendar repeats back to them every day
+    // until the appointment — worse than the sentence, because nothing about a
+    // calendar entry says "provisional". The attachment itself is gated
+    // alongside this line; see the `attachments` array below.
+    ...(isRequest ? [] : [`<p style="margin:16px 0;">${escapeHtml(CALENDAR_ATTACHED_LINE)}</p>`]),
     `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
     WRAP_CLOSE,
   ].join('');
 
   const text = [
-    `You're booked, ${input.name}`,
+    isRequest ? `${RECEIVED_HEADING}, ${input.name}` : `You're booked, ${input.name}`,
     '',
-    'Thanks for booking an assessment with YEG Restoration. Here are the details.',
+    isRequest ? RECEIVED_LEAD : 'Thanks for booking an assessment with YEG Restoration. Here are the details.',
     '',
     `When:      ${when}`,
     `Where:     ${where}`,
@@ -280,15 +419,28 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     '',
     VISIT_LENGTH_LINE,
     '',
+    ...(isRequest
+      ? [
+          RECEIVED_HOLD_LINE,
+          '',
+          ...RECEIVED_NEXT_STEPS.map((step, i) => `  ${i + 1}. ${step}`),
+          '',
+          RECEIVED_TIMING_LINE,
+          '',
+        ]
+      : []),
     `${HAVE_READY_HEADING}:`,
     ...HAVE_READY_ITEMS.map((item) => `  - ${item}`),
     '',
     `${FEE_TERMS_HEADING}:`,
     FEE_TERMS_INTRO,
     ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
-    ...FEE_TERMS_OUTRO.flatMap((line) => ['', line]),
+    ...FEE_TERMS_PAYMENT.flatMap((line) => ['', line]),
+    ...FEE_TERMS_REFUND.flatMap((line) => ['', line]),
     '',
-    CALENDAR_ATTACHED_LINE,
+    FEE_TERMS_CREDIT,
+    ...(input.assessmentTier ? ['', `You chose: ${assessmentSummary(input)}`] : []),
+    ...(isRequest ? [] : ['', CALENDAR_ATTACHED_LINE]),
     '',
     CANCEL_LINE,
     '',
@@ -302,17 +454,420 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // the time is talking to nobody. Cancellation is phone-in, but people reply
     // to confirmations regardless.
     replyTo: BOOKING_EMAIL_REPLY_TO,
-    subject: headerSafe(`You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`),
+    subject: headerSafe(
+      isRequest
+        ? `${RECEIVED_HEADING} — ${input.slotLabel} (${TIMEZONE_NOTE})`
+        : `You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`,
+    ),
     html,
     text,
-    attachments: [
-      icsAttachment(
-        buildBookingIcs(icsEventOf(input), 'request', input.now, icsCustomer(input.email)),
-        'request',
-        input.id,
-      ),
-    ],
+    // THE INVITE MOVES TO PAYMENT-CONFIRMED (BK-23), and this is the line that
+    // moves it. `'request'` here is the iCalendar METHOD, not the message type
+    // — an unfortunate collision of words, and worth being clear about, because
+    // `isRequest` being true is exactly when this attachment must NOT be built.
+    //
+    // Spreading an empty array rather than passing `attachments: undefined`:
+    // `createResendSender` maps the field with `...(message.attachments ? ...)`,
+    // so an absent key and an empty array behave the same at the SDK boundary,
+    // and the absent key is what the type already means by "no attachments".
+    ...(isRequest
+      ? {}
+      : {
+          attachments: [
+            icsAttachment(
+              buildBookingIcs(icsEventOf(input), 'request', input.now, icsCustomer(input.email)),
+              'request',
+              input.id,
+            ),
+          ],
+        }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Approval and decline (BK-23)
+//
+// Both are customer-only: the office just performed the action, so mailing them
+// about their own click is noise. Both are built here rather than in the route
+// for the reason every other message is — one module owns the copy, the
+// escaping and the PII rules, and `policy_number` / `claim_number` reach none of
+// them.
+// ---------------------------------------------------------------------------
+
+/** What the approval message needs beyond the booking itself. */
+export type ApprovalDetails = {
+  /** The itemised amounts as the office settled them, in cents. */
+  baseCents: number;
+  travelCents: number;
+  gstCents: number;
+  totalCents: number;
+  /** When payment is due, or null when it is due immediately (pay-now). */
+  dueAt: Date | null;
+  /**
+   * The hosted checkout URL, or null when no card payment is configured.
+   *
+   * BK-32 supplies it. Null is not an error state: the Interac route below is a
+   * complete way to pay, confirmed by the client, so a message with no card
+   * link still asks for money in a way the customer can act on. What must never
+   * happen is a message with neither.
+   */
+  paymentUrl: string | null;
+  /** Where an e-Transfer goes, or null if the client has not given one. */
+  interacEmail: string | null;
+};
+
+/**
+ * The approval: what it costs, when it is due, and what happens if it is not
+ * paid.
+ *
+ * Returns null when the booking has no email address. An approval nobody can
+ * receive is not an approval, and the route treats the null as a refusal to
+ * transition rather than as a message it may skip — see `review.ts`.
+ */
+export function approvalMessage(
+  input: BookingNotificationInput,
+  details: ApprovalDetails,
+): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+  const deadlineLabel = details.dueAt
+    ? `${formatSlot(details.dueAt)} (${TIMEZONE_NOTE})`
+    : null;
+
+  // THE MESSAGE MUST OFFER AT LEAST ONE WAY TO PAY. Asserted here rather than
+  // left to the caller, because "approved, pay us, no idea how" is a message
+  // that generates a phone call for every single booking it goes out on.
+  const ways: string[] = [];
+  if (details.paymentUrl) ways.push('card');
+  if (details.interacEmail) ways.push('interac');
+
+  const amountRows = [
+    row('Assessment', formatCents(details.baseCents)),
+    // A zero travel fee renders NO row rather than "$0.00". A line item for
+    // nothing invites the question of what it might have been.
+    details.travelCents > 0 ? row('Travel', formatCents(details.travelCents)) : '',
+    row('GST', formatCents(details.gstCents)),
+    rawRow('Total', `<strong>${escapeHtml(formatCents(details.totalCents))}</strong>`),
+  ].filter(Boolean);
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(APPROVED_HEADING)}, ${escapeHtml(input.name)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(APPROVED_LEAD)}</p>`,
+    table([
+      rawRow('When', `<strong>${escapeHtml(when)}</strong>`),
+      row('Where', fullAddress(input)),
+      row('Service', input.serviceLabel),
+      input.id > 0 ? row('Reference', `#${input.id}`) : '',
+    ].filter(Boolean)),
+    `<h2 style="font-size:16px;margin:24px 0 8px;">Amount</h2>`,
+    table(amountRows),
+    ...(deadlineLabel
+      ? [
+          `<p style="margin:16px 0;"><strong>${escapeHtml(`Please pay by ${deadlineLabel}.`)}</strong></p>`,
+          `<p style="margin:0 0 16px;">${escapeHtml(APPROVED_DEADLINE_NOTE)}</p>`,
+        ]
+      : [`<p style="margin:16px 0;">${escapeHtml(APPROVED_PAY_NOW_NOTE)}</p>`]),
+    ...(details.paymentUrl
+      ? [
+          `<p style="margin:24px 0;"><a href="${escapeHtml(details.paymentUrl)}" style="background:#111;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Pay ${escapeHtml(formatCents(details.totalCents))}</a></p>`,
+        ]
+      : []),
+    ...(details.interacEmail
+      ? [
+          `<p style="margin:16px 0;">${escapeHtml(APPROVED_INTERAC_LEAD)} ${escapeHtml(
+            `Send ${formatCents(details.totalCents)} to ${details.interacEmail} and put your booking number #${input.id} in the message so we can match it.`,
+          )}</p>`,
+        ]
+      : []),
+    `<p style="margin:16px 0;">${escapeHtml(CANCEL_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    `${APPROVED_HEADING}, ${input.name}`,
+    '',
+    APPROVED_LEAD,
+    '',
+    `When:      ${when}`,
+    `Where:     ${fullAddress(input)}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    'Amount',
+    `  Assessment  ${formatCents(details.baseCents)}`,
+    ...(details.travelCents > 0 ? [`  Travel      ${formatCents(details.travelCents)}`] : []),
+    `  GST         ${formatCents(details.gstCents)}`,
+    `  Total       ${formatCents(details.totalCents)}`,
+    '',
+    ...(deadlineLabel
+      ? [`Please pay by ${deadlineLabel}.`, '', APPROVED_DEADLINE_NOTE]
+      : [APPROVED_PAY_NOW_NOTE]),
+    ...(details.paymentUrl ? ['', `Pay here: ${details.paymentUrl}`] : []),
+    ...(details.interacEmail
+      ? [
+          '',
+          `${APPROVED_INTERAC_LEAD} Send ${formatCents(details.totalCents)} to ${details.interacEmail} and put your booking number #${input.id} in the message so we can match it.`,
+        ]
+      : []),
+    '',
+    CANCEL_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    from: BOOKING_EMAIL_FROM,
+    to: input.email,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(
+      `${APPROVED_HEADING} — ${formatCents(details.totalCents)} to confirm ${input.slotLabel}`,
+    ),
+    html,
+    text,
+    // NO CALENDAR INVITE. Approval is not confirmation; the invite goes out
+    // behind the payment, from `messageType: 'confirmed'`.
+  };
+}
+
+/**
+ * The decline. One reason, no menu, and a route back in.
+ *
+ * Returns null when there is no email address — the office declines those by
+ * phone, which is how they were taken.
+ */
+/**
+ * The stale-request expiry message (BK-23 Task 4).
+ *
+ * Same shape as `declineMessage` and deliberately NOT the same words — see
+ * `EXPIRED_REQUEST_HEADING`. Kept as its own builder rather than a flag on that
+ * one, because a boolean parameter on a customer-facing message is how the
+ * wrong branch gets sent.
+ */
+export function expiredRequestMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(EXPIRED_REQUEST_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(EXPIRED_REQUEST_LEAD)}</p>`,
+    table(
+      [
+        rawRow('Requested', `<strong>${escapeHtml(when)}</strong>`),
+        row('Service', input.serviceLabel),
+        input.id > 0 ? row('Reference', `#${input.id}`) : '',
+      ].filter(Boolean),
+    ),
+    `<p style="margin:16px 0;">${escapeHtml(EXPIRED_REQUEST_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    EXPIRED_REQUEST_HEADING,
+    '',
+    EXPIRED_REQUEST_LEAD,
+    '',
+    `Requested: ${when}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    EXPIRED_REQUEST_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    to: input.email,
+    from: BOOKING_EMAIL_FROM,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: `${EXPIRED_REQUEST_HEADING} — ${input.slotLabel}`,
+    html,
+    text,
+  };
+}
+
+/**
+ * The PAYMENT expiry (BK-32) — the office approved, the customer did not pay by
+ * the deadline, and the slot has been released.
+ *
+ * Its own builder rather than a flag on `expiredRequestMessage`, for the reason
+ * that one gives for not being a flag on `declineMessage`: a boolean parameter
+ * on a customer-facing message is how the wrong branch gets sent. Three
+ * expiries now exist and each describes a different event — see
+ * `PAYMENT_EXPIRED_HEADING` for what makes this one distinct.
+ *
+ * Returns null with no email address. There is nobody to tell, and the slot is
+ * released either way.
+ */
+export function paymentExpiredMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(PAYMENT_EXPIRED_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(PAYMENT_EXPIRED_LEAD)}</p>`,
+    table(
+      [
+        rawRow('Was held for', `<strong>${escapeHtml(when)}</strong>`),
+        row('Service', input.serviceLabel),
+        input.id > 0 ? row('Reference', `#${input.id}`) : '',
+      ].filter(Boolean),
+    ),
+    `<p style="margin:16px 0;">${escapeHtml(PAYMENT_EXPIRED_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    PAYMENT_ATTENTION_RULE,
+  PAYMENT_EXPIRED_HEADING,
+    '',
+    PAYMENT_EXPIRED_LEAD,
+    '',
+    `Was held for: ${when}`,
+    `Service:      ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference:    #${input.id}`] : []),
+    '',
+    PAYMENT_EXPIRED_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    to: input.email,
+    from: BOOKING_EMAIL_FROM,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(`${PAYMENT_EXPIRED_HEADING} — ${input.slotLabel}`),
+    html,
+    text,
+  };
+}
+
+/**
+ * The office alert for money that landed somewhere it should not have (BK-32).
+ *
+ * **Internal only, and it carries no PII rules of its own because it carries
+ * almost no PII**: a name, a reference and the sentence describing what
+ * happened. No policy or claim number, no description, no address — an alert
+ * has no use for them and every field omitted is a field that cannot leak.
+ *
+ * It exists because `needs_attention` on a row nobody is looking at is not an
+ * alert. The two cases that reach it — a double payment, and a payment landing
+ * after the slot was released — both need a human within hours, and both are
+ * cases where the wrong reaction (an automatic refund) is worse than the right
+ * one being slow.
+ *
+ * **It names what NOT to do.** The office reads this while a customer is
+ * possibly on the phone, and "refund it" is the obvious reflex; the ticket's
+ * rule is that a human issues any refund deliberately, in the Stripe dashboard.
+ */
+export function paymentAttentionAlert(
+  appointment: Pick<Appointment, 'id' | 'name' | 'status' | 'slot_start'>,
+  line: string,
+  now: Date,
+): Message {
+  const heading = `Payment needs attention — booking #${appointment.id}`;
+  const when = `${formatSlot(appointment.slot_start)} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:20px;margin:0 0 16px;">${escapeHtml(heading)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(line)}</p>`,
+    `<p style="margin:0 0 16px;"><strong>${escapeHtml(PAYMENT_ATTENTION_RULE)}</strong></p>`,
+    table([
+      row('Customer', appointment.name),
+      row('Slot', when),
+      row('Status', appointment.status),
+      row('Noticed', formatSlot(now)),
+    ]),
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    heading,
+    '',
+    line,
+    '',
+    PAYMENT_ATTENTION_RULE,
+    '',
+    `Customer: ${appointment.name}`,
+    `Slot:     ${when}`,
+    `Status:   ${appointment.status}`,
+    `Noticed:  ${formatSlot(now)}`,
+  ].join('\n');
+
+  return {
+    to: BOOKING_INTERNAL_TO,
+    from: BOOKING_EMAIL_FROM,
+    // The office writing to itself. Present rather than omitted: omitting it
+    // sends a reply to the `noreply@` From, which bounces 550 (BK-21).
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(heading),
+    html,
+    text,
+  };
+}
+
+export function declineMessage(input: BookingNotificationInput): Message | null {
+  if (!input.email) return null;
+
+  const when = `${input.slotLabel} (${TIMEZONE_NOTE})`;
+
+  const html = [
+    WRAP_OPEN,
+    `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(DECLINED_HEADING)}</h1>`,
+    `<p style="margin:0 0 16px;">${escapeHtml(DECLINED_LEAD)}</p>`,
+    table([
+      rawRow('Requested', `<strong>${escapeHtml(when)}</strong>`),
+      row('Service', input.serviceLabel),
+      input.id > 0 ? row('Reference', `#${input.id}`) : '',
+    ].filter(Boolean)),
+    `<p style="margin:16px 0;">${escapeHtml(DECLINED_REBOOK_LINE)}</p>`,
+    `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
+    WRAP_CLOSE,
+  ].join('');
+
+  const text = [
+    DECLINED_HEADING,
+    '',
+    DECLINED_LEAD,
+    '',
+    `Requested: ${when}`,
+    `Service:   ${input.serviceLabel}`,
+    ...(input.id > 0 ? [`Reference: #${input.id}`] : []),
+    '',
+    DECLINED_REBOOK_LINE,
+    '',
+    `YEG Restoration · ${SUPPORT_PHONE}`,
+  ].join('\n');
+
+  return {
+    from: BOOKING_EMAIL_FROM,
+    to: input.email,
+    replyTo: BOOKING_EMAIL_REPLY_TO,
+    subject: headerSafe(`About your assessment request — ${input.slotLabel}`),
+    html,
+    text,
+  };
+}
+
+/**
+ * Whether an approval message can be sent at all.
+ *
+ * Exported so the route can refuse the TRANSITION rather than perform it and
+ * then discover the message cannot go. An approved booking whose customer was
+ * never told is worse than a request left pending: the slot is held, the clock
+ * is running, and nobody is coming.
+ */
+export function canOfferPayment(details: Pick<ApprovalDetails, 'paymentUrl' | 'interacEmail'>): boolean {
+  return details.paymentUrl !== null || details.interacEmail !== null;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,8 +904,29 @@ const NO_EMAIL_NOTICE_TEXT =
  * calendar artifact, for any audience, even the office that reads them three
  * rows above. See `booking-ics.ts`.
  */
+/**
+ * The tier and what it costs, as one line.
+ *
+ * Built from `assessmentQuote` rather than from a figure anybody typed, so the
+ * office email, the customer email and the eventual Stripe line items all come
+ * from one computation. Weekend slots and mould jobs are exactly the cases a
+ * hand-written "$399 + GST" would get wrong.
+ */
+function assessmentSummary(input: BookingNotificationInput): string {
+  if (!input.assessmentTier) return 'Not chosen (phone booking — settle with the customer)';
+  const quote = assessmentQuote({
+    tier: input.assessmentTier,
+    service: input.service,
+    slotStart: input.slotStart,
+  });
+  const name = ASSESSMENT_TIER_NAMES[input.assessmentTier];
+  const weekend = quote.afterHours ? ' — weekend rate, 1.5x' : '';
+  return `${name} — ${formatCents(quote.baseCents)} + GST (${formatCents(quote.totalCents)} total)${weekend}`;
+}
+
 function internalNotification(input: BookingNotificationInput): Message {
   const insurance = input.paymentRoute === 'insurance';
+  const isRequest = input.messageType === 'request';
   const dash = '—';
   const or = (value: string | null) => value ?? dash;
 
@@ -364,6 +940,11 @@ function internalNotification(input: BookingNotificationInput): Message {
     // shouting about. `row` escapes, like every other row here.
     row('Email', input.email || NO_EMAIL_NOTICE),
     row('Service', input.serviceLabel),
+    // BK-31. The office is about to approve this and set an amount, so the tier
+    // and the computed price belong on the message they decide from. "Not
+    // chosen" rather than a blank: an admin entry legitimately has none, and a
+    // blank row reads as a rendering fault.
+    row('Assessment', assessmentSummary(input)),
     row('Address', fullAddress(input)),
     row('Payment', insurance ? 'Insurance claim' : 'Private pay'),
   ];
@@ -433,17 +1014,34 @@ function internalNotification(input: BookingNotificationInput): Message {
     // makes `headerSafe` load-bearing rather than decorative. The customer's own
     // subject is built entirely from constants and server-formatted values.
     subject: headerSafe(
-      `New booking #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`,
+      isRequest
+        ? `NEW REQUEST #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`
+        : `New booking #${input.id} — ${input.name} — ${input.serviceLabel} — ${input.slotLabel}`,
     ),
     html,
     text,
-    attachments: [
-      icsAttachment(
-        buildBookingIcs(icsEventOf(input), 'request', input.now, ICS_OFFICE),
-        'request',
-        input.id,
-      ),
-    ],
+    // THE OFFICE INVITE MOVES TOO (P9, 2026-08-16), not only the customer's.
+    //
+    // If it stayed at request time the office calendar would fill with slots
+    // that may be declined or never paid — and there is no CANCEL to clear them
+    // on either path, because a row that reaches `declined` from
+    // `pending_review` never had an invite to cancel. The office already sees
+    // pending requests in the admin queue and in this very email; the calendar
+    // should carry only real visits.
+    //
+    // This was flagged as a behaviour change from what P7 implied rather than
+    // assumed silently — see prepay-flow-spec.md section 6, item 7.
+    ...(isRequest
+      ? {}
+      : {
+          attachments: [
+            icsAttachment(
+              buildBookingIcs(icsEventOf(input), 'request', input.now, ICS_OFFICE),
+              'request',
+              input.id,
+            ),
+          ],
+        }),
   };
 }
 
@@ -469,6 +1067,7 @@ function icsEventOf(input: BookingNotificationInput): IcsEvent {
 export function planBookingNotifications(input: BookingNotificationInput): NotificationPlan {
   return {
     bookingId: input.id,
+    messageType: input.messageType,
     customer: customerConfirmation(input),
     internal: internalNotification(input),
   };

@@ -10,11 +10,13 @@
 import {
   CONFIRMATION_KEY,
   CONVERSION_MARKER_KEY,
+  paidLandingSessionId,
   planConversionReport,
   readConfirmation,
   serializeConfirmation,
   type Confirmation,
 } from './booking-confirmation';
+import { STRIPE_SESSION_QUERY_PARAM } from './booking-config';
 
 /**
  * `sessionStorage` access that never throws.
@@ -86,17 +88,34 @@ export function reportBookingFunnelEvent(event: BookingFunnelEvent): void {
 }
 
 /**
- * Report a booked assessment to Google Ads and GA4, at most once per booking.
+ * The Stripe Checkout Session this page was reached with, or null.
+ *
+ * `/book/confirmed/` uses it for two decisions: whether to render at all, and
+ * whether a conversion happened. Both hinge on the same fact — that the visitor
+ * arrived from a payment rather than by typing the URL or by carrying a stale
+ * request payload from `/book/received/`.
+ */
+export function paidLandingSession(): string | null {
+  return paidLandingSessionId(window.location.search, STRIPE_SESSION_QUERY_PARAM);
+}
+
+/**
+ * Report a PAID booking to Google Ads and GA4, at most once per payment.
  *
  * Safe to call on every load of the confirmed page: the marker is what makes a
  * reload, a Back, or a bookmarked URL cost nothing, while a second and
- * genuinely different booking in the same tab still reports.
+ * genuinely different payment in the same tab still reports.
+ *
+ * **Keyed on the Checkout Session id, not on the booking id** — see
+ * `conversionCalls`. The session id is in the URL on every legitimate landing
+ * and survives the customer paying on a different device, which the stored
+ * booking id does not.
  *
  * When `window.gtag` is absent the whole tag is dormant (neither `PUBLIC_GA4_ID`
  * nor `PUBLIC_AW_ID` is set), so there is nothing to report and nothing to
  * mark — leaving the marker unwritten is correct, not an oversight.
  */
-export function reportBookingConversion(id: number): void {
+export function reportBookingConversion(sessionId: string | null, id: number): void {
   const gtag = window.gtag;
   if (typeof gtag !== 'function') return;
 
@@ -109,6 +128,7 @@ export function reportBookingConversion(id: number): void {
     marker: readSession(CONVERSION_MARKER_KEY),
     awId: import.meta.env.PUBLIC_AW_ID,
     bookingLabel: import.meta.env.PUBLIC_AW_BOOKING_LABEL,
+    sessionId,
     id,
   });
   if (!report) return;

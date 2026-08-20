@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/cleanup-uploads/",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/expire-payments/",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

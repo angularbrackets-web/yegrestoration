@@ -36,6 +36,7 @@
 // reached the send and the mute stopped it" from "the route was never wired to
 // send at all" — which is what the boundary section below asserts, in both
 // directions. It still says nothing about what the message contained.
+import { SLOT_HOLD_PREDICATE } from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -91,9 +92,15 @@ process.env.BOOKING_NOTIFY_DISABLED = '1';
 const { POST: createRoute } = await import('../src/pages/api/admin/appointments/create');
 const { POST: updateRoute } = await import('../src/pages/api/admin/appointments/update');
 const { POST: resendRoute } = await import('../src/pages/api/admin/appointments/resend');
+const { POST: reviewRoute } = await import('../src/pages/api/admin/appointments/review');
 const { POST: blackoutAdd } = await import('../src/pages/api/admin/blackouts/add');
 const { POST: blackoutDelete } = await import('../src/pages/api/admin/blackouts/delete');
 const { GET: availability } = await import('../src/pages/api/booking/availability');
+// The expiry cron authenticates on CRON_SECRET, so the value has to exist
+// before the module is imported — same swap-then-import ordering as the DB URL.
+process.env.CRON_SECRET = process.env.CRON_SECRET ?? 'verify-cron-secret';
+const { GET: expiryCron } = await import('../src/pages/api/cron/expire-payments');
+const { markPaid } = await import('../src/lib/booking-payment');
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { UNTICKED_NOTE } = await import('../src/lib/booking-admin-entry');
@@ -147,6 +154,17 @@ const createdFileIds: number[] = [];
 const LEAD_MARKER = 'BK-10 reply verification';
 const createdLeadIds: number[] = [];
 
+/**
+ * ONE FROZEN CLOCK FOR EVERY SEND IN THIS FILE (BK-32).
+ *
+ * The notification idempotency prefix now carries an attempt component, so
+ * `new Date()` at each call site would make every prefix in this file unique
+ * for a reason that has nothing to do with what is being asserted — and the
+ * distinctness checks would then pass with the message TYPE dropped from the
+ * key entirely. A fixed instant is what keeps those assertions able to fail.
+ */
+const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
+
 let failures = 0;
 function check(condition: boolean, message: string) {
   if (!condition) {
@@ -173,6 +191,72 @@ async function call(
   return res.headers.get('Location') ?? '';
 }
 
+/**
+ * A slot instant no live row is holding (BK-32's arms).
+ *
+ * These arms insert directly rather than booking through the public route —
+ * they need rows already sitting in `approved_awaiting_payment`, which no door
+ * produces in one step. Direct inserts still meet the partial unique index, so
+ * two probes sharing one `slot_start` is a 23505 rather than a test failure.
+ *
+ * Deliberately far past the 14-day public window: nothing here goes through
+ * availability, and staying clear of it means these arms cannot consume the
+ * bookable slots `verify:booking:commit` is already at the ceiling of (ROADMAP,
+ * Known traps).
+ */
+let probeSlotCursor = 0;
+async function freeProbeSlot(): Promise<Date> {
+  for (let attempt = 0; attempt < 1200; attempt++) {
+    // 30 days out, then one hour per probe. On the grid's :30 to match the
+    // duration CHECK's expectations even though nothing here reads the grid.
+    const candidate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000 + probeSlotCursor * 60 * 60 * 1000);
+    candidate.setUTCMinutes(30, 0, 0);
+    probeSlotCursor++;
+    // MIDWEEK ONLY. Saturday and Sunday carry the 1.5x after-hours multiplier
+    // (BK-31), so a probe that drifted onto a weekend changed the price out
+    // from under arms that assert a settled total — which is exactly what
+    // happened once the cursor advanced far enough. Tuesday to Thursday is
+    // clear of the weekend under either UTC or America/Edmonton reading, and
+    // clear of the Friday closure.
+    const weekday = candidate.getUTCDay();
+    if (weekday < 2 || weekday > 4) continue;
+    const held = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${candidate.toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    if (held.length === 0) return candidate;
+  }
+  throw new Error('freeProbeSlot: no free slot found in 400 attempts');
+}
+
+/** An `approved_awaiting_payment` row with an amount settled on it. */
+/** The current status of one row. Used by every arm that drives a transition. */
+async function statusOf(id: number): Promise<string | undefined> {
+  return ((await sql`SELECT status FROM appointments WHERE id = ${id}`) as { status: string }[])[0]
+    ?.status;
+}
+
+async function seedAwaitingPayment(
+  totalCents: number,
+  sessionId: string | null = null,
+): Promise<number> {
+  const slot = await freeProbeSlot();
+  const inserted = (await sql`
+    INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                              slot_start, status, assessment_tier, payment_status,
+                              approved_at, assessment_amount_cents, travel_fee_cents,
+                              gst_cents, total_amount_cents, payment_due_at,
+                              stripe_session_id)
+    VALUES ('MarkPaid Probe', '780-555-0142', 'markpaid@example.com', 'water', '9 Paid Ave',
+            'private', ${slot.toISOString()}, 'approved_awaiting_payment', 'standard',
+            'pending', ${new Date().toISOString()}, 39900, 0, 1995, ${totalCents},
+            ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${sessionId})
+    RETURNING id
+  `) as { id: number }[];
+  createdIds.push(inserted[0].id);
+  return inserted[0].id;
+}
+
 function idFromLocation(location: string): number | null {
   const m = location.match(/^\/admin\/appointments\/(\d+)\//);
   return m ? Number(m[1]) : null;
@@ -191,6 +275,7 @@ type Row = {
   internal_notified_at: Date | null;
   admin_notes: string | null;
   policy_number: string | null;
+  payment_status: string;
   updated_at: Date;
 };
 
@@ -315,7 +400,12 @@ try {
   check(rowA !== null, 'the row exists');
   if (rowA) {
     check(rowA.source === 'admin', 'it is marked as office-entered');
-    check(rowA.status === 'booked', 'and booked');
+    // BK-23: an office entry is a REQUEST like any other. It lands in
+    // `pending_review` and the office approves it from the review panel, which
+    // is where the amount is set. "Payment always precedes dispatch, no
+    // exceptions" (client, 2026-08-16) applies to phone bookings too.
+    check(rowA.status === 'pending_review', 'and it lands in pending_review, not confirmed');
+    check(rowA.payment_status === 'not_required', 'with payment_status untouched until approval');
     check(rowA.pipeline_stage === 'assessment', 'at the default pipeline stage');
     check(rowA.duration_minutes === 30, 'with the locked 30-minute duration');
     // BK-35 pins BOTH halves here, and the equality is the point.
@@ -373,13 +463,13 @@ try {
   // -------------------------------------------------------------------------
   const before = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   const dupe = await call(createRoute, entryFields({ name: 'BK-08 duplicate' }));
   check(dupe.includes('taken=1'), `a duplicate slot reports taken, got "${dupe}"`);
   const after = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${zonedTimeToUtc(SLOT_DATE, SLOT_A).toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   check(
     before[0].n === 1 && after[0].n === 1,
@@ -396,7 +486,8 @@ try {
   check(rowACancelled?.cancelled_at != null, 'and cancelled_at is stamped');
   const cancelledAt = rowACancelled?.cancelled_at?.getTime();
 
-  // The slot is now free — the partial index only covers status <> 'cancelled'.
+  // The slot is now free — `cancelled` is one of SLOT_RELEASING_STATUSES, so the
+  // partial unique index no longer covers the row.
   const locationB = await call(createRoute, entryFields({ name: 'BK-08 rebook' }));
   const idB = idFromLocation(locationB);
   check(idB !== null, `the freed slot accepts a new booking, got "${locationB}"`);
@@ -411,7 +502,7 @@ try {
   // this is what makes that true rather than merely claimed.
   const conflict = await call(updateRoute, {
     id: String(idA),
-    status: 'booked',
+    status: 'confirmed',
     pipeline_stage: 'restoration',
     admin_notes: MARKER,
   });
@@ -432,10 +523,10 @@ try {
   // -------------------------------------------------------------------------
   const freed = await call(updateRoute, { id: String(idB), status: 'cancelled' });
   check(freed.endsWith('?saved=1'), 'the rebooking is cancelled out of the way');
-  const restored = await call(updateRoute, { id: String(idA), status: 'booked' });
+  const restored = await call(updateRoute, { id: String(idA), status: 'confirmed' });
   check(restored.endsWith('?saved=1'), `un-cancelling now succeeds, got "${restored}"`);
   const rowARestored = await read(idA);
-  check(rowARestored?.status === 'booked', 'the row is booked again');
+  check(rowARestored?.status === 'confirmed', 'the row is confirmed again');
   check(rowARestored?.cancelled_at === null, 'and cancelled_at is cleared, not left stale');
 
   // -------------------------------------------------------------------------
@@ -443,7 +534,7 @@ try {
   // -------------------------------------------------------------------------
   const edited = await call(updateRoute, {
     id: String(idA),
-    status: 'booked',
+    status: 'confirmed',
     pipeline_stage: 'mitigation',
     admin_notes: `${MARKER} edited`,
     // Everything below is outside the whitelist and must change nothing.
@@ -475,7 +566,7 @@ try {
   // ORDER MATTERS. The absent-field case is checked FIRST, while the notes
   // still hold a value: doing it after the clear compares NULL to NULL, which
   // is an assertion that cannot fail — the red pass caught exactly that.
-  await call(updateRoute, { id: String(idA), status: 'booked' });
+  await call(updateRoute, { id: String(idA), status: 'confirmed' });
   check(
     (await read(idA))?.admin_notes === `${MARKER} edited`,
     'an absent notes field leaves the notes alone',
@@ -486,7 +577,7 @@ try {
   check((await read(idA))?.admin_notes === MARKER, 'and writing them back works');
 
   // A well-formed id that matches nothing.
-  const missing = await call(updateRoute, { id: '2147483647', status: 'booked' });
+  const missing = await call(updateRoute, { id: '2147483647', status: 'confirmed' });
   check(missing.includes('saved=missing'), `a vanished appointment is reported, got "${missing}"`);
 
   // -------------------------------------------------------------------------
@@ -497,8 +588,11 @@ try {
   const noEmail = await call(resendRoute, { id: String(idA) });
   check(noEmail.endsWith('?email=refused'), `no email → refused, got "${noEmail}"`);
 
-  // Give it one, and a booked row is accepted — the send itself is muted here,
-  // so this asserts the GATE opened, not that mail went out.
+  // Give it one — and BK-23 narrowed the gate. The resend button re-sends the
+  // "you're booked" confirmation WITH its calendar invite, so it is now
+  // `confirmed`-only. A fresh entry lands in `pending_review`, and offering to
+  // re-send a confirmation for a booking nobody has paid for is the false claim
+  // this whole flow removes.
   const withEmail = await call(
     createRoute,
     entryFields({
@@ -511,10 +605,20 @@ try {
   check(idD !== null, `the emailable entry saved, got "${withEmail}"`);
   if (idD !== null) {
     createdIds.push(idD);
+
+    const pending = await call(resendRoute, { id: String(idD) });
+    check(
+      pending.endsWith('?email=refused'),
+      `a pending_review row is refused even with an email, got "${pending}"`,
+    );
+
+    // Move it to confirmed and the gate opens. The send itself is muted here,
+    // so this asserts the GATE, not that mail went out.
+    await call(updateRoute, { id: String(idD), status: 'confirmed' });
     const accepted = await call(resendRoute, { id: String(idD) });
     check(
       !accepted.endsWith('?email=refused'),
-      `a booked row with an email is accepted, got "${accepted}"`,
+      `a confirmed row with an email is accepted, got "${accepted}"`,
     );
 
     // Cancel it and the gate must close again: a cancelled appointment must not
@@ -615,7 +719,7 @@ try {
       // calendar attachment" unassertable at exactly the seam where a shared
       // builder makes attaching it to both a one-line edit.
       const delivered: Message[] = [];
-      const sentOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const sentOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async (m) => {
           delivered.push(m);
           return { ok: true };
@@ -646,7 +750,7 @@ try {
       //    show a timestamp for mail that never left, and the office would
       //    never think to resend.
       await reset();
-      const failedOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const failedOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => ({ ok: false, error: 'validation_error: API key is invalid' }),
       });
       check(failedOutcome === 'failed', `a resolved error reports failed, got ${failedOutcome}`);
@@ -657,7 +761,7 @@ try {
       // 3. A throwing sender is caught rather than escaping into the route —
       //    the appointment already exists by the time this runs.
       await reset();
-      const threwOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const threwOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => {
           throw new Error('socket hang up');
         },
@@ -669,7 +773,7 @@ try {
       //    stamp either, or a muted test run would leave a false timestamp.
       process.env.BOOKING_NOTIFY_DISABLED = '1';
       await reset();
-      const mutedOutcome = await sendConfirmationAndStamp(sql, plan, {
+      const mutedOutcome = await sendConfirmationAndStamp(sql, plan, SEND_NOW, {
         send: async () => ({ ok: true }),
       });
       check(mutedOutcome === 'skipped', `the mute reports skipped, got ${mutedOutcome}`);
@@ -887,18 +991,24 @@ try {
       check(enteredId !== null, `the entry ${label} saved, got "${entered.location}"`);
       if (enteredId !== null) {
         createdIds.push(enteredId);
+        // BK-23 INVERTED THIS ONE. It used to assert that the office invite
+        // fires regardless of the customer-confirmation checkbox. The office
+        // invite is now GONE from the entry path entirely: an invite at entry
+        // time is an invite for a slot nobody has paid for, and there is no
+        // CANCEL to clear it when the request is declined or the payment lapses
+        // — a row reaching `declined` from `pending_review` never had one.
+        //
+        // The assertion is kept rather than deleted, pointing the other way,
+        // because "no invite at entry" is a property somebody will otherwise
+        // restore by accident while fixing something else. This fixture HAS an
+        // email address, so both halves are falsifiable rather than vacuous.
         check(
-          muteLine(enteredId, 'request', 'office').test(entered.logs),
-          `an entry ${label} still reaches the office invite send`,
+          !muteLine(enteredId, 'request', 'office').test(entered.logs),
+          `an entry ${label} sends the office NO calendar invite`,
         );
-        // AND THE ENTRY MAILS THE CUSTOMER NOTHING FROM THE INVITE PATH. The
-        // entry's customer mail is the confirmation, gated on the checkbox and
-        // sent through `sendConfirmationAndStamp`; BK-16 must not have grown a
-        // second customer send here. This fixture HAS an email address, so the
-        // assertion is falsifiable rather than vacuous.
         check(
           !muteLine(enteredId, 'request', 'customer').test(entered.logs),
-          `and an entry ${label} sends the customer no separate invite`,
+          `and an entry ${label} sends the customer no invite either`,
         );
         // And it is cleaned up out of the slot so the next iteration can reuse it.
         await call(updateRoute, { id: String(enteredId), status: 'cancelled' });
@@ -928,6 +1038,46 @@ try {
       emailless[0]?.email == null,
       `and it really has no email, got ${JSON.stringify(emailless[0]?.email)} — otherwise the arm below is vacuous`,
     );
+    // BK-23: THE BOUNDARY IS NOW "DID THIS STATUS HOLD AN INVITE", not "is it
+    // the word cancelled". An office entry lands in `pending_review`, which
+    // never had an invite issued — so it has to be moved to `confirmed` first
+    // for there to be anything to cancel. That step is not scaffolding; it is
+    // the new rule made visible, and the arm immediately below asserts the
+    // other half of it.
+    const preInvite = await callCapturingLogs({ id: String(idE), status: 'pending_review' });
+    check(!anyMute(idE).test(preInvite.logs), 'a pending_review row has no invite, so no mail crosses');
+    const cancelPending = await callCapturingLogs({ id: String(idE), status: 'declined' });
+    check(
+      !anyMute(idE).test(cancelPending.logs),
+      'and declining a never-confirmed request sends NO cancellation — there was never an invite',
+    );
+    await callCapturingLogs({ id: String(idE), status: 'pending_review' });
+
+    const toConfirmed = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+    check(
+      muteLine(idE, 'request', 'office').test(toConfirmed.logs),
+      'confirming a request issues the office invite',
+    );
+
+    // THE CASE P9 CREATED, and the reason the boundary had to stop being the
+    // word "cancelled".
+    //
+    // A confirmed booking can now leave the calendar through `payment_expired`
+    // and `declined` as well as `cancelled` — a refund, a reversal, an office
+    // correction. Under the old rule NONE of those sent a CANCEL, because
+    // neither the old status nor the new one was the literal `'cancelled'`, and
+    // the invite would sit on two calendars forever with nothing to clear it.
+    // Silent, and only visible to whoever turns up at the door.
+    for (const exit of ['payment_expired', 'declined'] as const) {
+      await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+      const left = await callCapturingLogs({ id: String(idE), status: exit });
+      check(
+        muteLine(idE, 'cancel', 'office').test(left.logs),
+        `confirmed → ${exit} sends a CANCEL — the invite must not outlive the booking`,
+      );
+    }
+    await callCapturingLogs({ id: String(idE), status: 'confirmed' });
+
     const toCancelled = await callCapturingLogs({ id: String(idE), status: 'cancelled' });
     check(toCancelled.location.endsWith('?saved=1'), `the cancel still saves, got "${toCancelled.location}"`);
     check((await read(idE))?.status === 'cancelled', 'and the row is cancelled');
@@ -955,9 +1105,9 @@ try {
     check(!anyMute(idE).test(resubmit.logs), 'and sends nothing — it crossed no boundary');
 
     // 3. Out of cancelled: a fresh REQUEST, office only for this row.
-    const restored = await callCapturingLogs({ id: String(idE), status: 'booked' });
+    const restored = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
     check(restored.location.endsWith('?saved=1'), `the un-cancel saves, got "${restored.location}"`);
-    check((await read(idE))?.status === 'booked', 'and the row is booked again');
+    check((await read(idE))?.status === 'confirmed', 'and the row is confirmed again');
     check(
       muteLine(idE, 'request', 'office').test(restored.logs),
       'and the route reached the office invite send again',
@@ -968,7 +1118,7 @@ try {
     );
 
     // 4. Edits that do not touch the boundary send nothing.
-    for (const status of ['completed', 'no_show', 'booked']) {
+    for (const status of ['completed', 'no_show', 'confirmed']) {
       const edit = await callCapturingLogs({ id: String(idE), status });
       check(edit.location.endsWith('?saved=1'), `a ${status} edit saves`);
       check(!anyMute(idE).test(edit.logs), `and a ${status} edit sends nothing`);
@@ -996,6 +1146,9 @@ try {
     if (idG !== null) {
       createdIds.push(idG);
 
+      // Same as above: confirm it first, because that is when an invite exists
+      // to be cancelled.
+      await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       const cancelG = await callCapturingLogs({ id: String(idG), status: 'cancelled' });
       check(cancelG.location.endsWith('?saved=1'), `the cancel saves, got "${cancelG.location}"`);
       check((await read(idG))?.status === 'cancelled', 'and the row is cancelled');
@@ -1018,9 +1171,9 @@ try {
       // button's fixed idempotency key cannot carry it (the plan-review
       // blocker). Without this the customer's calendar shows "cancelled"
       // forever with no working recovery.
-      const restoreG = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      const restoreG = await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       check(restoreG.location.endsWith('?saved=1'), `the un-cancel saves, got "${restoreG.location}"`);
-      check((await read(idG))?.status === 'booked', 'and the row is booked again');
+      check((await read(idG))?.status === 'confirmed', 'and the row is confirmed again');
       check(
         muteLine(idG, 'request', 'office').test(restoreG.logs),
         'the office REQUEST was reached',
@@ -1038,7 +1191,7 @@ try {
       // what makes them mean something. On `idE` they could not fail.
       const resubmitG = await callCapturingLogs({
         id: String(idG),
-        status: 'booked',
+        status: 'confirmed',
         admin_notes: MARKER,
       });
       check(resubmitG.location.endsWith('?saved=1'), 'a re-submit on the with-email row saves');
@@ -1074,7 +1227,7 @@ try {
       // blank to NULL and so cannot produce this row — which is exactly why a
       // row like it can exist from some other writer.
       await sql`UPDATE appointments SET email = '   ' WHERE id = ${idG}`;
-      const blankEmail = await callCapturingLogs({ id: String(idG), status: 'booked' });
+      const blankEmail = await callCapturingLogs({ id: String(idG), status: 'confirmed' });
       check(blankEmail.location.endsWith('?saved=1'), 'a boundary crossing on a blank-email row saves');
       check(
         muteLine(idG, 'request', 'office').test(blankEmail.logs),
@@ -1096,7 +1249,7 @@ try {
     check(idF !== null, `the freed slot was taken, got "${stealer}"`);
     if (idF !== null) createdIds.push(idF);
 
-    const conflicted = await callCapturingLogs({ id: String(idE), status: 'booked' });
+    const conflicted = await callCapturingLogs({ id: String(idE), status: 'confirmed' });
     check(
       conflicted.location.endsWith('?saved=conflict'),
       `the collision is still reported, got "${conflicted.location}"`,
@@ -1563,6 +1716,1175 @@ try {
   // control API for real, and this script's contract is the dev database.
   // `verify:booking:files` covers the signing arguments; the post-deploy check
   // in the ticket covers the round trip.
+  // ---------------------------------------------------------------------------
+  console.log('\nBK-23 — approve and decline, against the real route');
+  // ---------------------------------------------------------------------------
+  //
+  // THE GUARDED UPDATE IS WHAT THIS EXISTS FOR. Every transition is
+  // `WHERE id = $1 AND status = 'pending_review'`, and zero rows returned means
+  // the decision was not this caller's to make. A double-click, a second tab, and
+  // a decline racing an approve all land there. Getting that wrong does not
+  // corrupt a row — it sends the customer a second email, or an approval for a
+  // booking somebody already declined.
+  {
+    const REVIEW_DATE = '2029-06-12';
+
+    const makeRequest = async (time: string, over: Record<string, string> = {}) => {
+      const location = await call(
+        createRoute,
+        entryFields({
+          slot_date: REVIEW_DATE,
+          slot_time: time,
+          name: `BK-23 review ${time}`,
+          email: 'bk23-verify@example.com',
+          assessment_tier: 'standard',
+          ...over,
+        }),
+      );
+      const id = idFromLocation(location);
+      if (id !== null) createdIds.push(id);
+      return id;
+    };
+
+    // --- APPROVE REFUSES A SLOT THAT HAS ALREADY PASSED ----------------------
+    //
+    // Task 4's auto-decline at slot-4h is what would normally make this
+    // unreachable, and it is not built. Without an equivalent on the built
+    // path, a request nobody reviewed in time could still be approved days
+    // later — emailing "please pay as soon as you can" for a visit that has
+    // been and gone, and under BK-32 opening a live Checkout Session for it.
+    //
+    // Inserted directly rather than through the create route, because every
+    // door refuses a past slot and the point is to reach the row a lapsed
+    // request BECOMES by sitting there.
+    {
+      const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, assessment_tier)
+        VALUES ('Elapsed Probe', '780-555-0199', 'elapsed@example.com', 'water', '1 Past St',
+                'private', ${past.toISOString()}, 'pending_review', 'standard')
+        RETURNING id
+      `) as { id: number }[];
+      const elapsedId = inserted[0]?.id;
+      check(elapsedId !== undefined, 'a lapsed request was constructed');
+      if (elapsedId !== undefined) {
+        createdIds.push(elapsedId);
+        const location = await call(reviewRoute, { id: String(elapsedId), action: 'approve' });
+        check(
+          location.includes('review=elapsed'),
+          `approving a slot in the past is refused, got "${location}"`,
+        );
+
+        const after = (await sql`
+          SELECT status, approved_at, assessment_amount_cents, payment_status
+          FROM appointments WHERE id = ${elapsedId}
+        `) as Record<string, unknown>[];
+        check(after[0]?.status === 'pending_review', 'and the row does not transition');
+        check(after[0]?.approved_at === null, 'nothing is stamped');
+        check(after[0]?.assessment_amount_cents === null, 'and no amount is written');
+        check(
+          after[0]?.payment_status === 'not_required',
+          'and payment_status is untouched — a refusal must change nothing',
+        );
+      }
+    }
+
+    // --- APPROVE -------------------------------------------------------------
+    const approveId = await makeRequest('11:30');
+    check(approveId !== null, 'a request to approve was created');
+    if (approveId !== null) {
+      const before = await read(approveId);
+      check(before?.status === 'pending_review', 'and it starts in pending_review');
+
+      const location = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+      check(
+        location.includes('review=approved'),
+        `approving reports success, got "${location}"`,
+      );
+
+      const row = (await sql`
+        SELECT status, payment_status, approved_at, assessment_amount_cents,
+               travel_fee_cents, gst_cents, total_amount_cents, payment_due_at
+        FROM appointments WHERE id = ${approveId}
+      `) as Record<string, unknown>[];
+
+      check(row[0]?.status === 'approved_awaiting_payment', 'the row moves to approved_awaiting_payment');
+      check(row[0]?.payment_status === 'pending', 'and payment_status becomes pending');
+      check(row[0]?.approved_at !== null, 'approved_at is stamped');
+
+      // THE AMOUNTS ARE SNAPSHOTTED, not left to be recomputed later. A price
+      // change under a live row must not move a quote the customer accepted.
+      check(row[0]?.assessment_amount_cents === 39900, 'the base amount is snapshotted from the table');
+      check(row[0]?.travel_fee_cents === 0, 'travel defaults to zero — never applied automatically');
+      check(row[0]?.gst_cents === 1995, 'GST is computed, not typed');
+      check(row[0]?.total_amount_cents === 41895, 'and the total is base + travel + GST');
+      check(row[0]?.payment_due_at !== null, 'a distant slot carries a real deadline');
+
+      // THE SLOT IS STILL HELD. `approved_awaiting_payment` is not in
+      // SLOT_RELEASING_STATUSES — the whole point of a deadline is that the time
+      // is reserved until it lapses.
+      const held = await call(
+        createRoute,
+        entryFields({ slot_date: REVIEW_DATE, slot_time: '11:30', name: 'BK-23 collide' }),
+      );
+      check(held.includes('taken=1'), 'and the slot stays held against a second booking');
+
+      // IDEMPOTENCE. A second approve is a no-op, not a second email.
+      const again = await call(reviewRoute, { id: String(approveId), action: 'approve' });
+      check(again.includes('review=stale'), `a second approve is a no-op, got "${again}"`);
+      const after = (await sql`
+        SELECT approved_at FROM appointments WHERE id = ${approveId}
+      `) as { approved_at: Date }[];
+      check(
+        after[0].approved_at.getTime() === (row[0].approved_at as Date).getTime(),
+        'and it does not restamp approved_at',
+      );
+
+      // A DECLINE CANNOT OVERTAKE AN APPROVAL. Same guard, other action.
+      const raced = await call(reviewRoute, { id: String(approveId), action: 'decline' });
+      check(raced.includes('review=stale'), 'declining an already-approved row is a no-op');
+      const stillApproved = await read(approveId);
+      check(
+        stillApproved?.status === 'approved_awaiting_payment',
+        'and the row is untouched by it',
+      );
+    }
+
+    // --- APPROVE WITH AN OVERRIDE AND A TRAVEL FEE ---------------------------
+    const overrideId = await makeRequest('12:30', { assessment_tier: 'report' });
+    if (overrideId !== null) {
+      await call(reviewRoute, {
+        id: String(overrideId),
+        action: 'approve',
+        assessment_amount: '750.00',
+        travel_fee: '46.50',
+      });
+      const row = (await sql`
+        SELECT assessment_amount_cents, travel_fee_cents, gst_cents, total_amount_cents
+        FROM appointments WHERE id = ${overrideId}
+      `) as Record<string, number>[];
+      check(row[0]?.assessment_amount_cents === 75000, 'an admin override replaces the suggested base');
+      check(row[0]?.travel_fee_cents === 4650, 'and the typed travel fee is stored');
+      // GST on base + travel, one rounding. 79650 * 5% = 3982.5 → 3983.
+      check(row[0]?.gst_cents === 3983, 'GST is recomputed on the overridden subtotal');
+      check(row[0]?.total_amount_cents === 83633, 'and the total adds up');
+    }
+
+    // --- A BAD AMOUNT CHANGES NOTHING ----------------------------------------
+    const badId = await makeRequest('13:30');
+    if (badId !== null) {
+      const refused = await call(reviewRoute, {
+        id: String(badId),
+        action: 'approve',
+        assessment_amount: '399abc',
+      });
+      check(refused.includes('review=amount'), `a malformed amount is refused, got "${refused}"`);
+      const row = await read(badId);
+      check(
+        row?.status === 'pending_review',
+        'and the row is left in pending_review — a refusal must not half-approve',
+      );
+    }
+
+    // --- NO TIER, NO APPROVAL ------------------------------------------------
+    const noTierId = await makeRequest('14:30', { assessment_tier: '' });
+    if (noTierId !== null) {
+      const refused = await call(reviewRoute, { id: String(noTierId), action: 'approve' });
+      check(refused.includes('review=notier'), `no tier means no amount, so no approval, got "${refused}"`);
+      check((await read(noTierId))?.status === 'pending_review', 'and nothing changed');
+
+      // ...but it can still be declined. A request the office cannot price is
+      // one they may well want to turn down.
+      const declined = await call(reviewRoute, { id: String(noTierId), action: 'decline' });
+      check(declined.includes('review=declined'), `an unpriced request can still be declined, got "${declined}"`);
+      check((await read(noTierId))?.status === 'declined', 'and it lands in declined');
+    }
+
+    // --- DECLINE RELEASES THE SLOT -------------------------------------------
+    const declineId = await makeRequest('15:30');
+    if (declineId !== null) {
+      await call(reviewRoute, { id: String(declineId), action: 'decline' });
+      const row = (await sql`
+        SELECT status, declined_at FROM appointments WHERE id = ${declineId}
+      `) as { status: string; declined_at: Date | null }[];
+      check(row[0]?.status === 'declined', 'declining moves the row to declined');
+      check(row[0]?.declined_at !== null, 'and stamps declined_at');
+
+      // THE SLOT IS BACK ON THE MARKET, through the real index rather than a
+      // separate release step: `declined` is in SLOT_RELEASING_STATUSES, so the
+      // row falls out of the partial unique index the moment it commits.
+      const rebooked = await call(
+        createRoute,
+        entryFields({ slot_date: REVIEW_DATE, slot_time: '15:30', name: 'BK-23 rebook' }),
+      );
+      const rebookedId = idFromLocation(rebooked);
+      check(rebookedId !== null, `the declined slot can be booked again, got "${rebooked}"`);
+      if (rebookedId !== null) createdIds.push(rebookedId);
+    }
+
+    // --- A BAD ACTION IS NOT A DECISION --------------------------------------
+    const bogus = await call(reviewRoute, { id: String(approveId ?? 1), action: 'confirm' });
+    check(bogus.includes('review=invalid'), `an unrecognised action is refused, got "${bogus}"`);
+
+    console.log('  approve, decline, override, refusals, and both idempotence guards');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nThe expiry cron: two sweeps, one handler (BK-32 + BK-23 Task 4)');
+  // -------------------------------------------------------------------------
+  //
+  // The verification BK-23 Task 4 named as mandatory, plus the payment sweep's
+  // one rule that must never regress.
+  {
+    const hours = (n: number) => new Date(Date.now() + n * 60 * 60 * 1000);
+
+    // A pending_review request is expired only once its slot is inside
+    // slot - PAYMENT_DEADLINE_LEAD_HOURS. Both sides of that boundary, because
+    // an off-by-one here either strands requests forever or kills live ones.
+    const seed = async (
+      status: string,
+      slotAt: Date,
+      extra: { paymentDueAt?: Date | null; notes?: string | null } = {},
+    ): Promise<number> => {
+      const rows = (await sql`
+        INSERT INTO appointments (
+          name, phone, email, service, address, payment_route,
+          slot_start, status, assessment_tier, payment_due_at, admin_notes
+        ) VALUES (
+          ${`${MARKER} expiry`}, '780-555-0111', 'expiry@example.com', 'water', '1 Expiry St',
+          'private', ${slotAt.toISOString()}, ${status}, 'standard',
+          ${extra.paymentDueAt ? extra.paymentDueAt.toISOString() : null},
+          ${extra.notes ?? null}
+        )
+        RETURNING id
+      `) as { id: number }[];
+      createdIds.push(rows[0].id);
+      return rows[0].id;
+    };
+
+    // INSIDE the window — must expire.
+    const staleId = await seed('pending_review', hours(1));
+    // OUTSIDE it by an hour — must be left alone. This is the arm that would
+    // catch a sweep that expired everything pending.
+    const freshId = await seed('pending_review', hours(5));
+    // The office's own note must survive the audit line being appended.
+    const notedId = await seed('pending_review', hours(1), { notes: 'Office: customer called.' });
+
+    // Not this sweep's business, in both directions.
+    const awaitingOverdue = await seed('approved_awaiting_payment', hours(1), {
+      paymentDueAt: hours(-1),
+    });
+    // THE PAY-NOW ROW. A NULL deadline must NEVER be treated as overdue: it is
+    // the near-term branch, and expiring it would auto-cancel every emergency
+    // and every next-day booking within 15 minutes of approval.
+    const payNow = await seed('approved_awaiting_payment', hours(1), { paymentDueAt: null });
+    const confirmedRow = await seed('confirmed', hours(1));
+
+    // THE ROW WITH A LIVE CHECKOUT SESSION (BK-32).
+    //
+    // Expiring the row releases the slot, but the Stripe link stays payable
+    // until its own `expires_at` — so a customer can pay for a time somebody
+    // else may already have booked. This is the open dependency the ROADMAP
+    // records against this ticket, and one call per expired row closes it.
+    //
+    // Observable WITHOUT a Stripe key, which is what makes it assertable here:
+    // `expireCheckoutSession` returns false when nothing is configured, so the
+    // handler counts it under `sessionsUncancelled`. A non-zero count proves the
+    // sweep REACHED Stripe for that row; deleting the loop takes it to zero.
+    await sql`
+      UPDATE appointments SET stripe_session_id = ${'cs_test_cronprobe0001'}
+      WHERE id = ${awaitingOverdue}
+    `;
+    // A SECOND overdue row with NO session — an approval that fell back to the
+    // Interac route. Without it the sweep expires exactly one row and "call
+    // Stripe for the row that has a session" is indistinguishable from "call
+    // Stripe for every row"; a deliberate break to the latter stayed green on
+    // one row, which is how this fixture earned its place.
+    const overdueNoSession = await seed('approved_awaiting_payment', hours(2), {
+      paymentDueAt: hours(-1),
+    });
+
+    const res = await expiryCron({
+      request: new Request('https://example.com/api/cron/expire-payments/', {
+        headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+      }),
+    } as never);
+    check(res.status === 200, `the cron answers 200, got ${res.status}`);
+    const counts = (await res.json()) as Record<string, number>;
+
+    check(await statusOf(staleId) === 'declined', 'a stale request inside slot-4h is declined');
+    check(
+      await statusOf(freshId) === 'pending_review',
+      'a request still outside slot-4h is left alone — the boundary is a window, not a sweep-everything',
+    );
+    check(
+      await statusOf(awaitingOverdue) === 'payment_expired',
+      'an overdue payment expires',
+    );
+    check(
+      await statusOf(payNow) === 'approved_awaiting_payment',
+      'a PAY-NOW row (NULL payment_due_at) is NEVER expired — it has no deadline to be past',
+    );
+    check(await statusOf(confirmedRow) === 'confirmed', 'a confirmed booking is untouched');
+    // A FLOOR, not an equality. Earlier arms in this script leave their own
+    // `pending_review` rows behind, and the sweep correctly takes any of them
+    // that are inside the window — including the deliberately-elapsed row the
+    // S3 arm seeds. Pinning an exact count here would fail whenever another arm
+    // is added, which is a test that breaks for being right.
+    check(
+      counts.requestsExpired >= 2,
+      `at least the two seeded stale requests expired, got ${counts.requestsExpired}`,
+    );
+    check(counts.paymentsExpired === 2, `both overdue payments expired, got ${counts.paymentsExpired}`);
+    check(
+      await statusOf(overdueNoSession) === 'payment_expired',
+      'including the one that never had a card link',
+    );
+
+    // The sweep tried to kill the link. It cannot succeed without a Stripe key,
+    // and that is exactly why the ATTEMPT is what gets asserted — the count is
+    // zero if the loop is not there at all.
+    check(
+      (counts.sessionsCancelled ?? 0) + (counts.sessionsUncancelled ?? 0) === 1,
+      `the sweep reached Stripe ONCE — for the row holding a session and not for the one without, got ${JSON.stringify({
+        cancelled: counts.sessionsCancelled,
+        uncancelled: counts.sessionsUncancelled,
+      })}`,
+    );
+    // And it did NOT try for the rows with no session — a call per expired row
+    // regardless would be a call per row for nothing, every fifteen minutes.
+    check(
+      (counts.sessionsCancelled ?? 0) === 0,
+      'with nothing reported cancelled, since no key is configured in this harness',
+    );
+
+    // The system actor is RECORDED, not inferred, and does not eat the office's
+    // note. BK-40's repair of this exact idiom is why both halves are asserted.
+    const noted = (await sql`
+      SELECT admin_notes, declined_at FROM appointments WHERE id = ${notedId}
+    `) as { admin_notes: string | null; declined_at: Date | null }[];
+    check(
+      noted[0]?.admin_notes?.includes('Office: customer called.') === true,
+      "the office's own note survives",
+    );
+    check(
+      noted[0]?.admin_notes?.includes('Auto-declined by the expiry sweep') === true,
+      'and the system actor is recorded beside it',
+    );
+    check(noted[0]?.declined_at !== null, 'declined_at is stamped');
+
+    // THE SLOT IS GENUINELY BACK — asserted against SLOT_HOLD_PREDICATE, the
+    // exact fragment the partial unique index and the availability query are
+    // both built from, rather than against the status string.
+    //
+    // NOT against the public calendar, and the reason is worth stating: every
+    // row this sweep touches is by definition within four hours of its slot,
+    // and the next-day-earliest notice rule means such a slot is never offered
+    // publicly whether it is held or free. An availability assertion here would
+    // pass identically before and after the release — a check that cannot fail.
+    // What "released" actually means is that the slot stops matching the hold
+    // predicate, which is what frees it for the office to rebook by phone and
+    // what stops it blocking the index.
+    const staleRow = (await sql`
+      SELECT slot_start FROM appointments WHERE id = ${staleId}
+    `) as { slot_start: Date }[];
+    const stillHeld = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${staleRow[0].slot_start.toISOString()}
+        AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    check(
+      stillHeld.length === 0,
+      `the expired request no longer holds its slot (${stillHeld.length} row(s) still hold it)`,
+    );
+
+    // And the proof that the check above can fail: the row that was NOT expired
+    // is still holding its own slot.
+    const freshRow = (await sql`
+      SELECT slot_start FROM appointments WHERE id = ${freshId}
+    `) as { slot_start: Date }[];
+    const freshHeld = (await sql`
+      SELECT id FROM appointments
+      WHERE slot_start = ${freshRow[0].slot_start.toISOString()}
+        AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+    `) as { id: number }[];
+    check(
+      freshHeld.some((r) => r.id === freshId),
+      'while the request that was left alone still holds its slot — so the check above is discriminating',
+    );
+
+    // A SECOND RUN IS A NO-OP. The guarded update is what makes the office
+    // approving mid-sweep safe, and this is the observable half of it.
+    const second = (await (
+      await expiryCron({
+        request: new Request('https://example.com/api/cron/expire-payments/', {
+          headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+        }),
+      } as never)
+    ).json()) as Record<string, number>;
+    check(
+      second.requestsExpired === 0 && second.paymentsExpired === 0,
+      `a second run expires nothing, got ${JSON.stringify(second)}`,
+    );
+
+    // And it will not run at all without the secret.
+    const unauthorized = await expiryCron({
+      request: new Request('https://example.com/api/cron/expire-payments/'),
+    } as never);
+    check(unauthorized.status === 401, `an unauthenticated call is refused, got ${unauthorized.status}`);
+
+    console.log('  both sweeps, the pay-now exemption, the audit line, and the released slot');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — layer 1 CLAIMS an event, and this is executed, not read');
+  // -------------------------------------------------------------------------
+  //
+  // THE IMPLEMENTATION REVIEW CAUGHT THIS AS THE NINTH CANNOT-FAIL ASSERTION.
+  // Layer 1 was pinned only by two regexes over `webhook.ts` — nothing anywhere
+  // created, inserted into or queried `stripe_events`, so the claim SQL had
+  // never once been executed. Those pins pass unchanged if the statement is
+  // syntactically broken, if `RETURNING` is dropped, or if the zero-row branch
+  // is inverted. They pinned the SHAPE of the code they were asserting about,
+  // which is the family this repo has now caught nine times.
+  //
+  // The property is the one plan-review blocker B1 existed to install, and it
+  // is worth spelling out because "idempotent" is not it: **a claimed but
+  // UNSTAMPED event must be claimable again**, or a handler that dies between
+  // recording and confirming makes Stripe's retry a no-op — and the cron then
+  // releases the slot of a booking that was paid for.
+  //
+  // The statement below is a byte-for-byte copy of the route's, which would
+  // normally be the shared-helper smell. It is not: `webhook.ts` runs it inside
+  // a signature-verified POST that cannot be reached from here, so the choice
+  // is between executing the same SQL or executing none. A source pin that the
+  // two agree is what keeps them honest, and it lives beside them below.
+  {
+    const eventId = `evt_probe_${Date.now()}`;
+    const claim = async () =>
+      (await sql`
+        INSERT INTO stripe_events (event_id, type, received_at)
+        VALUES (${eventId}, ${'checkout.session.completed'}, ${new Date().toISOString()})
+        ON CONFLICT (event_id) DO UPDATE SET event_id = EXCLUDED.event_id
+          WHERE stripe_events.processed_at IS NULL
+        RETURNING event_id
+      `) as { event_id: string }[];
+
+    try {
+      const first = await claim();
+      check(first.length === 1, 'a brand-new event is claimed');
+
+      // THE CRASH WINDOW. The handler died here: the row exists, nothing is
+      // stamped, and Stripe retries.
+      const retry = await claim();
+      check(
+        retry.length === 1,
+        'AN UNSTAMPED EVENT IS CLAIMED AGAIN — this is the payment that would otherwise be lost',
+      );
+
+      await sql`
+        UPDATE stripe_events SET processed_at = ${new Date().toISOString()}
+        WHERE event_id = ${eventId}
+      `;
+
+      const afterStamp = await claim();
+      check(
+        afterStamp.length === 0,
+        'and once it is stamped, a redelivery claims nothing — the handler does no work twice',
+      );
+
+      const stored = (await sql`
+        SELECT type, received_at, processed_at FROM stripe_events WHERE event_id = ${eventId}
+      `) as Record<string, unknown>[];
+      check(stored.length === 1, 'exactly one row exists for the event, however many deliveries');
+      check(stored[0]?.type === 'checkout.session.completed', 'with the type recorded');
+      check(stored[0]?.processed_at !== null, 'and processed_at stamped');
+    } finally {
+      await sql`DELETE FROM stripe_events WHERE event_id = ${eventId}`;
+    }
+
+    // The route must be running THIS statement. Without this the block above
+    // proves Postgres works, not that the webhook uses it.
+    const webhookSrc = readFileSync('src/pages/api/stripe/webhook.ts', 'utf8');
+    check(
+      webhookSrc.includes('ON CONFLICT (event_id) DO UPDATE SET event_id = EXCLUDED.event_id') &&
+        webhookSrc.includes('WHERE stripe_events.processed_at IS NULL'),
+      'and the webhook runs the same claim this arm just executed',
+    );
+
+    console.log('  claim, crash, re-claim, stamp, ignore — against the real database');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — markPaid, the one confirmation path, and its three no-ops');
+  // -------------------------------------------------------------------------
+  //
+  // Every one of these goes through `markPaid` rather than through SQL, because
+  // the property under test is that ONE function decides every payment outcome.
+  // Mail is muted by BOOKING_NOTIFY_DISABLED, which is what the log lines the
+  // route emits are read for elsewhere in this file.
+  {
+    const NOW = new Date();
+
+    // ── The happy path ─────────────────────────────────────────────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      const outcome = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_happy',
+        paymentIntentId: 'pi_test_happy',
+        sessionId: 'cs_test_happy0001',
+        now: NOW,
+      });
+      check(outcome === 'confirmed', `a paid session confirms, got "${outcome}"`);
+
+      const row = (await sql`
+        SELECT status, payment_status, payment_method, paid_amount_cents, payment_reference,
+               stripe_payment_intent_id, total_amount_cents, paid_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.status === 'confirmed', 'the status becomes confirmed');
+      check(row[0]?.payment_status === 'paid', 'payment_status becomes paid');
+      check(row[0]?.payment_method === 'stripe', 'the method is recorded');
+      check(row[0]?.paid_at !== null, 'paid_at is stamped');
+      // THE SNAPSHOT SURVIVES THE PAYMENT. What arrived goes in its own column;
+      // `total_amount_cents` is what the approval settled and the email quoted,
+      // and overwriting it would leave nothing to compare a receipt against.
+      check(row[0]?.paid_amount_cents === 41895, 'what arrived is recorded in paid_amount_cents');
+      check(
+        row[0]?.total_amount_cents === 41895,
+        'and total_amount_cents is UNTOUCHED — it is the approval snapshot, not the receipt',
+      );
+      check(
+        row[0]?.stripe_payment_intent_id === 'pi_test_happy',
+        'the payment intent lands in the column BK-33 refunds from',
+      );
+    }
+
+    // ── THE APPROVAL SNAPSHOT SURVIVES A PAYMENT THAT DISAGREES WITH IT ────
+    //
+    // A SEPARATE ARM WITH A DIFFERENT AMOUNT, because the happy path above
+    // cannot test this: there the arriving amount equals the settled total, so
+    // writing one over the other is invisible and the check stayed green
+    // through a deliberate break. The amounts have to differ for the property
+    // to be observable at all.
+    //
+    // They differ here by construction rather than by accident — `markPaid`
+    // takes what arrived as a parameter, and a partial payment, a Terminal
+    // handler, or an office member marking an e-Transfer that came up short all
+    // supply something other than the quote. `total_amount_cents` is what the
+    // approval email told the customer, so it has to survive any of them or
+    // there is nothing left to compare a receipt against.
+    {
+      const id = await seedAwaitingPayment(41895);
+      const outcome = await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 40000,
+        reference: 'ETR-SHORT',
+        actor: 'Dana',
+        now: NOW,
+      });
+      check(outcome === 'confirmed', `a short payment still confirms, got "${outcome}"`);
+      const row = (await sql`
+        SELECT paid_amount_cents, total_amount_cents FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.paid_amount_cents === 40000, 'what actually arrived is recorded');
+      check(
+        row[0]?.total_amount_cents === 41895,
+        'and the approval snapshot is UNCHANGED — the two are different columns for this reason',
+      );
+    }
+
+    // ── ONE PAYMENT DELIVERED TWICE IS NOT A DOUBLE PAYMENT ────────────────
+    //
+    // Stripe redelivers by design, and `checkout.session.completed` plus
+    // `async_payment_succeeded` can both reach here for one session. Reporting
+    // those as a double payment would tell the office to refund a single charge
+    // — and the ticket's rule is that a human acts on that alert.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_twice',
+        paymentIntentId: 'pi_test_twice',
+        sessionId: 'cs_test_twice0001',
+        now: NOW,
+      });
+      const again = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_twice',
+        paymentIntentId: 'pi_test_twice',
+        sessionId: 'cs_test_twice0001',
+        now: NOW,
+      });
+      check(again === 'already-recorded', `a redelivery is silent, got "${again}"`);
+      const row = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${id}
+      `) as { needs_attention: string | null }[];
+      check(
+        row[0]?.needs_attention === null,
+        'and it flags NOTHING — the office is not told to refund a single charge',
+      );
+    }
+
+    // ── TWO PAYMENTS IS A DOUBLE PAYMENT, AND IT NEVER REFUNDS ─────────────
+    //
+    // The real race: the office marks an e-Transfer, then the customer pays the
+    // Stripe link too. The second arrival must no-op and flag.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-8891',
+        actor: 'Dana',
+        now: NOW,
+      });
+      const clash = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_clash',
+        paymentIntentId: 'pi_test_clash',
+        sessionId: 'cs_test_clash0001',
+        now: NOW,
+      });
+      check(clash === 'double-pay', `a DIFFERENT payment on a confirmed row is a double pay, got "${clash}"`);
+
+      const row = (await sql`
+        SELECT payment_method, payment_reference, interac_marked_by, needs_attention, status
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.status === 'confirmed', 'the row stays confirmed');
+      check(
+        row[0]?.payment_method === 'interac' && row[0]?.payment_reference === 'ETR-8891',
+        'the FIRST payment keeps the columns — the loser overwrites nothing',
+      );
+      check(row[0]?.interac_marked_by === 'Dana', 'including who asserted it');
+      check(
+        typeof row[0]?.needs_attention === 'string' &&
+          (row[0].needs_attention as string).includes('DOUBLE PAYMENT'),
+        'and the row is flagged for a human',
+      );
+      check(
+        (row[0].needs_attention as string).includes('NOT refunded automatically'),
+        'with the instruction that nothing was refunded — never move money without a person',
+      );
+    }
+
+    // ── PAID AFTER THE SLOT WAS RELEASED ───────────────────────────────────
+    //
+    // The cron/webhook race the ticket calls out. The money is real: record it,
+    // flag it, and DO NOT put the status back — the slot may already be rebooked.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'payment_expired' WHERE id = ${id}`;
+      const late = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_late',
+        paymentIntentId: 'pi_test_late',
+        sessionId: 'cs_test_late00001',
+        now: NOW,
+      });
+      check(late === 'paid-after-release', `a payment on a released row records, got "${late}"`);
+
+      const row = (await sql`
+        SELECT status, payment_status, paid_amount_cents, needs_attention
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(
+        row[0]?.status === 'payment_expired',
+        'the STATUS IS NOT PUT BACK — the slot may already belong to somebody else',
+      );
+      check(row[0]?.payment_status === 'paid', 'but the money is recorded');
+      check(row[0]?.paid_amount_cents === 41895, 'with the amount that arrived');
+      check(
+        typeof row[0]?.needs_attention === 'string' &&
+          (row[0].needs_attention as string).includes('PAID AFTER THE SLOT WAS RELEASED'),
+        'and flagged for a human',
+      );
+    }
+
+    // ── AN INTERAC REFERENCE NEVER LANDS IN THE STRIPE COLUMN ──────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-4410',
+        actor: 'Sam',
+        now: NOW,
+      });
+      const row = (await sql`
+        SELECT payment_reference, stripe_payment_intent_id, interac_marked_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(row[0]?.payment_reference === 'ETR-4410', 'the e-Transfer reference is recorded');
+      check(
+        row[0]?.stripe_payment_intent_id === null,
+        'and NOT in stripe_payment_intent_id, which BK-33 would aim a refund at',
+      );
+      check(row[0]?.interac_marked_at !== null, 'interac_marked_at is stamped');
+    }
+
+    // ── THE LATE-PAYMENT UPDATE RESTATES ITS OWN EXPECTATIONS ──────────────
+    //
+    // `review.ts:46` forbids SELECT-then-act categorically. The narrow UPDATE
+    // on the released-row branch reads the row first to decide WHICH branch it
+    // is, so it has to re-state `status IN (...) AND payment_status <> 'paid'`
+    // in its own WHERE — or a payment that lands between the read and the write
+    // overwrites the method, stamp and reference of one that got there first.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'payment_expired' WHERE id = ${id}`;
+      await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: 'ETR-FIRST',
+        actor: 'Dana',
+        now: NOW,
+      });
+      // A second, different payment onto the same released row. The first one
+      // is already recorded, so this must not overwrite it.
+      const second = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_second',
+        paymentIntentId: 'pi_test_second',
+        now: NOW,
+      });
+      check(
+        second === 'not-applicable',
+        `a second payment onto an already-recorded released row no-ops, got "${second}"`,
+      );
+      const row = (await sql`
+        SELECT payment_method, payment_reference, interac_marked_by
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      check(
+        row[0]?.payment_method === 'interac' && row[0]?.payment_reference === 'ETR-FIRST',
+        'and the FIRST payment keeps the columns — the loser overwrites nothing',
+      );
+      check(row[0]?.interac_marked_by === 'Dana', 'including who asserted it');
+    }
+
+    // ── TWO REFERENCE-LESS MARKS ON ONE METHOD ARE ONE ASSERTION ───────────
+    //
+    // Deliberate, and the trade is stated rather than left to be discovered: an
+    // office member clicking "Mark as paid" twice with nothing typed is ONE
+    // claim made twice, so it must not read as a refundable double payment. The
+    // cost is that a genuinely second e-Transfer with no reference either is
+    // silently unflagged — which is why the form asks for a reference and says
+    // what it is for.
+    {
+      const id = await seedAwaitingPayment(41895);
+      await markPaid(sql, id, { method: 'interac', amountCents: 41895, reference: null, now: NOW });
+      const again = await markPaid(sql, id, {
+        method: 'interac',
+        amountCents: 41895,
+        reference: null,
+        now: NOW,
+      });
+      check(again === 'already-recorded', `a second reference-less mark is silent, got "${again}"`);
+      const row = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${id}
+      `) as { needs_attention: string | null }[];
+      check(row[0]?.needs_attention === null, 'and flags nothing');
+
+      // But a DIFFERENT METHOD is always a different payment, reference or not.
+      // This is the real double-pay race: Interac marked, then the card link paid.
+      const clash = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_after_interac',
+        paymentIntentId: 'pi_test_after_interac',
+        now: NOW,
+      });
+      check(clash === 'double-pay', `a different METHOD is always a double pay, got "${clash}"`);
+    }
+
+    // ── A ROW IN NO PAYABLE STATE ──────────────────────────────────────────
+    {
+      const id = await seedAwaitingPayment(41895);
+      await sql`UPDATE appointments SET status = 'pending_review' WHERE id = ${id}`;
+      const nope = await markPaid(sql, id, {
+        method: 'stripe',
+        amountCents: 41895,
+        reference: 'pi_test_nope',
+        now: NOW,
+      });
+      check(nope === 'not-applicable', `an unapproved row is not payable, got "${nope}"`);
+    }
+
+    console.log('  one path, four outcomes, and nothing is ever refunded automatically');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — the approve route transitions BEFORE it talks to Stripe');
+  // -------------------------------------------------------------------------
+  //
+  // With no STRIPE_SECRET_KEY set — which is the state of this environment —
+  // `createCheckoutSession` returns null and the approval degrades to the
+  // Interac route. That is the supported state, and it is enough to observe the
+  // ORDER: the columns are stamped and the flash says the card link was not
+  // created, rather than the whole approval being refused.
+  {
+    {
+      const slot = await freeProbeSlot();
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, assessment_tier)
+        VALUES ('Order Probe', '780-555-0177', 'order@example.com', 'water', '2 Order Rd',
+                'private', ${slot.toISOString()}, 'pending_review', 'standard')
+        RETURNING id
+      `) as { id: number }[];
+      const orderId = inserted[0].id;
+      createdIds.push(orderId);
+
+      const location = await call(reviewRoute, { id: String(orderId), action: 'approve' });
+      // `review=approved` covers all three success variants — `approved`,
+      // `approved-interac` and `approved-nomail`. Which one comes back depends
+      // on whether mail went, and mail cannot go in this harness (no valid
+      // Resend key), so pinning the exact string would be pinning the
+      // environment. What the arm is actually about is below: the row
+      // transitioned, `approved_at` is stamped, and no session was minted.
+      check(
+        location.includes('review=approved'),
+        `the approval COMPLETES rather than being refused, got "${location}"`,
+      );
+
+      const row = (await sql`
+        SELECT status, approved_at, total_amount_cents, stripe_session_id
+        FROM appointments WHERE id = ${orderId}
+      `) as Record<string, unknown>[];
+      // THE TRANSITION RAN. Under the old order the Checkout Session was created
+      // first and `approved_at` did not exist when its idempotency key needed it.
+      check(row[0]?.status === 'approved_awaiting_payment', 'the row transitioned');
+      check(row[0]?.approved_at !== null, 'and approved_at IS STAMPED — the key names it');
+      check(row[0]?.total_amount_cents === 41895, 'with the settled total');
+      check(
+        row[0]?.stripe_session_id === null,
+        'and no session id, because no session was created — not a half-written one',
+      );
+
+      // A SECOND CLICK REACHES NOTHING. This is what the inversion buys: the
+      // guarded UPDATE returns zero rows, so Stripe is never called a second
+      // time and there is no orphan session to clean up.
+      const twice = await call(reviewRoute, { id: String(orderId), action: 'approve' });
+      check(twice.includes('review=stale'), `a second approve is a no-op, got "${twice}"`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — the webhook, driven end to end over a real signature');
+  // -------------------------------------------------------------------------
+  //
+  // `stripe.webhooks.generateTestHeaderString` signs a body with any secret, so
+  // the route can be driven for real — signature verification, the claim, the
+  // amount check and the confirm transition — with no Stripe account, no
+  // network and no live key. Everything before this was pinned at the source
+  // level, which is what let the implementation review find that layer 1 had
+  // never once been executed.
+  {
+    const secret = 'whsec_verify_only_not_a_real_secret';
+    const priorSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const priorKey = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_WEBHOOK_SECRET = secret;
+    // The route constructs a client from this to VERIFY. Verification is local
+    // (HMAC over the body), so a syntactically valid key that is not a real one
+    // is enough and nothing here ever reaches Stripe.
+    process.env.STRIPE_SECRET_KEY = 'sk_test_verify_only_not_a_real_key';
+
+    const { default: StripeSdk } = await import('stripe');
+    const signer = new StripeSdk('sk_test_verify_only_not_a_real_key');
+    const { POST: webhookRoute } = await import('../src/pages/api/stripe/webhook');
+
+    const sessionEvent = (id: number, opts: { amount: number; eventId: string; sessionId: string }) =>
+      JSON.stringify({
+        id: opts.eventId,
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: opts.sessionId,
+            object: 'checkout.session',
+            payment_status: 'paid',
+            amount_total: opts.amount,
+            client_reference_id: String(id),
+            metadata: { appointment_id: String(id), tier: 'standard' },
+            payment_intent: `pi_${opts.sessionId}`,
+          },
+        },
+      });
+
+    const post = async (body: string) => {
+      const header = signer.webhooks.generateTestHeaderString({ payload: body, secret });
+      return webhookRoute({
+        request: new Request('https://example.com/api/stripe/webhook/', {
+          method: 'POST',
+          headers: { 'stripe-signature': header },
+          body,
+        }),
+      } as never);
+    };
+
+    const eventIds: string[] = [];
+    try {
+      // ── A FORGED BODY IS 400, NOT 200 ────────────────────────────────────
+      const forged = await webhookRoute({
+        request: new Request('https://example.com/api/stripe/webhook/', {
+          method: 'POST',
+          headers: { 'stripe-signature': 't=1,v1=deadbeef' },
+          body: '{"id":"evt_forged","type":"checkout.session.completed"}',
+        }),
+      } as never);
+      check(forged.status === 400, `a bad signature is refused with 400, got ${forged.status}`);
+
+      // ── AN UNKNOWN EVENT TYPE IS 200 ─────────────────────────────────────
+      const unknownId = `evt_unknown_${Date.now()}`;
+      eventIds.push(unknownId);
+      const unknown = await post(
+        JSON.stringify({ id: unknownId, type: 'customer.created', data: { object: {} } }),
+      );
+      check(unknown.status === 200, `an unhandled event type answers 200, got ${unknown.status}`);
+
+      // ── A REAL PAYMENT CONFIRMS ──────────────────────────────────────────
+      const payId = await seedAwaitingPayment(41895, 'cs_test_webhook00001');
+      const payEvent = `evt_pay_${Date.now()}`;
+      eventIds.push(payEvent);
+      const paid = await post(
+        sessionEvent(payId, {
+          amount: 41895,
+          eventId: payEvent,
+          sessionId: 'cs_test_webhook00001',
+        }),
+      );
+      check(paid.status === 200, `a paid session answers 200, got ${paid.status}`);
+      check(await statusOf(payId) === 'confirmed', 'and the booking is confirmed');
+
+      // ── A REDELIVERY DOES NOTHING ────────────────────────────────────────
+      const replay = await post(
+        sessionEvent(payId, {
+          amount: 41895,
+          eventId: payEvent,
+          sessionId: 'cs_test_webhook00001',
+        }),
+      );
+      check(replay.status === 200, 'a redelivery answers 200');
+      const replayBody = (await replay.json()) as { duplicate?: boolean };
+      check(
+        replayBody.duplicate === true,
+        'and is recognised as already processed rather than run again',
+      );
+
+      // ── AN AMOUNT STRIPE DISAGREES WITH CONFIRMS NOTHING ─────────────────
+      //
+      // The stale-link case: a session minted by an earlier approval at a
+      // different price. This is the only place it becomes visible.
+      const wrongId = await seedAwaitingPayment(41895, 'cs_test_webhook00002');
+      const wrongEvent = `evt_wrong_${Date.now()}`;
+      eventIds.push(wrongEvent);
+      const wrong = await post(
+        sessionEvent(wrongId, {
+          amount: 39900,
+          eventId: wrongEvent,
+          sessionId: 'cs_test_webhook00002',
+        }),
+      );
+      check(wrong.status === 200, 'a mismatched amount still answers 200 — nothing to retry');
+      check(
+        await statusOf(wrongId) === 'approved_awaiting_payment',
+        'but the booking is NOT confirmed at a price it was never quoted',
+      );
+      const wrongRow = (await sql`
+        SELECT needs_attention FROM appointments WHERE id = ${wrongId}
+      `) as { needs_attention: string | null }[];
+      check(
+        wrongRow[0]?.needs_attention?.includes('AMOUNT MISMATCH') === true,
+        'and it is flagged for a human',
+      );
+
+      // ── A TRANSITION THAT FAILS LEAVES THE EVENT UNSTAMPED ───────────────
+      //
+      // THE SECOND IMPLEMENTATION-REVIEW BLOCKER. `markPaid` never throws — a
+      // failed UPDATE comes back as the VALUE 'error' — so discarding that
+      // return meant a transient database blip produced: event claimed, nothing
+      // written, event stamped, Stripe told 200 and never retrying. The row
+      // then expired on the cron and the customer was emailed an apology for a
+      // booking they had paid for. Exactly what `processed_at` exists to
+      // prevent, reopened one layer up.
+      //
+      // Driven by pointing the event at a row that exists and is payable, then
+      // making the confirm UPDATE fail — the amount column is dropped from
+      // under it for the length of this arm.
+      const failId = await seedAwaitingPayment(41895, 'cs_test_webhook00003');
+      const failEvent = `evt_fail_${Date.now()}`;
+      eventIds.push(failEvent);
+      await sql`ALTER TABLE appointments RENAME COLUMN paid_amount_cents TO paid_amount_cents_tmp`;
+      let failStatus = 0;
+      try {
+        const failed = await post(
+          sessionEvent(failId, {
+            amount: 41895,
+            eventId: failEvent,
+            sessionId: 'cs_test_webhook00003',
+          }),
+        );
+        failStatus = failed.status;
+      } finally {
+        await sql`ALTER TABLE appointments RENAME COLUMN paid_amount_cents_tmp TO paid_amount_cents`;
+      }
+      check(failStatus === 500, `a failed transition answers 500 so Stripe retries, got ${failStatus}`);
+      const stamp = (await sql`
+        SELECT processed_at FROM stripe_events WHERE event_id = ${failEvent}
+      `) as { processed_at: Date | null }[];
+      check(
+        stamp[0]?.processed_at === null,
+        'and the event is left UNSTAMPED — the retry is what recovers the payment',
+      );
+      check(
+        await statusOf(failId) === 'approved_awaiting_payment',
+        'with the booking still awaiting payment rather than silently lost',
+      );
+
+      // The retry now succeeds, which is the whole point of leaving it unstamped.
+      const recovered = await post(
+        sessionEvent(failId, {
+          amount: 41895,
+          eventId: failEvent,
+          sessionId: 'cs_test_webhook00003',
+        }),
+      );
+      check(recovered.status === 200, "Stripe's retry answers 200");
+      check(await statusOf(failId) === 'confirmed', 'AND THE PAYMENT LANDS — the booking confirms');
+    } finally {
+      for (const id of eventIds) {
+        await sql`DELETE FROM stripe_events WHERE event_id = ${id}`.catch(() => {});
+      }
+      if (priorSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+      else process.env.STRIPE_WEBHOOK_SECRET = priorSecret;
+      if (priorKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = priorKey;
+    }
+
+    console.log('  signature, claim, confirm, replay, mismatch, and a failure that retries');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — re-approving a booking that already holds a Checkout Session');
+  // -------------------------------------------------------------------------
+  //
+  // THE PATH THE IMPLEMENTATION REVIEW FOUND B1 ON, and the ticket had claimed
+  // an arm for it that did not exist.
+  //
+  // The flow is real and documented on BK-23's approval screen: "once a
+  // Checkout Session exists the amount is frozen; changing it means cancelling
+  // and re-approving." The office puts an expired or mistaken booking back to
+  // `pending_review` and approves it again — and that row still names the
+  // session minted the first time.
+  //
+  // With no STRIPE_SECRET_KEY in this harness `expireCheckoutSession` returns
+  // `'failed'` without a network call, which is exactly the branch that
+  // mattered: the first version ABORTED here and rolled back, except the
+  // rollback was guarded `AND stripe_session_id IS NULL` and so could never
+  // run — leaving the row approved, a deadline ticking, NO email sent, and the
+  // office told the approval was refused.
+  {
+    const slot = await freeProbeSlot();
+    const inserted = (await sql`
+      INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                slot_start, status, assessment_tier, stripe_session_id)
+      VALUES ('Reapprove Probe', '780-555-0166', 'reapprove@example.com', 'water', '4 Again St',
+              'private', ${slot.toISOString()}, 'pending_review', 'standard',
+              ${'cs_test_stale000000001'})
+      RETURNING id
+    `) as { id: number }[];
+    const againId = inserted[0].id;
+    createdIds.push(againId);
+
+    const location = await call(reviewRoute, { id: String(againId), action: 'approve' });
+
+    // THE APPROVAL STANDS. Aborting would be worse in every direction: the
+    // transition has already committed, and a rollback would leave a
+    // possibly-live link pointing at a `pending_review` row — where `markPaid`
+    // refuses, so a payment on it is money recorded nowhere.
+    check(
+      location.includes('review=approved'),
+      `the approval COMPLETES rather than reporting a refusal, got "${location}"`,
+    );
+
+    const row = (await sql`
+      SELECT status, approved_at, payment_status, needs_attention
+      FROM appointments WHERE id = ${againId}
+    `) as Record<string, unknown>[];
+    check(row[0]?.status === 'approved_awaiting_payment', 'the row is approved');
+    check(row[0]?.approved_at !== null, 'and stamped — not left half-transitioned');
+    check(row[0]?.payment_status === 'pending', 'with payment_status moved on');
+    // The old link may still be live at the OLD price. A human has to close it,
+    // and the webhook's amount check is what stops it confirming at a stale
+    // price in the meantime.
+    check(
+      typeof row[0]?.needs_attention === 'string' &&
+        (row[0].needs_attention as string).includes('STALE CHECKOUT SESSION'),
+      'and the un-expirable session is FLAGGED rather than silently left behind',
+    );
+    check(
+      (row[0].needs_attention as string).includes('cs_test_stale000000001'),
+      'naming the session id, so the office can actually go and close it',
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-32 — a $0.00 approval confirms without a payment step');
+  // -------------------------------------------------------------------------
+  {
+    const slot = await freeProbeSlot();
+    const inserted = (await sql`
+      INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                slot_start, status, assessment_tier)
+      VALUES ('Goodwill Probe', '780-555-0188', 'goodwill@example.com', 'water', '3 Free Ln',
+              'private', ${slot.toISOString()}, 'pending_review', 'standard')
+      RETURNING id
+    `) as { id: number }[];
+    const freeId = inserted[0].id;
+    createdIds.push(freeId);
+
+    const location = await call(reviewRoute, {
+      id: String(freeId),
+      action: 'approve',
+      assessment_amount: '0.00',
+      travel_fee: '0.00',
+    });
+    check(
+      location.includes('review=approved-free'),
+      `a $0 approval confirms in one step, got "${location}"`,
+    );
+
+    const row = (await sql`
+      SELECT status, payment_status, payment_method, total_amount_cents, payment_due_at,
+             stripe_session_id
+      FROM appointments WHERE id = ${freeId}
+    `) as Record<string, unknown>[];
+    check(row[0]?.status === 'confirmed', 'it reaches confirmed');
+    check(row[0]?.payment_status === 'paid', 'payment_status is paid');
+    // NOT 'not_required'. Migration 008 reserves that value for rows predating
+    // prepay, and reusing it would mix a live booking into the historical ones.
+    check(
+      row[0]?.payment_method === 'none',
+      "the method is 'none' — not payment_status 'not_required', which means something older",
+    );
+    check(row[0]?.total_amount_cents === 0, 'the total is zero');
+    check(
+      row[0]?.stripe_session_id === null,
+      'AND NO CHECKOUT SESSION WAS OPENED — a $0 session is a booking with a broken step, not one without a step',
+    );
+
+    console.log('  approved and confirmed through the same markPaid, with no link and no charge');
+  }
+
 } finally {
   const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1, leads: -1 }));
   seeded = false;

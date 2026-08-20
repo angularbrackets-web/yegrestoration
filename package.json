@@ -17,9 +17,11 @@
     "verify:availability": "tsx scripts/verify-availability.ts",
     "verify:availability:db": "tsx scripts/verify-availability-db.ts",
     "verify:booking:payload": "tsx scripts/verify-booking-payload.ts",
+    "verify:booking:pricing": "tsx scripts/verify-booking-pricing.ts",
     "verify:booking:commit": "tsx scripts/verify-booking-commit.ts",
     "verify:booking:form": "tsx scripts/verify-booking-form.ts",
     "verify:booking:preview": "tsx scripts/verify-booking-preview.ts",
+    "verify:booking:review": "tsx scripts/verify-booking-review.ts",
     "verify:booking:confirmation": "tsx scripts/verify-booking-confirmation.ts",
     "verify:booking:email": "tsx scripts/verify-booking-email.ts",
     "verify:booking:ics": "tsx scripts/verify-booking-ics.ts",
@@ -29,6 +31,7 @@
     "verify:booking:admin:db": "tsx scripts/verify-booking-admin-db.ts",
     "verify:booking:files": "tsx scripts/verify-booking-files.ts",
     "verify:appointment:upload": "npm run build && tsx scripts/verify-appointment-upload.ts",
+    "verify:stripe:webhook": "npm run build && tsx scripts/verify-stripe-webhook.ts",
     "verify:reveal": "npm run build && tsx scripts/verify-reveal.ts"
   },
   "dependencies": {
@@ -40,6 +43,7 @@
     "clsx": "^2.1.1",
     "gsap": "^3.14.2",
     "resend": "^6.12.2",
+    "stripe": "^22.5.0",
     "tailwind-merge": "^3.4.0",
     "zod": "^4.3.5"
   },

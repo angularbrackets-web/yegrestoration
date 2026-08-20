@@ -4,8 +4,15 @@ import Navbar from '../../components/Navbar.svelte';
 import Footer from '../../components/Footer.astro';
 import BookingConfirmation from '../../components/BookingConfirmation.svelte';
 
+/**
+ * Where a PAID booking lands (BK-23).
+ *
+ * Since P9 this page is reached from the payment redirect, not from the form —
+ * `/book/received/` is where submitting goes. Everything here may keep saying
+ * "confirmed", because by the time anyone reaches it the money has moved.
+ */
 const title = 'Booking confirmed | YEG Restoration Edmonton';
-const description = 'Your on-site restoration assessment is booked.';
+const description = 'Your on-site restoration assessment is confirmed.';
 ---
 
 <!--
@@ -26,7 +33,7 @@ const description = 'Your on-site restoration assessment is booked.';
         client:load, not client:visible: this is the whole page, above the fold,
         and a visit carrying no confirmation redirects from within it.
       -->
-      <BookingConfirmation client:load />
+      <BookingConfirmation client:load variant="confirmed" />
     </div>
   </main>
 

@@ -18,6 +18,17 @@ import { readEnv } from '../src/lib/env';
 import { getDb } from '../src/lib/db';
 import { issueDraftToken } from '../src/lib/draft-token';
 
+/**
+ * ONE FROZEN CLOCK FOR EVERY SEND IN THIS FILE (BK-32).
+ *
+ * The notification idempotency prefix now carries an attempt component, so
+ * `new Date()` at each call site would make every prefix in this file unique
+ * for a reason that has nothing to do with what is being asserted — and the
+ * distinctness checks would then pass with the message TYPE dropped from the
+ * key entirely. A fixed instant is what keeps those assertions able to fail.
+ */
+const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
+
 let failures = 0;
 function check(condition: boolean, message: string) {
   if (!condition) {
@@ -129,6 +140,9 @@ console.log('\nBooking notifications without RESEND_API_KEY');
 
   const plan = planBookingNotifications({
     id: 1,
+    messageType: 'confirmed',
+    service: 'water',
+    assessmentTier: 'standard',
     slotLabel: 'Tue, Aug 12 · 1:30 p.m.',
     slotStart: new Date('2026-08-12T19:30:00.000Z'),
     now: new Date('2026-08-12T17:00:00.000Z'),
@@ -148,7 +162,7 @@ console.log('\nBooking notifications without RESEND_API_KEY');
     filesAttached: 0,
   });
 
-  const r = await attempt(() => sendBookingNotifications(plan));
+  const r = await attempt(() => sendBookingNotifications(plan, SEND_NOW));
   check(!r.threw, `sendBookingNotifications must not throw (threw "${r.threw ? message(r.error) : ''}")`);
   if (!r.threw) {
     const outcome = r.value as { customer: string; internal: string };

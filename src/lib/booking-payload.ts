@@ -19,6 +19,7 @@
  * `booking-uploads.ts` stays free of `@vercel/blob`.
  */
 
+import { isAssessmentTier, type AssessmentTier } from './booking-pricing';
 import { isSlotOnGrid } from './booking-time';
 
 export const MAX_FIELD_LENGTHS = {
@@ -61,6 +62,16 @@ export type BookingPayload = {
    * turns true into a `terms_acked_at` stamp.
    */
   termsAcked: boolean;
+  /**
+   * Which assessment the customer chose (BK-31). **Null on an admin entry**,
+   * which is exempt on the same `entry` discriminator as email, photos and the
+   * terms acknowledgment — the office settles the tier on the phone.
+   *
+   * A tier KEY, never an amount. `booking-pricing.ts` turns it into money, on
+   * the server, from this key plus the stored service and slot. Nothing in a
+   * request may carry a price.
+   */
+  assessmentTier: AssessmentTier | null;
   /** The raw token, still unverified. The endpoint decides what it means. */
   draftToken: string | null;
 };
@@ -250,6 +261,31 @@ export function parseBookingPayload(input: unknown, options: ParseOptions): Pars
     add('terms_ack', 'Please confirm you understand the assessment terms.');
   }
 
+  // BK-31's tier choice, on exactly the shape above: the SET check runs on both
+  // doors (an unknown tier is a malformed request whichever door it came
+  // through), the REQUIREMENT is public-only (the office settles it verbally).
+  //
+  // No default. A pre-selected $399 charges someone for a tier they never
+  // looked at, and a pre-selected anything else is worse — so an absent tier is
+  // an error on the public path rather than a fallback, and the island routes
+  // the visitor back to the step that asks.
+  //
+  // NOTE WHAT IS *NOT* READ HERE: an amount. A payload carrying one is ignored
+  // entirely — it is not validated, not stored, and not echoed. The price comes
+  // from `assessmentQuote(tier, service, slot)` on the server. This is the
+  // whole defence against a hand-built request paying $1 for the sketch tier.
+  const tierRaw = raw.assessment_tier;
+  let assessmentTier: AssessmentTier | null = null;
+  if (tierRaw !== undefined && tierRaw !== null && tierRaw !== '') {
+    if (isAssessmentTier(tierRaw)) {
+      assessmentTier = tierRaw;
+    } else {
+      add('assessment_tier', 'Choose one of the listed assessments.');
+    }
+  } else if (options.entry === 'public') {
+    add('assessment_tier', 'Choose which assessment you would like.');
+  }
+
   const draftTokenRaw = raw.draft_token;
   if (draftTokenRaw !== undefined && typeof draftTokenRaw !== 'string') {
     add('draft_token', 'Invalid upload session.');
@@ -278,6 +314,7 @@ export function parseBookingPayload(input: unknown, options: ParseOptions): Pars
       // actually ticked, not what the door required. An admin entry therefore
       // carries false and stamps nothing, which is what the exemption means.
       termsAcked: termsRaw === true,
+      assessmentTier,
       draftToken: typeof draftTokenRaw === 'string' ? draftTokenRaw : null,
     },
   };

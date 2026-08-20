@@ -10,6 +10,11 @@
 // nothing on its own — the variable has to be SWAPPED, and the route module
 // imported only afterwards, or a static import binds the production connection
 // before the swap happens.
+import {
+  APPOINTMENT_STATUSES,
+  SLOT_HOLD_PREDICATE,
+  SLOT_RELEASING_STATUSES,
+} from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -214,6 +219,11 @@ function baseFields(slot: Date, overrides: Record<string, unknown> = {}) {
     // "pass", and would have stopped testing files at all. Same shape of trap
     // as BK-22's draft-token blocker, one layer down.
     terms_ack: true,
+    // BK-31, in the SHARED builder for exactly the reason above: the public
+    // door refuses a booking without a tier, so leaving it to individual arms
+    // would 422 the file and concurrency arms for a reason those arms are not
+    // about — and they would keep "passing" while testing nothing.
+    assessment_tier: 'standard',
     ...overrides,
   };
 }
@@ -262,7 +272,7 @@ const bodies: string[] = [];
 async function countBookings(slot: Date) {
   const rows = (await sql`
     SELECT COUNT(*)::int AS n FROM appointments
-    WHERE slot_start = ${slot.toISOString()} AND status <> 'cancelled'
+    WHERE slot_start = ${slot.toISOString()} AND ${sql.unsafe(SLOT_HOLD_PREDICATE)}
   `) as { n: number }[];
   return rows[0].n;
 }
@@ -296,8 +306,40 @@ let slotCursor = 0;
 function nextSlot(): Date {
   const slot = slots[slotCursor++];
   // An undefined here would surface as an opaque TypeError inside payload().
-  if (!slot) throw new Error(`Ran out of free slots after ${slotCursor - 1}; raise SLOTS_NEEDED.`);
+  if (!slot) {
+    throw new Error(
+      `Ran out of free slots after ${slotCursor - 1} of ${slots.length}. ` +
+        'Raising SLOTS_NEEDED will NOT help — that is a precondition check, not the ' +
+        'supply. The supply is the 14-day booking window minus Fridays, which is ~60 ' +
+        'slots, and this script now consumes nearly all of them. A new arm that needs ' +
+        'a bookable slot has to use `recycleSlot()` below, or free one.',
+    );
+  }
   return slot;
+}
+
+/**
+ * A slot that is genuinely free RIGHT NOW, asked of the database rather than of
+ * the cursor.
+ *
+ * `nextSlot()` hands out one slot per CALL, but most calls belong to arms that
+ * deliberately fail — a 422 or a 409 books nothing and leaves its slot free
+ * forever. By the end of a run the cursor has walked off the end of a pool that
+ * is still largely unbooked, and the script aborts with slots to spare. This
+ * closes that gap for arms added after the cursor is exhausted.
+ *
+ * Deliberately NOT a replacement for `nextSlot()`: the concurrency hammer needs
+ * a slot nothing else will touch, and re-querying mid-run would hand it one
+ * another arm is about to take. This is for the sequential arms at the end.
+ */
+async function recycleSlot(): Promise<Date> {
+  const taken = (await sql`
+    SELECT slot_start FROM appointments WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)}
+  `) as { slot_start: Date }[];
+  const busy = new Set(taken.map((r) => new Date(r.slot_start).getTime()));
+  const free = freeSlots().find((s) => !busy.has(s.getTime()));
+  if (!free) throw new Error('No free slot remains in the booking window at all.');
+  return free;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +416,7 @@ try {
             // acknowledges nothing (BK-27). The stamp assertions live in the
             // endpoint arms, which is where the public requirement is enforced.
             termsAcked: false,
+            assessmentTier: null,
             draftToken: null,
           },
           racerDrafts[i],
@@ -749,6 +792,7 @@ try {
         slotStart: adminSlot,
         smsConsent: false,
         termsAcked: false,
+        assessmentTier: null,
         draftToken: null,
       },
       null,
@@ -762,6 +806,185 @@ try {
     check(adminRow[0]?.terms_acked_at === null, 'and must leave terms_acked_at NULL — exempt');
 
     console.log('  required and stamped on the public door, NULL and exempt on the office door');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nAssessment tier (BK-31)');
+  // -------------------------------------------------------------------------
+  {
+    // At the ENDPOINT, for the reason the acknowledgment arm above gives:
+    // `verify:booking:payload` proves the rule, and only this proves the route
+    // asks for it and the column takes it.
+    // ONE slot serves both rejection arms, deliberately: neither request
+    // commits, so the slot is still free for the second. If either ever DID
+    // commit, the other would come back 409 instead of 422 and this arm goes
+    // red — which is the outcome we want from that mistake anyway. The slot
+    // pool is bounded by the 14-day booking window and this script is close to
+    // exhausting it, so a slot spent on a request that cannot book is a slot
+    // the concurrency hammer above does not get.
+    const rejectSlot = await recycleSlot();
+
+    const withoutTier = payload(rejectSlot) as Record<string, unknown>;
+    delete withoutTier.assessment_tier;
+    const noTier = await post(withoutTier);
+    check(noTier.status === 422, `a public POST with no tier must 422 (got ${noTier.status})`);
+    check(
+      Array.isArray(noTier.body?.fields) &&
+        noTier.body.fields.some((f: { field: string }) => f.field === 'assessment_tier'),
+      'and it must name `assessment_tier`, or the island cannot route it to step 3',
+    );
+
+    const bogus = await post(payload(rejectSlot, { assessment_tier: 'premium' }));
+    check(bogus.status === 422, `an invented tier must 422 (got ${bogus.status})`);
+
+    // The happy path through to the column, AND the price-integrity case, in
+    // one booking — the slot pool cannot afford two. The request names the
+    // dearest tier and also carries amount fields naming a dollar: the tier
+    // must be stored and the amounts must vanish. There is no amount column for
+    // one to land in, and that is the property being asserted — nobody added a
+    // path to one.
+    //
+    // A 201 that stored NULL here would be a booking with no amount to charge,
+    // which under P9 is a booking that can never be confirmed.
+    const tierBooking = await post(
+      payload(await recycleSlot(), {
+        name: `${NAME} tier`,
+        assessment_tier: 'sketch',
+        amount_cents: 100,
+        assessment_amount_cents: 100,
+        price: 1,
+      }),
+    );
+    check(
+      tierBooking.status === 201,
+      `a booking with a tier (and stray amounts) must commit (got ${tierBooking.status})`,
+    );
+    const tierRow = (await sql`
+      SELECT * FROM appointments WHERE id = ${tierBooking.body?.id}
+    `) as Record<string, unknown>[];
+    check(tierRow[0]?.assessment_tier === 'sketch', 'and the chosen tier must reach the column');
+    // BK-23 added the amount columns (migration 008), so "no such column
+    // exists" stopped being the assertion. The durable form is stronger: the
+    // columns exist, the request named amounts, and the request wrote NONE of
+    // them. They are the approval screen's to set, server-side, after the
+    // office has looked at the job.
+    check(
+      tierRow[0]?.assessment_amount_cents === null &&
+        tierRow[0]?.gst_cents === null &&
+        tierRow[0]?.total_amount_cents === null,
+      'and every amount column is still NULL — a request cannot price itself',
+    );
+    check(
+      tierRow[0]?.travel_fee_cents === 0,
+      'and the travel fee is zero, never a value a request supplied',
+    );
+    check(
+      tierRow[0]?.payment_status === 'not_required',
+      'and payment_status is untouched by the request',
+    );
+
+    // The DB CHECK is the backstop under the parser. Asserted directly, because
+    // the parser is the only thing standing between a hand-built request and
+    // this column, and a CHECK nobody ever exercised is a CHECK that might not
+    // be there.
+    //
+    // THE ERROR CODE IS ASSERTED, NOT JUST THE FAILURE, and that is not
+    // pedantry — it caught a real hole during the red pass. The first version
+    // only checked that the INSERT threw, and it stayed green with the CHECK
+    // constraint dropped: a probe row left behind by the previous run made the
+    // second INSERT fail on the slot_start unique index instead. A test that
+    // passes for the wrong reason on the exact defect it exists to catch is
+    // worse than no test. 23514 is `check_violation`.
+    //
+    // A far-future instant rather than a slot from the pool: this INSERT
+    // bypasses the route entirely, so it needs no bookable time, and the pool
+    // is the scarce resource here. It is deleted first so a crashed earlier run
+    // cannot make the unique index answer for the CHECK again.
+    await sql`DELETE FROM appointments WHERE name = 'BK-31 check probe'`;
+    let checkViolation = false;
+    try {
+      await sql`
+        INSERT INTO appointments (name, phone, service, address, city, payment_route, slot_start, assessment_tier)
+        VALUES ('BK-31 check probe', '7805550134', 'water', '1 Test Way', 'Edmonton', 'private', '2099-01-01T18:30:00Z', 'premium')
+      `;
+    } catch (err) {
+      checkViolation = (err as { code?: string }).code === '23514';
+    }
+    check(checkViolation, 'the database CHECK refuses a tier outside the closed set (23514)');
+    const probeRows = (await sql`
+      SELECT COUNT(*)::int AS n FROM appointments WHERE name = 'BK-31 check probe'
+    `) as { n: number }[];
+    check(probeRows[0].n === 0, 'and nothing landed');
+
+    console.log('  required, stored, and no amount ever reaches a column');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nSlot hold and release, and the ON CONFLICT arbiter (BK-23)');
+  // -------------------------------------------------------------------------
+  //
+  // THE FAILURE THIS EXISTS FOR. `insertBooking`'s
+  // `ON CONFLICT (slot_start) WHERE <predicate>` is resolved by Postgres
+  // proving the INDEX predicate implies it. When it cannot, it raises 42P10 —
+  // on every booking, public and admin, the entire funnel at once. Migration
+  // 008 widened both from `status <> 'cancelled'` to a three-status deny-list,
+  // and both now come from SLOT_HOLD_PREDICATE so they cannot be typed apart.
+  //
+  // Asserted against the REAL INDEX rather than by reading the two strings: the
+  // strings being equal is what we control, and the planner accepting them is
+  // what actually matters. Postgres stores `NOT IN (...)` normalised to
+  // `<> ALL (ARRAY[...])`, so a textual comparison would not have proved this.
+  {
+    const holdSlot = new Date('2097-05-05T18:30:00.000Z');
+    await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+
+    // Inserted directly rather than through the route: this arm is about the
+    // statement, and a far-future instant needs no bookable slot from the pool.
+    const insert = async (name: string, status: string) => {
+      const rows = (await sql`
+        INSERT INTO appointments (name, phone, service, address, city, payment_route, slot_start, status)
+        VALUES (${name}, '7805550134', 'water', '1 Test Way', 'Edmonton', 'private',
+                ${holdSlot.toISOString()}, ${status})
+        ON CONFLICT (slot_start) WHERE ${sql.unsafe(SLOT_HOLD_PREDICATE)} DO NOTHING
+        RETURNING id
+      `) as { id: number }[];
+      return rows.length;
+    };
+
+    check(
+      (await insert('BK-23 hold probe', 'pending_review')) === 1,
+      'the arbiter resolves at all — a mismatch here is 42P10 on every booking',
+    );
+    check(
+      (await insert('BK-23 hold probe 2', 'pending_review')) === 0,
+      'and a second booking of a held slot is refused',
+    );
+
+    // Every status, both directions, against the real index. A status added
+    // later and left out of the deny-list must HOLD — the deny-list's whole
+    // point is that the forgetful case fails safe.
+    for (const status of APPOINTMENT_STATUSES) {
+      await sql`
+        UPDATE appointments SET status = ${status}
+        WHERE slot_start = ${holdSlot.toISOString()}
+      `;
+      const free = (await insert(`BK-23 probe after ${status}`, 'pending_review')) === 1;
+      const shouldRelease = SLOT_RELEASING_STATUSES.includes(status);
+      check(
+        free === shouldRelease,
+        `'${status}' must ${shouldRelease ? 'RELEASE' : 'HOLD'} its slot`,
+      );
+      // Put the slot back to a single row before the next iteration.
+      await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+      await sql`
+        INSERT INTO appointments (name, phone, service, address, city, payment_route, slot_start, status)
+        VALUES ('BK-23 hold probe', '7805550134', 'water', '1 Test Way', 'Edmonton', 'private',
+                ${holdSlot.toISOString()}, 'pending_review')
+      `;
+    }
+
+    await sql`DELETE FROM appointments WHERE slot_start = ${holdSlot.toISOString()}`;
+    console.log('  arbiter resolves; five statuses hold, three release');
   }
 
   // -------------------------------------------------------------------------
@@ -834,7 +1057,10 @@ try {
     check(insRow[0].sms_consent_at !== null, 'consent must be stamped when given');
     check(insRow[0].source === 'web', "source must be 'web'");
     check(insRow[0].pipeline_stage === 'assessment', 'pipeline stage must default to assessment');
-    check(insRow[0].status === 'booked', 'status must default to booked');
+    // BK-23: the default moved with the flow. A public booking is a REQUEST
+    // now, and a row landing in any other status is the review gate not
+    // existing.
+    check(insRow[0].status === 'pending_review', "status must default to 'pending_review'");
 
     const privSlot = nextSlot();
     const priv = await post(
@@ -913,6 +1139,7 @@ try {
           slotStart: nextSlot(),
           smsConsent: false,
           termsAcked: false,
+          assessmentTier: null,
           draftToken: null,
         },
         null,
@@ -1028,6 +1255,112 @@ try {
   }
 }
 
+// ---------------------------------------------------------------------------
+{
+  console.log('\nThe deploy window: both arbiters against the EXPAND-phase index (BK-23)');
+  // -------------------------------------------------------------------------
+  //
+  // This is the property that makes the two-phase rollout safe, and until the
+  // implementation review it existed only as an `EXPLAIN` someone ran once in a
+  // session that has since ended.
+  //
+  // Migrations 008 (expand) and 009 (contract) sit either side of the code
+  // deploy. Between them the OLD code is live against the index 008 leaves
+  // standing — the pre-P9 `status <> 'cancelled'` one. Postgres resolves an
+  // `ON CONFLICT ... WHERE` arbiter by proving the ARBITER predicate implies the
+  // INDEX predicate, and that relation is directional:
+  //
+  //   old arbiter  status <> 'cancelled'    — wider, does NOT imply the deny-list
+  //   new arbiter  status NOT IN (three)    — narrower, DOES imply `<> 'cancelled'`
+  //
+  // So the new arbiter works against the old index (which is what lets the code
+  // deploy first) and the old arbiter raises 42P10 against the new one (which is
+  // why the index rebuild must come last). Rebuilding it before the deploy takes
+  // every booking down, public and admin, for the length of the window.
+  //
+  // Against a SCRATCH TABLE carrying each index in turn, never `appointments`:
+  // the assertion must not depend on which half of the rollout the database in
+  // front of it happens to be on.
+  //
+  // `sql.query()`, NOT `sql.unsafe()`. `sql.unsafe` builds an interpolation
+  // fragment for a tagged template — it is not executable, so `await
+  // sql.unsafe(...)` runs NOTHING and resolves. The first version of this probe
+  // did exactly that and reported every arbiter as resolving, including a
+  // deliberately unrelated one. The CONTROL below is what caught it and is the
+  // reason it stays: a probe on which everything passes is not evidence.
+  const probe = 'bk23_deploy_window_probe';
+  const LEGACY_PREDICATE = "status <> 'cancelled'";
+  const q = (text: string) => sql.query(text);
+
+  const arbiterResolves = async (indexPredicate: string, arbiter: string): Promise<boolean> => {
+    await q(`DROP INDEX IF EXISTS ${probe}_slot`);
+    await q(`CREATE UNIQUE INDEX ${probe}_slot ON ${probe} (slot_start) WHERE ${indexPredicate}`);
+    try {
+      // EXPLAIN: arbiter inference happens at planning time, so the 42P10 is
+      // raised without writing a row.
+      await q(`
+        EXPLAIN INSERT INTO ${probe} (slot_start, status)
+        VALUES (now(), 'pending_review')
+        ON CONFLICT (slot_start) WHERE ${arbiter} DO NOTHING
+      `);
+      return true;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === '42P10') return false;
+      throw err;
+    }
+  };
+
+  try {
+    await q(`DROP TABLE IF EXISTS ${probe}`);
+    await q(`
+      CREATE TABLE ${probe} (
+        id SERIAL PRIMARY KEY,
+        slot_start TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'booked'
+      )
+    `);
+
+    // CONTROL FIRST. An arbiter that plainly cannot be implied by the index
+    // predicate must be REFUSED. If this passes, the probe is not testing
+    // anything and every assertion under it is decoration.
+    check(
+      !(await arbiterResolves(SLOT_HOLD_PREDICATE, "status <> 'no_show'")),
+      'control: an unrelated arbiter is refused with 42P10 — without this the probe cannot fail',
+    );
+
+    // THE ONE THAT MAKES THE ROLLOUT SAFE. If this goes false, the code can no
+    // longer be deployed ahead of the contract migration and the deploy window
+    // becomes a funnel outage again.
+    check(
+      await arbiterResolves(LEGACY_PREDICATE, SLOT_HOLD_PREDICATE),
+      'the NEW arbiter resolves against the EXPAND-phase index — this is what lets the code deploy between 008 and 009',
+    );
+
+    // And the reason the halves cannot be swapped: production's own arbiter
+    // against the index 009 builds. Asserted as a fact rather than left as a
+    // warning in a comment, because a comment is what it was.
+    check(
+      !(await arbiterResolves(SLOT_HOLD_PREDICATE, LEGACY_PREDICATE)),
+      'the OLD arbiter raises 42P10 against the CONTRACT-phase index — which is why 009 must not run before the deploy',
+    );
+
+    // The steady state on either side, so a future predicate change that breaks
+    // both directions at once is still caught.
+    check(
+      await arbiterResolves(SLOT_HOLD_PREDICATE, SLOT_HOLD_PREDICATE),
+      'and the new arbiter resolves against the new index, which is the steady state after 009',
+    );
+    check(
+      await arbiterResolves(LEGACY_PREDICATE, LEGACY_PREDICATE),
+      'as the old pair did before any of this, which is the state production is in right now',
+    );
+  } finally {
+    await q(`DROP TABLE IF EXISTS ${probe}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 if (failures > 0) {
   console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed.`);
   process.exit(1);

@@ -31,11 +31,97 @@ export const SLOT_MINUTES = 30;
 /** 0 = Sunday … 6 = Saturday. Fridays are permanently off — config, not a blackout row. */
 export const CLOSED_WEEKDAYS: readonly number[] = [5];
 
-/** A slot must start at least this far in the future to be publicly bookable. */
-export const MIN_NOTICE_HOURS = 4;
+/**
+ * How many CALENDAR DAYS ahead the earliest publicly bookable slot sits.
+ *
+ * `1` means next-day earliest: no same-day web bookings, and every slot from
+ * tomorrow onward is offered regardless of the hour it is now. Client decision,
+ * 2026-08-18.
+ *
+ * ── WHY DAYS AND NOT HOURS ────────────────────────────────────────────────
+ *
+ * This replaced `MIN_NOTICE_HOURS = 4`. P9 first recorded the client's
+ * 2026-08-12 decision as "4h → 24h", and 24 rolling hours is NOT the same rule:
+ * it would refuse a Wednesday 11:30 slot to somebody booking Tuesday at 15:00,
+ * which next-day-earliest allows. The client's 2026-08-18 answer is the
+ * calendar-day version, so that is what ships. The intent was always the same —
+ * the office will not take a web booking for today.
+ *
+ * ── WHAT IT DOES TO THE PAYMENT DEADLINE ──────────────────────────────────
+ *
+ * The tight case is a request at 15:29 for the next day's 11:30: about 20 hours
+ * of notice, but an 07:00 approval leaves barely half an hour before
+ * `slot − 4h`. That case is covered by the pay-now branch rather than by this
+ * constant — see `PAY_NOW_THRESHOLD_HOURS`, which skips the deferred deadline
+ * entirely when the slot is close. This constant deliberately does not try to
+ * guarantee a payable window; a rule that did would have to be hours-based and
+ * would refuse the bookings the client wants to take.
+ *
+ * The admin grid is exempt from this and from every other window check — see
+ * `ADMIN_MIN_NOTICE_HOURS`.
+ */
+export const MIN_NOTICE_DAYS = 1;
+
+/**
+ * The floor the office works to when typing a booking in by hand.
+ *
+ * Documentation rather than enforcement: `api/admin/appointments/create.ts`
+ * never calls `isSlotBookable`, so nothing checks this. It is recorded because
+ * "the admin path has a 4-hour floor" is the sentence everybody repeats, and
+ * the truth is that the admin path has no floor at all — an emergency at 08:00
+ * for 11:30 is exactly what that bypass is for.
+ */
+export const ADMIN_MIN_NOTICE_HOURS = 4;
 
 /** The public calendar shows at most this many days ahead. */
 export const MAX_ADVANCE_DAYS = 14;
+
+// ---------------------------------------------------------------------------
+// The payment window (BK-23 / BK-32)
+//
+// Three constants that have to be read together, because two of them describe
+// the same deadline from different ends and the third is what stops them
+// producing a deadline in the past.
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a customer gets to pay, measured from the moment the office
+ * approves.
+ *
+ * Approve at 9am, pay by 9pm. Long enough for somebody at work, short enough to
+ * recycle a slot that is not going to be paid for. A business-feel number, not
+ * an engineering one — the client may move it and it is a constant so that they
+ * can.
+ */
+export const PAYMENT_WINDOW_HOURS = 12;
+
+/**
+ * The other end of the same deadline: payment must land at least this far
+ * before the visit.
+ *
+ * Past this point a confirmation can no longer usefully complete — the crew is
+ * being dispatched — which is why the auto-decline timer is pinned to the same
+ * instant rather than to a number somebody picked.
+ */
+export const PAYMENT_DEADLINE_LEAD_HOURS = 4;
+
+/**
+ * Below this much time-to-slot at approval, the deferred deadline is skipped
+ * and the link is sent to be paid NOW.
+ *
+ * REQUIRED, NOT AN OPTIMISATION. `min(approved_at + 12h, slot − 4h)` produces a
+ * deadline in the past — or minutes away — whenever the slot is close, and
+ * "close" is reachable on both paths: a 2am emergency typed in by the office,
+ * and an ordinary web request made at 15:29 for the next day's 11:30 that the
+ * office approves at 07:00. Without this branch those bookings get a link that
+ * is dead on arrival, or one that expires while the customer is finding their
+ * card.
+ *
+ * Eight hours covers both. When it applies, `payment_due_at` is left NULL and
+ * the expiry cron must leave the row alone — the office is on the phone to that
+ * customer, not waiting on a timer.
+ */
+export const PAY_NOW_THRESHOLD_HOURS = 8;
 
 /** How long before the appointment the reminder SMS goes out. */
 export const REMINDER_LEAD_HOURS = 3;
@@ -184,8 +270,101 @@ export const APPOINTMENT_UPLOAD_RATE_LIMIT_PER_HOUR = 30;
 /** The booking form. Where a confirmed page with nothing to show sends people. */
 export const BOOKING_PATH = '/book/';
 
-/** Where a committed booking lands. Both `noindex` and out of the sitemap. */
+/**
+ * Where a SUBMITTED REQUEST lands (BK-23). Both `noindex` and out of the
+ * sitemap, like its sibling below.
+ *
+ * New in P9, and the split is the point. Submitting the form used to produce a
+ * booking, so it landed on a page that said "You're booked". It now produces a
+ * REQUEST the office has not looked at and nobody has paid for, and that page
+ * would be making the exact claim this whole flow exists to stop making — on
+ * the one surface a customer is most likely to believe, and most likely to
+ * screenshot.
+ *
+ * `/book/confirmed/` is kept rather than repurposed, for two reasons: it is
+ * live and may be linked, and BK-32's Stripe `success_url` needs a
+ * post-payment landing page anyway. Reusing it there is the smaller diff and
+ * leaves both URLs saying something true.
+ */
+export const BOOKING_RECEIVED_PATH = '/book/received/';
+
+/**
+ * Where a PAID booking lands. Both `noindex` and out of the sitemap.
+ *
+ * Since BK-23 this is reached from the payment redirect, not from the form.
+ */
 export const BOOKING_CONFIRMED_PATH = '/book/confirmed/';
+
+/**
+ * Where a customer lands after ABANDONING the Stripe Checkout page (BK-32).
+ *
+ * Its own page rather than sending them back to `/book/`: the form would be
+ * empty and the request already exists, so "start again" is the one instruction
+ * that is actively wrong. The row is still `approved_awaiting_payment` and the
+ * link in their email still works until the deadline, which is what this page
+ * says.
+ */
+export const BOOKING_PAYMENT_CANCELLED_PATH = '/book/payment-cancelled/';
+
+/**
+ * The query parameter Stripe puts the Checkout Session id in on the way back.
+ *
+ * `{CHECKOUT_SESSION_ID}` in a `success_url` is substituted by Stripe. The name
+ * is spelled once, here, because THREE things read it and they must agree: the
+ * `success_url` builder below, the confirmation island deciding whether this is
+ * a payment landing at all, and the conversion keyed on its value.
+ */
+export const STRIPE_SESSION_QUERY_PARAM = 'session_id';
+
+/**
+ * Stripe's own substitution token. A literal, unencoded, and it must stay that
+ * way — `encodeURIComponent` would turn the braces into `%7B…%7D` and Stripe
+ * would hand the customer back a URL containing the literal text rather than
+ * their session id.
+ */
+const STRIPE_SESSION_PLACEHOLDER = '{CHECKOUT_SESSION_ID}';
+
+/**
+ * The absolute URLs a Checkout Session redirects to.
+ *
+ * ABSOLUTE, because Stripe redirects a browser from its own domain — a relative
+ * path is not a destination. There is no site-origin constant in this codebase:
+ * every absolute URL is built at its call site from `Astro.site`, so the origin
+ * is a parameter here rather than a fourth place the domain is written down.
+ *
+ * SLASHED, because `astro.config.mjs` sets `trailingSlash: 'always'` and the
+ * unslashed form answers 308. A browser follows that, so the customer would
+ * still arrive — but the query string survives a 308 and the extra hop is
+ * pointless, and the same rule applied to the WEBHOOK is not survivable at all
+ * (Stripe does not follow redirects). Both are asserted against the generated
+ * route table in `scripts/verify-stripe-webhook.ts`.
+ */
+export function checkoutSuccessUrl(origin: string | URL): string {
+  const url = new URL(BOOKING_CONFIRMED_PATH, origin);
+  return `${url.toString()}?${STRIPE_SESSION_QUERY_PARAM}=${STRIPE_SESSION_PLACEHOLDER}`;
+}
+
+export function checkoutCancelUrl(origin: string | URL): string {
+  return new URL(BOOKING_PAYMENT_CANCELLED_PATH, origin).toString();
+}
+
+/** Where Stripe posts payment events. Slashed — see `checkoutSuccessUrl`. */
+export const STRIPE_WEBHOOK_PATH = '/api/stripe/webhook/';
+
+/**
+ * The URL to paste into the Stripe dashboard, built from the same constant the
+ * route resolves to so the rollout note and the route cannot drift.
+ *
+ * **THE TRAILING SLASH IS THE WHOLE REASON THIS IS A FUNCTION.** Registered
+ * without it, Vercel answers 308 — and **Stripe does not follow redirects**, so
+ * every event fails, silently, in production only. A webhook is unsmokable
+ * under `astro dev` by definition, which puts this in the same family as
+ * BK-34a's upload links: the dev server resolves it, the route table decides
+ * it. See `/CLAUDE.md`'s Known trap.
+ */
+export function stripeWebhookUrl(origin: string | URL): string {
+  return new URL(STRIPE_WEBHOOK_PATH, origin).toString();
+}
 
 export const BOOKING_AVAILABILITY_ENDPOINT = '/api/booking/availability/';
 export const BOOKING_CREATE_ENDPOINT = '/api/booking/create/';
@@ -261,6 +440,20 @@ export const BOOKING_EMAIL_REPLY_TO = 'info@yegrestoration.ca';
 /** Who hears that a crew is expected somewhere. Settled with the user 2026-08-09. */
 export const BOOKING_INTERNAL_TO = 'info@yegrestoration.ca';
 
+/**
+ * Where an Interac e-Transfer goes (BK-32, merged in 2026-08-18).
+ *
+ * A real payment route, not a fallback: the client offers it alongside the card
+ * link, and the approval email names both. There is no inbox automation — the
+ * office reads their own mail and marks the booking paid, which is deliberate
+ * and is recorded as out of scope rather than as a gap.
+ *
+ * `null` would mean the client has not given one, and the approval message
+ * would then have to rely on the card link alone. It is a constant rather than
+ * an env var because it is a published address, not a secret.
+ */
+export const INTERAC_EMAIL: string | null = 'info@yegrestoration.ca';
+
 // ---------------------------------------------------------------------------
 // Calendar invites (BK-14)
 //
@@ -303,3 +496,23 @@ export const ICS_ORGANIZER = 'noreply@yegrestoration.ca';
  * documented Vercel default (10s); BK-11 confirms the plan's real limit.
  */
 export const POST_COMMIT_BUDGET_MS = 5000;
+
+/**
+ * Wall-clock ceiling on the one Stripe call the approval path makes.
+ *
+ * **DELIBERATELY SMALLER THAN `POST_COMMIT_BUDGET_MS`, AND THE ARITHMETIC IS
+ * THE REASON.** Since BK-32 the approve route creates the Checkout Session
+ * AFTER the guarded UPDATE, so a hung Stripe call sits in front of a mail send
+ * that already has its own 5000ms race. Two 5s races stack to 10s on top of the
+ * row read and the UPDATE, and nothing in this repo raises the function limit
+ * (`vercel.json` has no `functions` block, `astro.config.mjs` sets no adapter
+ * `maxDuration`) — so the platform default applies and the office gets a
+ * platform 504 for an approval that committed. 3000 + 5000 leaves headroom
+ * against the lowest documented Vercel default of 10s.
+ *
+ * Timing out is not an error state: it resolves to `null`, which is the same
+ * answer "no card processor is configured" gives, and the approval degrades to
+ * the Interac route. A late-arriving session is the one window BK-32 cannot
+ * close — it is live and unrecorded — so that path flags `needs_attention`.
+ */
+export const CHECKOUT_BUDGET_MS = 3000;
