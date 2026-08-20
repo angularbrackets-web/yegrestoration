@@ -1332,9 +1332,19 @@ function statusClasses(status: Appointment['status']) {
         <p class="text-zinc-600 text-xs mb-1">
           Record-keeping, not a decision.{decisionPanelNote ? ` ${decisionPanelNote}` : ''}
         </p>
+        {/*
+          UN-CANCELLING NOW HAS TWO FAILURE CAUSES, and this sentence asserted
+          one. BK-44 added the second: a booking that was never paid cannot
+          cross back into the invite-holding set, so it returns as a request
+          rather than as a confirmed visit. The withheld-status line under the
+          dropdown explains that for the row on screen; this line describes the
+          operation, and describing it by one of its two causes is how a true
+          sentence becomes a misleading one.
+        */}
         <p class="text-zinc-600 text-xs mb-5">
           Cancelling frees the slot for online booking but keeps the record. Un-cancelling
-          fails if somebody has taken the slot since.
+          fails if somebody has taken the slot since, and a booking that was never paid comes
+          back as a request rather than as a confirmed visit.
         </p>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
