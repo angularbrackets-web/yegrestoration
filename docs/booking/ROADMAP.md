@@ -62,6 +62,49 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **The admin status dropdown can perform an approval, which is the one thing
+  the review route was split out to prevent.** `review.ts`'s header states the
+  design: *"Folding that into the editor would mean the editor's dropdown could
+  also perform it, which is exactly what must not happen: an office member
+  setting the status to `approved_awaiting_payment` by hand would approve a
+  booking with no amount, no deadline and no email."* **`[id].astro:1267`
+  renders all eight `APPOINTMENT_STATUSES` on every row and `update.ts` has no
+  transition guard**, so that is one dropdown selection away on any
+  `pending_review` row.
+
+  Two consequences, the second worse than the first:
+
+  - `-> approved_awaiting_payment` by hand is the scenario the comment forbids
+    verbatim: slot held, no clock, no amount, customer never told.
+  - `-> confirmed` by hand crosses the calendar-invite boundary, so `update.ts`
+    **sends the customer a confirmation email and an ICS invite with no payment
+    taken** — against P9's locked *"PAYMENT ALWAYS PRECEDES DISPATCH. NO
+    EXCEPTIONS."*
+
+  **`update.ts:266`'s comment is stale and is part of how this survived:** it
+  says the dropdown *"is currently the ONLY route to `confirmed`"*, which was
+  true before BK-32 and is false now — BK-32 shipped **"Mark as paid — Interac"**
+  as the sanctioned manual confirm. The dropdown is now an unguarded duplicate
+  of it that skips the money.
+
+  **Found 2026-08-19 by the user, within minutes of first real use of the review
+  screen** — they asked which of the two panels accepts a booking, which is the
+  right question and evidence that the ambiguity is a trap rather than a
+  theoretical hole. Not found by any of the 23 gates, because every one of them
+  tests the routes and none tests whether two routes overlap.
+
+  **Severity: high — it silently defeats the deploy's central rule, and the
+  wrong option sits alphabetically beside the right ones in a dropdown the
+  office uses for ordinary edits.** Requires a deliberate wrong selection by an
+  authenticated user, which is the only reason it is not a release blocker.
+
+  **Owner: BK-44 (new, not yet written).** Constrain the dropdown to
+  transitions that are legal from the row's current status, and guard the same
+  rule server-side in `update.ts` rather than only in the template — a
+  template-only fix is a client-side check on a write path. Leave the Interac
+  action as the one sanctioned manual route to `confirmed`. Reviewed tier: it is
+  an admin write path that sends customer mail and moves money's worth of state.
+
 - **A pin whose MESSAGE describes the claim while its ASSERTION covers half of
   it.** `verify-booking-email.ts` asserted *"the office subject says REQUEST,
   not \"New booking\""* — and checked only the subject. The office email's BODY
