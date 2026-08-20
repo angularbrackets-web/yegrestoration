@@ -215,6 +215,37 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   copy** — two statements of one rule is the drift this repo has paid for more
   than once. Read them in `CLAUDE.md`.
 
+- **The office's copy of a confirmed booking states a DIFFERENT figure from the
+  customer's, and BK-45 made the gap visible rather than creating it.**
+  `internalNotification` (`booking-email.ts`) renders `assessmentSummary`, which
+  calls `assessmentQuote({tier, service, slotStart})` with **no
+  `travelFeeCents`** — so it defaults to zero — and recomputes from today's price
+  table. BK-45 moved the CUSTOMER's confirmation onto the row's snapshot
+  (`assessment_amount_cents` + `travel_fee_cents` + `gst_cents` +
+  `total_amount_cents`), and deliberately did not touch the office message. So on
+  any booking with a travel fee or an edited amount, the two messages about one
+  appointment now name different totals. **Nothing new ships broken** — the
+  office notification is not sent on the payment path at all — but it is the
+  third instance of the recompute-versus-snapshot shape after the appointment
+  header and the email, and it should be fixed in the same pass as the header.
+  Severity: low today, moderate the moment anything sends that message.
+  **Owner: BK-46.**
+
+- **One office-facing flash still says `booked` where the status is
+  `confirmed`.** `[id].astro`'s `EMAIL_MESSAGES.refused` reads *"A confirmation
+  is only sent for a booked appointment with an email address"*. It predates
+  BK-45 and was not falsified by it, so it was recorded rather than fixed inline
+  — BK-45 rewrote only the claims its own change made false. Same class as the
+  header's **BOOKED** label and **Booked online** already listed above, and it
+  belongs in the same pass so the word is retired from the admin surface in one
+  commit rather than three. Severity: low, office-facing only.
+  **Owner: BK-47.**
+
+  (`resend.ts`'s header carried the same staleness and **was** fixed under
+  BK-45, because that ticket's own change made the rest of that comment false
+  and half-correcting a paragraph is worse than either state. Recorded so BK-47
+  does not go looking for a string that is no longer there.)
+
 - **`approve` and `rollBack` never clear `paid_at` or `payment_method`, so a
   re-approved booking carries the previous cycle's payment.** Nothing in the
   system clears either column, and `booking-payment.ts:608-618` even stamps
@@ -532,6 +563,11 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   operationally** — it is the kind of thing found at go-live, by an accountant.
   **Owner: BK-32**, recorded as a rollout task rather than an implementation
   one.
+
+  **CLOSED 2026-08-20** — the Dashboard step was taken (`CA GST/HST
+  775654577RT0001`). Kept for the lesson: a configuration step no code can
+  cover is invisible to every gate in the repo, and this one was found by
+  reading the mechanism rather than by any test.
 
   **Corrected 2026-08-19.** This entry used to add *"the env var correctly
   drives our emails"*, and BK-32's own rollout note says the same. **It is not
@@ -1219,7 +1255,7 @@ submit request ──▶ pending_review ──▶ approved_awaiting_payment ─�
    (photos req'd)      │  hold             │  hold                     │  hold        │ hold
                        ├─▶ declined        └─▶ payment_expired         ├─▶ cancelled  └─▶ no_show
                        │   (release)           (release)               │   (release)      (hold)
-              request-received email     payment-link email     "you're booked" + ICS + SMS
+              request-received email     payment-link email     confirmation + ICS + SMS
               (no ICS, no "booked")      (deadline stated)      reminder eligibility starts
 ```
 
@@ -1445,7 +1481,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
 | BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Client answer 2026-08-20: no hand-confirm. | Reviewed | ✅ **committed 2026-08-20** on `deploy-2-prepay` — plan review (2 blockers) and implementation review (2 blockers) both passed after fixes; 12 red-first rows; all 23 verify scripts green. **Not deployed.** |
-| BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | draft — see `tickets/BK-45.md` |
+| BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | ✅ **implemented 2026-08-20** — plan review (5 blockers / 8 should-fix / 3 nits) and implementation review (3 blockers / 3 should-fix / 6 nits) both passed after fixes; merged on the payment path per the user's six decisions; 13 red-first rows; typecheck 0, build clean, all 23 verify scripts green. **Not deployed.** |
 | BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | draft — see `tickets/BK-46.md` |
 | BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
@@ -1537,6 +1573,19 @@ together or the site tells a lie between deploys.
    terms went out in the request email and `/book/confirmed/` shows the
    have-ready list. See `tickets/BK-45.md`.
 
+   **BK-45 IS NOW FIXED IN CODE AND NOT DEPLOYED (2026-08-20), alongside BK-44.**
+   `markPaid` sends `customerConfirmation` — the same builder the Resend button
+   uses, so the two are one message by construction — carrying the have-ready
+   list, the assessment terms and **what the row says was charged**, itemised
+   from the BK-32 snapshot rather than recomputed. The merge was not free: the
+   plan review found that `customerConfirmation`'s confirmed arm would have told
+   a customer who had just paid that *"we email you a secure payment link"* and
+   that we *"may release the time"* if they did not pay, because the fee-terms
+   block is written in pre-payment tense and renders on both arms. Three
+   sentences are now request-only. **The two builders were NOT collapsed** —
+   `update.ts`'s late-payment inward crossing still sends the thinner message,
+   because its snapshot carries no tier and no amounts.
+
    **Both are route-relationship or screen-legibility failures, and the suite
    tests neither.** Every verify script exercises one route in isolation; none
    asks whether two routes overlap, or how a screen reads to the person using
@@ -1589,9 +1638,22 @@ together or the site tells a lie between deploys.
       than `cs_test_` in the Stripe URL, then refunding in the dashboard and
       cancelling the row. Until that runs, "live" is a configuration claim, not
       an observed fact.
-   2. **The GST registration number is now a LIVE compliance item**, not a
-      to-do. Real receipts are being issued from 2026-08-20. Stripe renders it
-      from Dashboard settings and no code can supply it — see the Known trap.
+   2. **DONE 2026-08-20 — the GST registration number is on the account.**
+      `CA GST/HST 775654577RT0001`, added as a Tax ID under Settings → Billing →
+      Invoices, confirmed by the user from the Dashboard. Real receipts had been
+      issuing since the live-key swap earlier the same day, so the exposure
+      window was hours rather than days.
+
+      **No code changed and none was needed** — see the Known trap: nothing in
+      `src/` or `scripts/` reads `GST_REGISTRATION_NUMBER`, and Stripe renders
+      tax info on Checkout receipts from Dashboard settings alone. Our own
+      emails itemize the GST *amount* and print no registration number, which
+      is very likely sufficient because Stripe's receipt is the tax receipt.
+      If the client ever wants the number on our approval email too, that is a
+      small ticket and it still does not exist.
+
+      **Not verified from outside, and cannot be:** the only proof is a real
+      receipt from a real charge, which is outstanding item 1 below.
    3. **The office has not been briefed on the new workflow.** A real customer
       booking now produces a REQUEST that does nothing until someone approves
       it, and BK-23 Task 4 expires it at `slot − 4h` with an apology email if
@@ -1604,8 +1666,21 @@ together or the site tells a lie between deploys.
       committed on `deploy-2-prepay`; deploying it is a rollout step and has
       not been taken.
 
+      **BK-45 is in the same state** — fixed in code on `deploy-2-prepay`,
+      not deployed. Until it ships, every customer who pays receives the thin
+      calendar-boundary confirmation with no terms, no have-ready list and no
+      record of what they were charged, and clicking **Resend confirmation**
+      sends them a materially different, fuller message under a different
+      heading. That is a customer-facing inconsistency rather than a money
+      defect, and it is live on production now.
+
       The same pass produced **BK-46** and **BK-47** from a deliberate read of
       the appointment screen — see Known traps. Neither is deployed either.
+
+      **Four tickets now sit against this branch and none of them is on
+      production: BK-44 committed, BK-45 implemented and reviewed but not yet
+      committed, BK-46 and BK-47 still drafts. Deploying is a decision the user
+      has not made, and no ticket may take it as a step of its own.**
    5. **`DATABASE_URL` is shared between Preview and Production**, which is why
       no preview deploy can be used to test this flow.
 

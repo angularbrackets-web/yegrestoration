@@ -370,5 +370,9 @@ function notificationInputFor(row: Appointment, now: Date): BookingNotificationI
     claimNumber: row.claim_number,
     smsConsent: row.sms_consent_at !== null,
     filesAttached: 0,
+    // BK-45. The expiry and payment-expired messages tell a customer their
+    // request lapsed. Neither renders an amount, and a row that expired unpaid
+    // has no payment to report even where a snapshot exists.
+    settled: null,
   };
 }

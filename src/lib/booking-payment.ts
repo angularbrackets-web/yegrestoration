@@ -47,10 +47,15 @@ import {
 import {
   inviteEventFromAppointment,
   planCalendarInvite,
-  planFirstConfirmationEmail,
+  planForAppointment,
 } from './booking-admin-notify';
 import { paymentAttentionAlert } from './booking-email';
-import { sendCalendarInvite, sendOfficeMessage, withDeadline } from './booking-notify';
+import {
+  sendCalendarInvite,
+  sendOfficeMessage,
+  withDeadline,
+  type NotifyDeps,
+} from './booking-notify';
 import type { AssessmentTier } from './booking-pricing';
 import { getDb, SERVICE_LABELS, type Appointment } from './db';
 import { readEnv } from './env';
@@ -515,7 +520,25 @@ export async function markPaid(
   sql: Sql,
   appointmentId: number,
   input: MarkPaidInput,
-  deps: StripeDeps = {},
+  /**
+   * **`NotifyDeps` as well as `StripeDeps`, and that is BK-45's doing.**
+   *
+   * This module's header says every external call is injectable, *"without it
+   * the whole of this module would be verified by reading it, which is precisely
+   * how the fixed-idempotency-prefix defect survived two reviews."* The mail
+   * calls were the ones that escaped — all three of them, the confirmation and
+   * both office alerts, which is why `deps` reaches `flagAndAlert` and
+   * `alertOffice` as well and not the confirm branch alone. A parameter that
+   * covered one of three would have made this comment a promise the code did
+   * not keep. The one that mattered for BK-45: `sendConfirmation` passed no deps, so the
+   * only observable of a confirmation send was a mute line carrying no message
+   * content — and "the message a paying customer receives" was checkable by
+   * reading the source and nothing else. That is the shape of defect BK-45 was
+   * filed for. Threading the seam through is what lets a verify script capture
+   * the real `Message` this route hands its sender and compare it with the one
+   * the Resend button builds.
+   */
+  deps: StripeDeps & NotifyDeps = {},
 ): Promise<MarkPaidOutcome> {
   const nowIso = input.now.toISOString();
   const isStripe = input.method === 'stripe';
@@ -551,7 +574,7 @@ export async function markPaid(
   }
 
   if (confirmed.length === 1) {
-    await sendConfirmation(confirmed[0], input.now);
+    await sendConfirmation(confirmed[0], input.now, deps);
     return 'confirmed';
   }
 
@@ -583,7 +606,7 @@ export async function markPaid(
       `(ref ${input.reference ?? 'none'}) arrived after this booking was already confirmed by ` +
       `${row.payment_method ?? 'an unrecorded method'}. NOT refunded automatically — ` +
       `issue any refund by hand in the Stripe dashboard.`;
-    await flagAndAlert(sql, row, line, input.now);
+    await flagAndAlert(sql, row, line, input.now, deps);
     return 'double-pay';
   }
 
@@ -632,7 +655,7 @@ export async function markPaid(
       console.error(`markPaid(${appointmentId}) could not record a late payment:`, err);
       return 'error';
     }
-    await alertOffice(row, line, input.now);
+    await alertOffice(row, line, input.now, deps);
     return 'paid-after-release';
   }
 
@@ -643,40 +666,86 @@ export async function markPaid(
 }
 
 /**
- * The confirmation and the two calendar invites — **exactly what the inward
- * invite crossing in `update.ts` already sends**, reused rather than rebuilt.
+ * The customer's confirmation and the office's calendar invite.
  *
- * A second confirmation-email builder is precisely the "branch in the email
- * layer and a second status path" the confirm seam exists to prevent. Reusing
- * these also inherits BK-23's B2 fix for free: a payment-confirmed row is told
- * it is confirmed, never that it "was cancelled and has now been reinstated".
+ * ── WHICH CUSTOMER MESSAGE THIS SENDS, AND WHY IT CHANGED (BK-45) ──────────
+ *
+ * It used to send `planFirstConfirmationEmail` — `update.ts`'s calendar-boundary
+ * builder, reused on the argument that a second confirmation-email builder is
+ * the *"branch in the email layer and a second status path"* the confirm seam
+ * exists to prevent. The argument was right and the choice was still wrong,
+ * because there was never one builder to reuse: `customerConfirmation` already
+ * existed, already carried the assessment terms, the have-ready list and the
+ * chosen tier, and was already what the **Resend confirmation** button sent. So
+ * the seam produced exactly what it was meant to prevent — two materially
+ * different emails both called the confirmation, with the thin one going to the
+ * customer who paid and the full one to whoever the office resent.
+ *
+ * Found 2026-08-19 by the first real payment on production. It now sends
+ * `planForAppointment(...).customer`, which is the builder `resend.ts` calls,
+ * with the arguments derived from the same row — so "a resent confirmation is
+ * the message the customer originally received" is true by construction rather
+ * than by two builders being kept in step.
+ *
+ * **The ICS does not change, and that is a property rather than a promise.**
+ * `icsEventOf` and `inviteEventFromAppointment` build the same eight-field
+ * `IcsEvent` from the same row, both attach METHOD `request` with the customer
+ * as ATTENDEE, and `buildBookingIcs` is a pure function of those plus `now`.
+ * Same UID, same SEQUENCE, byte-identical body.
+ *
+ * **BK-23's B2 fix is still inherited**, one level more strongly than before: a
+ * payment-confirmed row is told it is confirmed and never that it "was cancelled
+ * and has now been reinstated", because the builder it now uses has no
+ * reinstatement copy at all.
+ *
+ * ── WHAT IS DELIBERATELY UNCHANGED ─────────────────────────────────────────
+ *
+ * The SENDER stays `sendCalendarInvite`: the message is still invite-bearing,
+ * and keeping it preserves the idempotency prefix (`booking-<id>-request-<seq>`)
+ * and the mute line the admin verify suite reads. And nothing here stamps
+ * `confirmation_sent_at` — `sendConfirmationAndStamp` writes that column, this
+ * does not, and it must not start, because the column currently records the
+ * REQUEST acknowledgement and stamping it here would overwrite that fact. The
+ * column's mislabelling is BK-46's to fix, whole.
  *
  * One deadline over both sends, run concurrently — the same reasoning
  * `sendBoundaryMail` states: two serial budgets stack past the platform's
  * function limit on a request that has already written a row.
  */
-async function sendConfirmation(row: Appointment, now: Date): Promise<void> {
+async function sendConfirmation(
+  row: Appointment,
+  now: Date,
+  deps: NotifyDeps = {},
+): Promise<void> {
   try {
-    const event = inviteEventFromAppointment(row, SERVICE_LABELS[row.service] ?? row.service);
+    // ONE LABEL FOR BOTH. The invite and the confirmation describe one
+    // appointment; deriving the service label twice is how they come to disagree.
+    const serviceLabel = SERVICE_LABELS[row.service] ?? row.service;
+    const event = inviteEventFromAppointment(row, serviceLabel);
     const email = typeof row.email === 'string' && row.email.trim() !== '' ? row.email : null;
 
     const sends: Promise<[string, string]>[] = [
-      sendCalendarInvite(planCalendarInvite(event, 'request', now), {
-        id: row.id,
-        kind: 'request',
-        now,
-        audience: 'office',
-      }).then((o) => ['office', o] as [string, string]),
+      sendCalendarInvite(
+        planCalendarInvite(event, 'request', now),
+        { id: row.id, kind: 'request', now, audience: 'office' },
+        deps,
+      ).then((o) => ['office', o] as [string, string]),
     ];
 
-    if (email) {
+    // THE GUARD IS THIS ONE, NOT THE BUILDER'S (BK-45). `customerConfirmation`
+    // returns null on a FALSY email; the line above trims first, so a
+    // whitespace-only address is falsy here and truthy there. Keeping the send
+    // gated on `email` rather than on `plan.customer` is what makes the
+    // behaviour identical to what shipped before this ticket — a blank address
+    // queues nothing, rather than queueing a message addressed to spaces.
+    const customer = email ? planForAppointment(row, serviceLabel, now).customer : null;
+    if (customer) {
       sends.push(
-        sendCalendarInvite(planFirstConfirmationEmail(event, email, now), {
-          id: row.id,
-          kind: 'request',
-          now,
-          audience: 'customer',
-        }).then((o) => ['customer', o] as [string, string]),
+        sendCalendarInvite(
+          customer,
+          { id: row.id, kind: 'request', now, audience: 'customer' },
+          deps,
+        ).then((o) => ['customer', o] as [string, string]),
       );
     }
 
@@ -699,7 +768,13 @@ async function sendConfirmation(row: Appointment, now: Date): Promise<void> {
 }
 
 /** Append to `needs_attention` and tell the office. */
-async function flagAndAlert(sql: Sql, row: Appointment, line: string, now: Date): Promise<void> {
+async function flagAndAlert(
+  sql: Sql,
+  row: Appointment,
+  line: string,
+  now: Date,
+  deps: NotifyDeps = {},
+): Promise<void> {
   try {
     await sql`
       UPDATE appointments
@@ -713,7 +788,7 @@ async function flagAndAlert(sql: Sql, row: Appointment, line: string, now: Date)
   } catch (err) {
     console.error(`Booking ${row.id}: could not flag needs_attention:`, err);
   }
-  await alertOffice(row, line, now);
+  await alertOffice(row, line, now, deps);
 }
 
 /**
@@ -722,9 +797,14 @@ async function flagAndAlert(sql: Sql, row: Appointment, line: string, now: Date)
  * Under its own deadline and unable to fail its caller: the money has already
  * moved and the row already says so.
  */
-async function alertOffice(row: Appointment, line: string, now: Date): Promise<void> {
+async function alertOffice(
+  row: Appointment,
+  line: string,
+  now: Date,
+  deps: NotifyDeps = {},
+): Promise<void> {
   await withDeadline(
-    sendOfficeMessage(row.id, 'payment-attention', paymentAttentionAlert(row, line, now)).then(
+    sendOfficeMessage(row.id, 'payment-attention', paymentAttentionAlert(row, line, now), deps).then(
       () => true,
     ),
     POST_COMMIT_BUDGET_MS,

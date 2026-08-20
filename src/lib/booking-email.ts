@@ -47,6 +47,10 @@ import {
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
   ASSESSMENT_TIER_NAMES,
+  CONFIRMED_HEADING,
+  CONFIRMED_LEAD,
+  NO_CHARGE_LINE,
+  PAID_IN_FULL_LINE,
   RECEIVED_HEADING,
   RECEIVED_HOLD_LINE,
   RECEIVED_LEAD,
@@ -199,6 +203,62 @@ export type BookingNotificationInput = {
   claimNumber: string | null;
   smsConsent: boolean;
   filesAttached: number;
+  /**
+   * BK-45. What the office ACTUALLY settled and what actually arrived, read off
+   * the row. Null until a booking has been approved.
+   *
+   * ── WHY THIS EXISTS AT ALL, AND WHY IT IS NOT `assessmentSummary` ─────────
+   *
+   * `assessmentSummary` below recomputes from the pricing table:
+   * `assessmentQuote({ tier, service, slotStart })`, with **no
+   * `travelFeeCents`**, which therefore defaults to zero. On the REQUEST message
+   * that is exactly right — it is a quote, no snapshot exists yet, and it is the
+   * figure the form showed. On the message a customer keeps AFTER PAYING it is a
+   * receipt-shaped claim about money already taken, and it is wrong on every
+   * booking the office adjusted or added travel to — which is the field the
+   * office adjusts most often. Same defect the appointment header carries
+   * (ROADMAP Known traps, BK-46); this is the email half of it, and it is fixed
+   * here rather than inherited.
+   *
+   * ── REQUIRED, NOT OPTIONAL, AND THAT IS THE POINT ────────────────────────
+   *
+   * An optional field is how the next construction site silently omits the
+   * amounts and ships a confirmation with none. Required means `astro check`
+   * names all nine sites, and each one has to state an answer.
+   */
+  settled: SettledAmounts | null;
+};
+
+/**
+ * The approval snapshot as the customer's own record of it.
+ *
+ * The first four mirror `ApprovalDetails` deliberately: the customer sees the
+ * same itemisation twice, once when asked to pay and once when confirmed, and
+ * two shapes for one set of figures is how the two drift.
+ */
+export type SettledAmounts = {
+  baseCents: number;
+  travelCents: number;
+  gstCents: number;
+  /**
+   * The settled total. **Zero is a real value** — `approveFree` writes it — and
+   * it is the renderer's job to say "no charge" rather than print three `$0.00`
+   * rows. A mapper that dropped the snapshot at zero could not tell a free visit
+   * from one that has not been approved.
+   */
+  totalCents: number;
+  /**
+   * What actually arrived (`paid_amount_cents`), or null when nothing has.
+   *
+   * Carried separately from `totalCents` rather than assumed equal to it. They
+   * are equal on every route that reaches `markPaid`'s confirm branch — the
+   * webhook refuses to confirm on a mismatch, the Interac button reads the
+   * total, and the free path passes zero against zero — but they can differ on a
+   * row that took a LATE payment while released and was later restored, and a
+   * confirmation that says "paid $X" when $X is not what arrived is the same
+   * class of defect as a recomputed total.
+   */
+  paidCents: number | null;
 };
 
 /**
@@ -314,9 +374,16 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
    * WHETHER THIS MESSAGE MAY CLAIM AN APPOINTMENT EXISTS (BK-23).
    *
    * A `request` is what submitting the form produces: the office has not looked
-   * at it and nobody has paid. It gets no "you're booked" heading, no calendar
-   * invite, and no line about one. A `confirmed` message is sent from behind
-   * the payment webhook, where every one of those is true.
+   * at it and nobody has paid. It gets no confirmed heading, no calendar invite,
+   * and no line about one. A `confirmed` message is sent from behind the payment
+   * webhook, where every one of those is true.
+   *
+   * BK-45 widened what else the flag decides, and the additions are all claims
+   * about MONEY rather than about the calendar: the confirmed arm drops the
+   * three fee-terms sentences written in the future tense, states what was
+   * charged from the row's own snapshot, and says it is paid. Same flag, because
+   * the same fact — the money has arrived — is what makes every one of them
+   * true, and a second flag would be a second thing to get wrong.
    *
    * Keyed off `messageType` rather than off a separate flag, so the thing that
    * decides the idempotency key and the thing that decides the claim cannot
@@ -325,14 +392,77 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
    */
   const isRequest = input.messageType === 'request';
 
+  /**
+   * WHAT THE CONFIRMED ARM SAYS ABOUT MONEY (BK-45).
+   *
+   * `settled` present means the office has approved and the row carries a
+   * snapshot; zero means it approved at no charge. Both are answered here rather
+   * than by the caller, so every producer of a confirmed message — `markPaid`
+   * and the Resend button — gets the same answer.
+   */
+  const settled = isRequest ? null : input.settled;
+  const freeVisit = settled !== null && settled.totalCents === 0;
+  const paidAmounts = settled !== null && settled.totalCents > 0 ? settled : null;
+  // Named only when it DIFFERS. Saying "paid $606.38" beside a Total of $606.38
+  // is noise; saying it beside a different figure is the only way a customer
+  // sees a short payment before the office phones them about it.
+  const arrivedLine =
+    paidAmounts && paidAmounts.paidCents !== null && paidAmounts.paidCents !== paidAmounts.totalCents
+      ? `We received ${formatCents(paidAmounts.paidCents)}.`
+      : null;
+
+  /**
+   * WHAT THIS MESSAGE MAY CLAIM ABOUT PAYMENT, and it is FOUR states rather
+   * than the two an earlier version of this code recognised. Implementation
+   * review found all three of the missing answers as live wrong sentences.
+   *
+   *   settled === null   -> SAY NOTHING. `confirmed` does NOT imply money
+   *                         arrived: migration 008 renamed thirteen pre-prepay
+   *                         rows into this status, and `008-review-lifecycle`
+   *                         says so in as many words — they "were confirmed
+   *                         under a flow that took no money online". The Resend
+   *                         button gates on status and an email address and
+   *                         nothing else, so one click on any of them would
+   *                         otherwise tell a customer who still owes $399 that
+   *                         nothing further is due.
+   *   totalCents === 0   -> the goodwill visit. No charge, and no amount.
+   *   paid !== total     -> name what ARRIVED and do NOT also claim the whole
+   *                         of it is settled; the two together contradict.
+   *   otherwise          -> paid in full.
+   */
+  const paymentClaim =
+    settled === null
+      ? null
+      : freeVisit
+        ? NO_CHARGE_LINE
+        : arrivedLine
+          ? null
+          : PAID_IN_FULL_LINE;
+
+  /**
+   * The tier line follows the SNAPSHOT, not the amount block.
+   *
+   * Gated on `settled` rather than on `paidAmounts` — the difference is the
+   * goodwill visit, where the snapshot exists and the amounts are zero. Keying
+   * on `paidAmounts` fell through to `assessmentSummary`, so a message reading
+   * "There is no charge for this visit" quoted "$399.00 + GST ($418.95 total)"
+   * fourteen lines later, and that message is the ONLY money-shaped one a
+   * goodwill customer ever receives.
+   */
+  const tierLine = input.assessmentTier
+    ? `You chose: ${
+        settled !== null ? tierNameOf(input.assessmentTier) : assessmentSummary(input)
+      }`
+    : null;
+
   const html = [
     WRAP_OPEN,
     isRequest
       ? `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(`${RECEIVED_HEADING}, ${input.name}`)}</h1>`
-      : `<h1 style="font-size:22px;margin:0 0 16px;">You're booked, ${escapeHtml(input.name)}</h1>`,
+      : `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(`${CONFIRMED_HEADING}, ${input.name}`)}</h1>`,
     isRequest
       ? `<p style="margin:0 0 16px;">${escapeHtml(RECEIVED_LEAD)}</p>`
-      : `<p style="margin:0 0 16px;">Thanks for booking an assessment with YEG Restoration. Here are the details.</p>`,
+      : `<p style="margin:0 0 16px;">${escapeHtml(CONFIRMED_LEAD)}</p>`,
     table(
       [
         rawRow('When', `<strong>${escapeHtml(when)}</strong>`),
@@ -382,20 +512,41 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // block ends on the credit because the last thing read should be the good
     // news; the refund and no-refund language sits in the middle. Pinned.
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(FEE_TERMS_HEADING)}</h2>`,
-    `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`,
+    // BK-45, decision 4. THE TERMS, NOT THE INSTRUCTIONS. See `feeTermsFor`.
+    ...(isRequest ? [`<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`] : []),
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...FEE_TERMS_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
-    ...FEE_TERMS_PAYMENT.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    ...feeTermsPaymentFor(isRequest).map(
+      (line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`,
+    ),
+    ...(paymentClaim ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(paymentClaim)}</strong></p>`] : []),
     ...FEE_TERMS_REFUND.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
     `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_CREDIT)}</p>`,
     // BK-31. The tier list above is the menu; this is what THIS customer chose
     // and what it comes to. Written back to them in the message they keep,
     // because the figure on the form is the one thing they cannot re-check
     // later — the form is gone and the terms box states standard prices.
-    ...(input.assessmentTier
-      ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(`You chose: ${assessmentSummary(input)}`)}</strong></p>`]
+    // BK-45. WHEN THE ROW KNOWS WHAT WAS CHARGED, THE ROW IS WHAT RENDERS.
+    // `assessmentSummary` recomputes and omits travel; it is right for a quote
+    // and wrong for a receipt. The tier name still leads, because "what you
+    // bought" and "what it cost" are two facts and the customer wants both.
+    ...(tierLine ? [`<p style="margin:0 0 8px;"><strong>${escapeHtml(tierLine)}</strong></p>`] : []),
+    ...(paidAmounts
+      ? [
+          table(
+            [
+              row('Assessment', formatCents(paidAmounts.baseCents)),
+              // A zero travel fee renders NO row, exactly as `approvalMessage`
+              // does it and for the same reason.
+              paidAmounts.travelCents > 0 ? row('Travel', formatCents(paidAmounts.travelCents)) : '',
+              row('GST', formatCents(paidAmounts.gstCents)),
+              rawRow('Total', `<strong>${escapeHtml(formatCents(paidAmounts.totalCents))}</strong>`),
+            ].filter(Boolean),
+          ),
+        ]
       : []),
+    ...(arrivedLine ? [`<p style="margin:8px 0 0;">${escapeHtml(arrivedLine)}</p>`] : []),
     // NO INVITE ON A REQUEST. An .ics for an unpaid slot is the "you're booked"
     // claim in a form the customer's calendar repeats back to them every day
     // until the appointment — worse than the sentence, because nothing about a
@@ -408,9 +559,9 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
   ].join('');
 
   const text = [
-    isRequest ? `${RECEIVED_HEADING}, ${input.name}` : `You're booked, ${input.name}`,
+    isRequest ? `${RECEIVED_HEADING}, ${input.name}` : `${CONFIRMED_HEADING}, ${input.name}`,
     '',
-    isRequest ? RECEIVED_LEAD : 'Thanks for booking an assessment with YEG Restoration. Here are the details.',
+    isRequest ? RECEIVED_LEAD : CONFIRMED_LEAD,
     '',
     `When:      ${when}`,
     `Where:     ${where}`,
@@ -433,13 +584,25 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     ...HAVE_READY_ITEMS.map((item) => `  - ${item}`),
     '',
     `${FEE_TERMS_HEADING}:`,
-    FEE_TERMS_INTRO,
+    ...(isRequest ? [FEE_TERMS_INTRO] : []),
     ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
-    ...FEE_TERMS_PAYMENT.flatMap((line) => ['', line]),
+    ...feeTermsPaymentFor(isRequest).flatMap((line) => ['', line]),
+    ...(paymentClaim ? ['', paymentClaim] : []),
     ...FEE_TERMS_REFUND.flatMap((line) => ['', line]),
     '',
     FEE_TERMS_CREDIT,
-    ...(input.assessmentTier ? ['', `You chose: ${assessmentSummary(input)}`] : []),
+    ...(tierLine ? ['', tierLine] : []),
+    ...(paidAmounts
+      ? [
+          `  Assessment  ${formatCents(paidAmounts.baseCents)}`,
+          ...(paidAmounts.travelCents > 0
+            ? [`  Travel      ${formatCents(paidAmounts.travelCents)}`]
+            : []),
+          `  GST         ${formatCents(paidAmounts.gstCents)}`,
+          `  Total       ${formatCents(paidAmounts.totalCents)}`,
+        ]
+      : []),
+    ...(arrivedLine ? ['', arrivedLine] : []),
     ...(isRequest ? [] : ['', CALENDAR_ATTACHED_LINE]),
     '',
     CANCEL_LINE,
@@ -457,7 +620,7 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     subject: headerSafe(
       isRequest
         ? `${RECEIVED_HEADING} — ${input.slotLabel} (${TIMEZONE_NOTE})`
-        : `You're booked — ${input.slotLabel} (${TIMEZONE_NOTE})`,
+        : `${CONFIRMED_HEADING} — ${input.slotLabel} (${TIMEZONE_NOTE})`,
     ),
     html,
     text,
@@ -627,8 +790,30 @@ export function approvalMessage(
     ),
     html,
     text,
-    // NO CALENDAR INVITE. Approval is not confirmation; the invite goes out
-    // behind the payment, from `messageType: 'confirmed'`.
+    // NO CALENDAR INVITE. Approval is not confirmation.
+    //
+    // THE INVITE GOES OUT BEHIND THE PAYMENT, and BK-45 is what made that
+    // sentence true rather than merely intended. It used to end there, naming
+    // `messageType: 'confirmed'` as the path — which was the path nothing on the
+    // payment side took: `markPaid` sent the calendar-boundary builder instead,
+    // and the fuller message this comment described was reachable only from the
+    // Resend button. A comment naming a path that is not taken is how that gap
+    // stayed invisible for a whole deploy.
+    //
+    // THREE THINGS PRODUCE A CONFIRMED CUSTOMER MESSAGE TODAY, and the count is
+    // the point — an incomplete claim here is what the last one was:
+    //
+    //   1. `markPaid` (`booking-payment.ts`) — card, Interac and $0 approval
+    //      alike. Sends `planForAppointment(...).customer`, i.e. this builder at
+    //      `messageType: 'confirmed'`. THE ONE A PAYING CUSTOMER RECEIVES.
+    //   2. the Resend button (`resend.ts`) — the same builder, by construction,
+    //      which is what makes a resent confirmation the message the customer
+    //      originally got rather than a different one under a different heading.
+    //   3. `update.ts`'s late-payment inward crossing — `declined` or
+    //      `payment_expired` where money arrived and stamped `paid_at` without
+    //      moving the status. It still sends `planFirstConfirmationEmail`,
+    //      because its snapshot carries no tier and no amounts. Stated rather
+    //      than tidied: BK-45 did NOT collapse the two builders.
   };
 }
 
@@ -912,6 +1097,40 @@ const NO_EMAIL_NOTICE_TEXT =
  * from one computation. Weekend slots and mould jobs are exactly the cases a
  * hand-written "$399 + GST" would get wrong.
  */
+/**
+ * Which of the four payment sentences a message may carry (BK-45, decision 4a).
+ *
+ * `FEE_TERMS_PAYMENT` is four lines doing two jobs, and the payment model is
+ * what separates them:
+ *
+ *   [0] "Those are our standard rates…"     — what the rates ARE
+ *   [1] "Saturday and Sunday are 1.5x"      — what the rates ARE
+ *   [2] "Nothing is charged when you send…" — how and when you PAY
+ *   [3] "If we do not have the payment…"    — what happens if you DON'T
+ *
+ * The confirmed message keeps the first two and drops the last two. [2] and [3]
+ * describe payment as still ahead of the reader and are read seconds after the
+ * money arrived — [3] tells a paid customer we may release their slot, which is
+ * worse than the omission BK-45 exists to fix.
+ *
+ * [0] and [1] are not optional politeness. `FEE_TERMS_ITEMS` prints the standard
+ * $399 / $699 / $1,199, and a mould or weekend customer's own total matches none
+ * of them; these two sentences are the only thing joining the menu to the figure
+ * in their Amount block. `FEE_TERMS_PAYMENT`'s own header calls that
+ * reconciliation the single most likely way this copy ships subtly wrong.
+ *
+ * Indices rather than a re-listed array, deliberately: the strings live once, in
+ * `booking-copy.ts`, and a client edit to either sentence lands here for free.
+ */
+function feeTermsPaymentFor(isRequest: boolean): readonly string[] {
+  return isRequest ? FEE_TERMS_PAYMENT : FEE_TERMS_PAYMENT.slice(0, 2);
+}
+
+/** The tier's name with no price attached — see `settled` on the input type. */
+function tierNameOf(tier: AssessmentTier): string {
+  return ASSESSMENT_TIER_NAMES[tier];
+}
+
 function assessmentSummary(input: BookingNotificationInput): string {
   if (!input.assessmentTier) return 'Not chosen (phone booking — settle with the customer)';
   const quote = assessmentQuote({

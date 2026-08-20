@@ -56,6 +56,7 @@ import { fileURLToPath } from 'url';
 // reaches getDb() is dynamic and happens after it.
 import type { Appointment } from '../src/lib/db';
 import type { Message } from '../src/lib/booking-email';
+import type { SendResult } from '../src/lib/booking-notify';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -123,6 +124,15 @@ const {
   sendConfirmationAndStamp,
 } = await import('../src/lib/booking-admin-notify');
 const { localDateKey, zonedTimeToUtc } = await import('../src/lib/booking-time');
+// BK-45's relationship pin needs the copy constants it asserts, the escaper the
+// html arm is built with, and the two ics functions that rebuild what the
+// payment path sent BEFORE the builder changed.
+const { escapeHtml } = await import('../src/lib/booking-email');
+const { SERVICE_LABELS } = await import('../src/lib/db');
+const { buildBookingIcs, icsCustomer } = await import('../src/lib/booking-ics');
+const { FEE_TERMS_HEADING, FEE_TERMS_INTRO, HAVE_READY_HEADING } = await import(
+  '../src/lib/booking-copy'
+);
 // BK-10's lead-reply path. Same split as the appointment resend above: the
 // helper's send is injectable (lib-level), the route is driven under the mute
 // (route-level).
@@ -633,8 +643,7 @@ try {
   check(noEmail.endsWith('?email=refused'), `no email → refused, got "${noEmail}"`);
 
   // Give it one — and BK-23 narrowed the gate. The resend button re-sends the
-  // "you're booked" confirmation WITH its calendar invite, so it is now
-  // `confirmed`-only. A fresh entry lands in `pending_review`, and offering to
+  // confirmation WITH its calendar invite, so it is now `confirmed`-only. A fresh entry lands in `pending_review`, and offering to
   // re-send a confirmation for a booking nobody has paid for is the false claim
   // this whole flow removes.
   const withEmail = await call(
@@ -674,8 +683,8 @@ try {
     );
 
     // Cancel it and the gate must close again: a cancelled appointment must not
-    // receive a fresh "You're booked" for a slot that may belong to someone
-    // else now.
+    // be told again that its assessment is confirmed for a slot that may belong
+    // to someone else now.
     await call(updateRoute, { id: String(idD), status: 'cancelled' });
     const refused = await call(resendRoute, { id: String(idD) });
     check(refused.endsWith('?email=refused'), `a cancelled row is refused, got "${refused}"`);
@@ -2276,6 +2285,157 @@ try {
     );
 
     console.log('  claim, crash, re-claim, stamp, ignore — against the real database');
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\nBK-45 — the message a paying customer gets IS the one Resend sends');
+  // -------------------------------------------------------------------------
+  //
+  // THE LOAD-BEARING PIN OF THIS TICKET, and it asserts a RELATIONSHIP rather
+  // than two sets of contents. BK-44's lesson: an invariant over the whole
+  // matrix caught a door no per-case assertion named. Here the door is "one of
+  // the two paths gets repointed and the other does not" — which is precisely
+  // the state BK-45 was filed for, and which every per-message assertion in this
+  // repo was green through for a whole deploy.
+  //
+  // ── WHY THE MUTE COMES OFF FOR THIS ARM ───────────────────────────────────
+  //
+  // `BOOKING_NOTIFY_DISABLED` short-circuits `sendCalendarInvite` BEFORE it
+  // consults `deps.send`, so under the mute the only observable is a log line
+  // carrying no message content — which is exactly why this defect was
+  // invisible. The flag comes off, a fake sender is injected, and nothing
+  // reaches the network: `deps.send` is consulted before any API key is read.
+  // Restored immediately after, in a `finally`, because every arm below this one
+  // depends on it.
+  //
+  // ── WHAT THIS CANNOT CATCH, STATED ────────────────────────────────────────
+  //
+  // Both sides ultimately reach `planForAppointment`, so an edit to the BUILDER
+  // moves both and stays green. That is the source pin's job
+  // (`verify-booking-ics.ts`), and the two are complementary rather than
+  // redundant: this one catches divergence, that one catches repointing.
+  {
+    const NOW = new Date();
+    const id = await seedAwaitingPayment(65468);
+    // The office edited the amount and added travel — the case where a
+    // recomputed figure and the settled one disagree, which is what makes the
+    // comparison below about the row rather than about the price table.
+    await sql`
+      UPDATE appointments
+      SET assessment_amount_cents = 57750, travel_fee_cents = 4600, gst_cents = 3118,
+          total_amount_cents = 65468
+      WHERE id = ${id}
+    `;
+
+    const captured: Message[] = [];
+    const capture = async (message: Message): Promise<SendResult> => {
+      captured.push(message);
+      return { ok: true };
+    };
+
+    const previousMute = process.env.BOOKING_NOTIFY_DISABLED;
+    let outcome: string;
+    try {
+      delete process.env.BOOKING_NOTIFY_DISABLED;
+      outcome = await markPaid(
+        sql,
+        id,
+        { method: 'stripe', amountCents: 65468, reference: 'pi_rel', now: NOW },
+        { send: capture },
+      );
+    } finally {
+      if (previousMute === undefined) delete process.env.BOOKING_NOTIFY_DISABLED;
+      else process.env.BOOKING_NOTIFY_DISABLED = previousMute;
+    }
+    check(outcome === 'confirmed', `the payment confirms, got "${outcome}"`);
+
+    // Two sends: the office invite and the customer confirmation. The customer
+    // one is identified by its recipient, never by its position — the two run
+    // concurrently and the order they resolve in is not ours to depend on.
+    const fromPayment = captured.find((m) => m.to === 'markpaid@example.com');
+    check(
+      captured.length === 2 && fromPayment !== undefined,
+      `the payment path sent the office invite and a customer message, got ${captured.length}`,
+    );
+
+    // The other side: what the Resend button builds for the same row and the
+    // same instant. Read back through `SELECT *` so it is the ROW that drives
+    // it, exactly as `resend.ts` does.
+    // THE FILE COUNT COMES FROM THE SAME SUBQUERY `resend.ts` USES, not from a
+    // hardcoded 0. It reaches only `internalNotification` today, so the two are
+    // identical either way — which is exactly why passing 0 would encode that
+    // equivalence instead of testing it, and would leave this pin green on the
+    // day anything file-related reaches the customer body. That day is the one
+    // this pin exists for.
+    const [row] = (await sql`
+      SELECT a.*,
+             (SELECT COUNT(*)::int FROM appointment_files f
+               WHERE f.appointment_id = a.id AND f.deleted_at IS NULL) AS file_count
+      FROM appointments a WHERE a.id = ${id}
+    `) as (Appointment & { file_count: number })[];
+    const fromResend = planForAppointment(
+      row,
+      SERVICE_LABELS[row.service] ?? row.service,
+      NOW,
+      row.file_count,
+    ).customer;
+
+    check(fromResend !== null, 'and the Resend button has a customer message to send for that row');
+
+    if (fromPayment && fromResend) {
+      for (const field of ['subject', 'html', 'text', 'to', 'from', 'replyTo'] as const) {
+        check(
+          fromPayment[field] === fromResend[field],
+          `the paid message and the resent message have the same ${field}`,
+        );
+      }
+
+      // THE ICS TOO, BY CONTENT AND NOT BY PRESENCE. "The calendar side works
+      // today" was BK-45's stated constraint, and an attachment that is merely
+      // PRESENT on both would satisfy a shape check while carrying a different
+      // event.
+      const a = fromPayment.attachments ?? [];
+      const b = fromResend.attachments ?? [];
+      check(a.length === 1 && b.length === 1, 'both carry exactly one attachment');
+      check(a[0]?.filename === b[0]?.filename, 'the same attachment filename');
+      check(a[0]?.contentType === b[0]?.contentType, 'the same content type, so the same METHOD');
+      check(a[0]?.content === b[0]?.content, 'and a BYTE-IDENTICAL ics — same UID, same SEQUENCE');
+
+      // AND THE ICS IS WHAT THE PAYMENT PATH SENT BEFORE THIS TICKET. The
+      // builder changed; the calendar artifact must not have. Rebuilt here from
+      // the pre-BK-45 expression rather than compared to itself.
+      const before = buildBookingIcs(
+        inviteEventFromAppointment(row, SERVICE_LABELS[row.service] ?? row.service),
+        'request',
+        NOW,
+        icsCustomer(row.email!),
+      );
+      check(
+        a[0]?.content === before,
+        'and it is byte-identical to the ics the payment path sent before BK-45 changed the builder',
+      );
+    }
+
+    // The content the ticket exists to deliver, asserted on the message that was
+    // actually captured coming out of the payment route — not on a builder call.
+    if (fromPayment) {
+      check(
+        fromPayment.html.includes(escapeHtml(HAVE_READY_HEADING)),
+        'the message the payment path sent carries the have-ready list',
+      );
+      check(
+        fromPayment.html.includes(escapeHtml(FEE_TERMS_HEADING)),
+        'and the assessment terms',
+      );
+      check(
+        fromPayment.html.includes('$654.68') && fromPayment.html.includes('$46.00'),
+        'and what was actually charged, travel fee included',
+      );
+      check(
+        !fromPayment.html.includes(escapeHtml(FEE_TERMS_INTRO)),
+        'and NOT the sentence promising a payment link to a customer who has just paid',
+      );
+    }
   }
 
   // -------------------------------------------------------------------------

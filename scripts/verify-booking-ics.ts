@@ -29,7 +29,19 @@ import {
   planRestoreEmail,
   planFirstConfirmationEmail,
 } from '../src/lib/booking-admin-notify';
-import { CANCEL_LINE, CANCELLED_REBOOK_LINE, CONFIRMED_HEADING } from '../src/lib/booking-copy';
+import {
+  CANCEL_LINE,
+  CANCELLED_REBOOK_LINE,
+  CONFIRMED_HEADING,
+  FEE_TERMS_CREDIT,
+  FEE_TERMS_HEADING,
+  FEE_TERMS_INTRO,
+  FEE_TERMS_ITEMS,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
+  HAVE_READY_HEADING,
+  HAVE_READY_ITEMS,
+} from '../src/lib/booking-copy';
 import {
   BOOKING_EMAIL_FROM,
   BOOKING_EMAIL_REPLY_TO,
@@ -38,7 +50,7 @@ import {
   SLOT_MINUTES,
   SUPPORT_PHONE,
 } from '../src/lib/booking-config';
-import type { Message } from '../src/lib/booking-email';
+import { escapeHtml, type Message } from '../src/lib/booking-email';
 import {
   buildBookingIcs,
   escapeIcsText,
@@ -699,6 +711,59 @@ console.log('\nA first confirmation must not claim a reinstatement (BK-23)');
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nBK-45 — the boundary builder carries no money and no terms');
+// ---------------------------------------------------------------------------
+//
+// THIS IS THE CONSTRAINT THAT DECIDED BK-45, so it is asserted rather than left
+// to the fact that nobody edited `planBoundaryEmail`.
+//
+// The ticket's alternative was to GROW the boundary builder — add the terms and
+// the have-ready list to `planFirstConfirmationEmail`. That was rejected because
+// the builder is shared with the CANCELLATION and the RESTORE, so the growth
+// would have arrived as a fifth parameter threading through both, and assessment
+// terms must never appear in an email telling somebody their appointment is off.
+// Merging on the payment path removed the risk category instead of managing it.
+//
+// The pin is what keeps it removed. A future "just add the amount to the
+// confirmation" edit lands in the shared builder unless something objects.
+{
+  const CUSTOMER = 'dana@example.com';
+  const BANNED: [string, string][] = [
+    ['the fee-terms heading', FEE_TERMS_HEADING],
+    ['the fee-terms intro', FEE_TERMS_INTRO],
+    ['a fee-terms item', FEE_TERMS_ITEMS[0]],
+    ['a payment sentence', FEE_TERMS_PAYMENT[0]],
+    ['a refund sentence', FEE_TERMS_REFUND[0]],
+    ['the credit line', FEE_TERMS_CREDIT],
+    ['the have-ready heading', HAVE_READY_HEADING],
+    ['a have-ready item', HAVE_READY_ITEMS[0]],
+  ];
+
+  for (const [label, message] of [
+    ['cancellation', planCancellationEmail(EVENT, CUSTOMER, NOW)],
+    ['restore', planRestoreEmail(EVENT, CUSTOMER, LATER)],
+    ['first confirmation', planFirstConfirmationEmail(EVENT, CUSTOMER, LATER)],
+  ] as const) {
+    for (const part of ['html', 'text', 'subject'] as const) {
+      for (const [what, line] of BANNED) {
+        check(
+          !message[part].includes(line) && !message[part].includes(escapeHtml(line)),
+          `the ${label} ${part} carries no ${what}`,
+        );
+      }
+      // NO AMOUNT EITHER. A cancellation naming a figure reads as a bill, and
+      // the restore reads as a second charge. Anchored on the dollar sign
+      // rather than on a constant, because the defect would arrive as an
+      // interpolated number and no constant would name it.
+      check(
+        !/\$\d/.test(message[part]),
+        `nor any dollar amount in the ${label} ${part}`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nThe customer boundary emails (BK-16)');
 // ---------------------------------------------------------------------------
 {
@@ -1035,6 +1100,43 @@ console.log('\nSource pins (weak by construction — see the header)');
         `the admin entry route no longer calls ${needle} — invites issue at payment, not at entry`,
       );
     }
+  }
+
+  // 3. BK-45 — THE TWO PATHS THAT PRODUCE A CONFIRMED CUSTOMER MESSAGE MUST
+  //    BUILD IT FROM THE SAME FUNCTION.
+  //
+  //    The relationship pin in `verify-booking-admin-db.ts` compares the two
+  //    messages and is the load-bearing one; it cannot catch ONE path being
+  //    repointed at a different builder, because it derives both sides from
+  //    what the code does. This catches exactly that, at the source, which is
+  //    the only place the question is answerable without a live send.
+  //
+  //    The ABSENCE half is the half that matters. Before BK-45 the payment path
+  //    called `planFirstConfirmationEmail` — the calendar-boundary builder — and
+  //    every gate was green while a paying customer received a message with no
+  //    terms, no have-ready list and no record of what they bought.
+  {
+    const paymentSource = strip('src/lib/booking-payment.ts');
+    check(
+      paymentSource.includes('planForAppointment('),
+      'the payment path builds the customer confirmation with planForAppointment',
+    );
+    check(
+      !paymentSource.includes('planFirstConfirmationEmail'),
+      'and no longer reaches for the calendar-boundary builder — the defect BK-45 was filed for',
+    );
+    const resendSource = strip('src/pages/api/admin/appointments/resend.ts');
+    check(
+      resendSource.includes('planForAppointment('),
+      'and the Resend button builds it with the same function, so the two cannot be different messages',
+    );
+    check(
+      !resendSource.includes('planFirstConfirmationEmail'),
+      'nor does the Resend button reach for the other builder',
+    );
+    // `update.ts` KEEPING it is the residual, and it is already pinned above by
+    // the first-confirmation branch check. Not restated here: two statements of
+    // one rule is the drift this repo has paid for more than once.
   }
 
   for (const [label, file, helper, needles] of [

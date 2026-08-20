@@ -16,6 +16,10 @@ import {
 import {
   CALENDAR_ATTACHED_LINE,
   CANCEL_LINE,
+  CONFIRMED_HEADING,
+  HAVE_READY_HEADING,
+  NO_CHARGE_LINE,
+  PAID_IN_FULL_LINE,
   RECEIVED_HEADING,
   RECEIVED_HOLD_LINE,
   RECEIVED_NEXT_STEPS,
@@ -37,7 +41,12 @@ import {
 // The weekend multiplier is asserted against the constants `assessmentQuote`
 // actually multiplies by, not against a retyped "1.5" — two hand-written copies
 // of one number is the drift this whole module exists to prevent.
-import { AFTER_HOURS_DENOMINATOR, AFTER_HOURS_NUMERATOR } from '../src/lib/booking-pricing';
+import {
+  AFTER_HOURS_DENOMINATOR,
+  AFTER_HOURS_NUMERATOR,
+  assessmentQuote,
+  formatCents,
+} from '../src/lib/booking-pricing';
 import {
   declineMessage,
   escapeHtml,
@@ -115,6 +124,13 @@ const INSURANCE: BookingNotificationInput = {
   claimNumber: CLAIM,
   smsConsent: true,
   filesAttached: 3,
+  // BK-45. INSURANCE KEEPS `settled: null` DELIBERATELY, and it is load-bearing.
+  // Giving it a snapshot would swap the `assessmentSummary` line for the Amount
+  // block and redden the four $399.00/$418.95 customer-side arms below while
+  // their office-side twins stayed green — the fixture would have moved, not
+  // the code. This fixture is now the SNAPSHOT-ABSENT path's coverage; the
+  // settled cases get their own fixtures.
+  settled: null,
 };
 
 const PRIVATE: BookingNotificationInput = {
@@ -489,17 +505,70 @@ console.log('\nBK-36 — the fee terms, on BOTH messages and in BOTH arms');
       const body = customer[part];
       const needle = (line: string) => (part === 'html' ? escapeHtml(line) : line);
 
-      for (const line of [
-        FEE_TERMS_HEADING,
-        FEE_TERMS_INTRO,
-        ...FEE_TERMS_ITEMS,
-        ...FEE_TERMS_PAYMENT,
-        ...FEE_TERMS_REFUND,
-        FEE_TERMS_CREDIT,
-      ]) {
+      // BK-45 SPLIT THIS LIST IN TWO, AND THE SPLIT IS THE ASSERTION.
+      //
+      // Both messages used to carry all six sections, so one list served both
+      // arms. Decision 4 (client, 2026-08-20) makes that false: three of those
+      // sentences describe payment as still ahead of the reader, and the
+      // confirmed message is read seconds after the money arrived. One of them
+      // — `FEE_TERMS_PAYMENT[3]` — tells a paid customer we may release their
+      // slot.
+      //
+      // THE ARM DID NOT REGRESS AND IS NOT LOOSENED. It was written when both
+      // messages legitimately carried the whole block; the rule changed under
+      // it. So it is re-derived per constant instead: each arm now states what
+      // it carries AND what it must not, in one place, so a future edit cannot
+      // satisfy it by emptying either side.
+      const carries =
+        messageType === 'request'
+          ? [
+              FEE_TERMS_HEADING,
+              FEE_TERMS_INTRO,
+              ...FEE_TERMS_ITEMS,
+              ...FEE_TERMS_PAYMENT,
+              ...FEE_TERMS_REFUND,
+              FEE_TERMS_CREDIT,
+            ]
+          : [
+              FEE_TERMS_HEADING,
+              ...FEE_TERMS_ITEMS,
+              // [0] "those are our standard rates" and [1] the weekend 1.5x are
+              // what the RATES are, and they stay: FEE_TERMS_ITEMS prints the
+              // standard figures and a mould or weekend customer's own total
+              // matches none of them.
+              FEE_TERMS_PAYMENT[0],
+              FEE_TERMS_PAYMENT[1],
+              ...FEE_TERMS_REFUND,
+              FEE_TERMS_CREDIT,
+            ];
+      // NEITHER PAYMENT LINE BELONGS IN `carries` HERE, and the reason is the
+      // fixture: `INSURANCE` has `settled: null`, so this arm is the
+      // SNAPSHOT-ABSENT confirmed message, which may claim no payment either
+      // way. Pinning "Paid in full" on it is what the implementation review
+      // caught — an acceptance criterion satisfied on the one message the claim
+      // is false for. The paid and free claims are pinned on settled-bearing
+      // fixtures in the BK-45 block below.
+      const mustNotCarry =
+        messageType === 'request'
+          ? [PAID_IN_FULL_LINE, NO_CHARGE_LINE]
+          : [
+              FEE_TERMS_INTRO,
+              FEE_TERMS_PAYMENT[2],
+              FEE_TERMS_PAYMENT[3],
+              PAID_IN_FULL_LINE,
+              NO_CHARGE_LINE,
+            ];
+
+      for (const line of carries) {
         check(
           body.includes(needle(line)),
           `the ${messageType} ${part} part carries the fee terms: "${line.slice(0, 28)}…"`,
+        );
+      }
+      for (const line of mustNotCarry) {
+        check(
+          !body.includes(needle(line)),
+          `and the ${messageType} ${part} part does NOT carry: "${line.slice(0, 40)}…"`,
         );
       }
 
@@ -507,9 +576,16 @@ console.log('\nBK-36 — the fee terms, on BOTH messages and in BOTH arms');
       // first line of each section: they are distinct strings, so a section
       // moved past another moves its index with it.
       const at = (line: string) => body.indexOf(needle(line));
+      // The INTRO anchor is request-only since BK-45 — it is one of the three
+      // sentences the confirmed arm drops. Removing it from the chain rather
+      // than from the assertion: the remaining five still pin the order claim,
+      // which is what this block is about, and `mustNotCarry` above is what
+      // proves the INTRO is absent rather than merely unanchored.
       const chain: [string, number][] = [
         ['HEADING', at(FEE_TERMS_HEADING)],
-        ['INTRO', at(FEE_TERMS_INTRO)],
+        ...(messageType === 'request'
+          ? ([['INTRO', at(FEE_TERMS_INTRO)]] as [string, number][])
+          : []),
         ['ITEMS', at(FEE_TERMS_ITEMS[0])],
         ['PAYMENT', at(FEE_TERMS_PAYMENT[0])],
         ['REFUND', at(FEE_TERMS_REFUND[0])],
@@ -523,6 +599,256 @@ console.log('\nBK-36 — the fee terms, on BOTH messages and in BOTH arms');
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-45 — the message a PAYING customer keeps states what the ROW says');
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THIS CLOSES. `markPaid` used to send the calendar-boundary builder
+// — heading, lead, a four-row table, a calendar line, a phone line — so the
+// email a customer re-opens the night before the visit carried no terms, no
+// have-ready list and no record of what they bought. The full message existed
+// and was reachable only from the Resend button.
+//
+// AND THE SECOND DEFECT, WHICH THE MERGE WOULD OTHERWISE HAVE INTRODUCED.
+// `assessmentSummary` recomputes with `assessmentQuote({tier, service,
+// slotStart})` and passes NO travel fee, so it defaults to zero and reads
+// today's price table. On a request that is correct — it is a quote. On the
+// record of a completed purchase it is a receipt-shaped claim about money
+// already taken, wrong on every booking the office adjusted or added travel to.
+//
+// THE FIXTURE IS BUILT TO DISAGREE. Its snapshot is NOT what the pricing table
+// would produce for the same row: a non-zero travel fee, and a base the office
+// edited. An expectation that agreed with `assessmentQuote` could not tell the
+// snapshot from the recomputation, which is the whole property under test.
+{
+  const SETTLED_BASE = 57750;
+  const SETTLED_TRAVEL = 4600;
+  const SETTLED_GST = 3118;
+  const SETTLED_TOTAL = 65468;
+
+  // What the pricing table WOULD say for this row, computed here so the
+  // divergence is asserted rather than assumed. INSURANCE is standard/water on
+  // a Tuesday: $399.00 + GST. If a price move ever made these equal, the check
+  // below fails and says so rather than passing vacuously.
+  const recomputed = assessmentQuote({
+    tier: INSURANCE.assessmentTier!,
+    service: INSURANCE.service,
+    slotStart: INSURANCE.slotStart,
+  });
+  check(
+    recomputed.totalCents !== SETTLED_TOTAL && recomputed.baseCents !== SETTLED_BASE,
+    'the fixture snapshot disagrees with the pricing table — otherwise this whole block is vacuous',
+  );
+
+  const paid = planBookingNotifications({
+    ...INSURANCE,
+    messageType: 'confirmed',
+    settled: {
+      baseCents: SETTLED_BASE,
+      travelCents: SETTLED_TRAVEL,
+      gstCents: SETTLED_GST,
+      totalCents: SETTLED_TOTAL,
+      paidCents: SETTLED_TOTAL,
+    },
+  }).customer!;
+
+  for (const part of ['html', 'text'] as const) {
+    const body = paid[part];
+    const needle = (line: string) => (part === 'html' ? escapeHtml(line) : line);
+
+    check(body.includes('$577.50'), `the paid ${part} states the settled base $577.50`);
+    check(body.includes('$46.00'), `the paid ${part} states the travel fee the office typed`);
+    check(body.includes('$31.18'), `the paid ${part} states the settled GST`);
+    check(body.includes('$654.68'), `the paid ${part} states the settled total $654.68`);
+
+    // THE NEGATIVE HALF, and it is the one that catches the defect. The
+    // recomputed figure must be ABSENT, not merely accompanied.
+    check(
+      !body.includes(formatCents(recomputed.totalCents)),
+      `and the paid ${part} does NOT state the recomputed total ${formatCents(recomputed.totalCents)}`,
+    );
+    check(
+      !body.includes(formatCents(recomputed.baseCents)),
+      `nor the recomputed base ${formatCents(recomputed.baseCents)}`,
+    );
+
+    // The tier still leads — "what you bought" and "what it cost" are two facts
+    // — but WITHOUT the recomputed price `assessmentSummary` staples on.
+    check(
+      body.includes(needle('You chose: On-site assessment')) &&
+        !body.includes(needle('On-site assessment — $399.00')),
+      `the paid ${part} names the tier without a recomputed price beside it`,
+    );
+
+    // The have-ready list: the most practically useful content in the flow, and
+    // the thing whose absence from this message is what filed BK-45.
+    check(body.includes(needle(HAVE_READY_HEADING)), `the paid ${part} carries the have-ready heading`);
+    for (const item of HAVE_READY_ITEMS) {
+      check(body.includes(needle(item)), `the paid ${part} carries have-ready: "${item.slice(0, 24)}…"`);
+    }
+  }
+
+  // A zero travel fee renders NO row — `approvalMessage`'s rule, applied here
+  // for the same reason: a line item for nothing invites the question of what
+  // it might have been.
+  const noTravel = planBookingNotifications({
+    ...INSURANCE,
+    messageType: 'confirmed',
+    settled: {
+      baseCents: 39900,
+      travelCents: 0,
+      gstCents: 1995,
+      totalCents: 41895,
+      paidCents: 41895,
+    },
+  }).customer!;
+  check(!noTravel.html.includes('Travel') && !noTravel.text.includes('Travel'),
+    'a zero travel fee renders no Travel row at all');
+
+  // ── THE $0 APPROVAL (decision 5) ─────────────────────────────────────────
+  //
+  // `approveFree` writes a total of 0 and confirms through the same `markPaid`.
+  // That customer never receives an approval email — `review.ts` returns before
+  // that send — so this confirmation is the ONLY message that ever tells them
+  // what the visit costs. Three `$0.00` rows would read as a pricing error.
+  const free = planBookingNotifications({
+    ...INSURANCE,
+    messageType: 'confirmed',
+    settled: { baseCents: 0, travelCents: 0, gstCents: 0, totalCents: 0, paidCents: 0 },
+  }).customer!;
+  for (const part of ['html', 'text'] as const) {
+    const body = free[part];
+    check(
+      body.includes(part === 'html' ? escapeHtml(NO_CHARGE_LINE) : NO_CHARGE_LINE),
+      `a $0 booking's ${part} says there is no charge for the visit`,
+    );
+    // NOT `!includes('$0.00')`. That pins the "table of zeros" and nothing
+    // else, and the defect implementation review actually found here was a
+    // recomputed "$399.00 + GST ($418.95 total)" quoted underneath the
+    // no-charge sentence — a real price, in the only money-shaped message a
+    // goodwill customer ever receives. The assertion is that NO amount appears.
+    // ANCHORED ON THE CENTS, and that is what makes it precise rather than
+    // merely strict. `FEE_TERMS_ITEMS` legitimately prints "$399 + GST" on this
+    // message — decision 4a keeps the rate menu — and those figures carry no
+    // decimals. Every amount this module COMPUTES goes through `formatCents`,
+    // which always emits two. So "no two-decimal amount" is exactly "no
+    // computed figure", and it catches the recomputed quote without objecting
+    // to the menu it has to coexist with.
+    check(
+      !/\$[\d,]+\.\d{2}/.test(body),
+      `and its ${part} names no computed amount — not a total, not a recomputed quote`,
+    );
+    check(
+      !body.includes(part === 'html' ? escapeHtml(PAID_IN_FULL_LINE) : PAID_IN_FULL_LINE),
+      `and its ${part} does not claim a payment was made`,
+    );
+  }
+
+  // ── WHAT ARRIVED, WHEN IT IS NOT WHAT WAS CHARGED ────────────────────────
+  //
+  // UNREACHABLE THROUGH THE PAYMENT PATH, DELIBERATELY DRIVEN HERE. The webhook
+  // refuses to confirm on an amount mismatch, the Interac button reads
+  // `total_amount_cents` and offers the office no field to type another figure,
+  // and the free path passes 0 against 0. It is reachable through Resend on a
+  // row that took a LATE payment while released and was later restored — so no
+  // route arm can produce it and a builder fixture is the honest driver.
+  const short = planBookingNotifications({
+    ...INSURANCE,
+    messageType: 'confirmed',
+    settled: {
+      baseCents: SETTLED_BASE,
+      travelCents: SETTLED_TRAVEL,
+      gstCents: SETTLED_GST,
+      totalCents: SETTLED_TOTAL,
+      paidCents: 60000,
+    },
+  }).customer!;
+  check(
+    short.html.includes('$600.00') && short.text.includes('$600.00'),
+    'a payment that differs from the settled total is named on its own line',
+  );
+  check(
+    !paid.html.includes('We received') && !paid.text.includes('We received'),
+    'and a payment that matches it is NOT — restating the total is noise',
+  );
+  // AND THE TWO CLAIMS ARE MUTUALLY EXCLUSIVE. "Paid in full" above a line
+  // naming a smaller figure is a message contradicting itself, which is the
+  // stronger version of the defect assumption A3 was written to prevent.
+  check(
+    !short.html.includes(escapeHtml(PAID_IN_FULL_LINE)) &&
+      !short.text.includes(PAID_IN_FULL_LINE),
+    'and a short payment is never ALSO called paid in full — the two contradict',
+  );
+  check(
+    paid.text.includes(PAID_IN_FULL_LINE),
+    'while a payment that matches the total is called paid in full',
+  );
+
+  // ── THE SNAPSHOT-ABSENT FALLBACK ─────────────────────────────────────────
+  //
+  // A pre-BK-32 `confirmed` row reached through Resend has no amount columns.
+  // It falls back to the quote line rather than to silence: the tier is still
+  // the thing the customer chose.
+  const noSnapshot = planBookingNotifications({ ...INSURANCE, messageType: 'confirmed' }).customer!;
+  check(
+    noSnapshot.html.includes('$399.00') && noSnapshot.html.includes('$418.95'),
+    'a row with no snapshot falls back to the quote line rather than saying nothing',
+  );
+  check(
+    !noSnapshot.html.includes('Total'),
+    'and renders no Amount block, because there is no settled amount to state',
+  );
+  // AND IT CLAIMS NO PAYMENT, which is the opposite of what this pin asserted
+  // when it was written. The sentence it carried — "`confirmed` means the money
+  // arrived, snapshot or not" — is FALSE, and `008-review-lifecycle` says so
+  // directly about the rows this fallback exists for: they "were confirmed under
+  // a flow that took no money online". Thirteen of them were renamed into this
+  // status, and `[id].astro`'s resend gate reads status and an email address and
+  // nothing else — so the false version of this pin was one office click away
+  // from telling a customer who still owes $399 that nothing further is due.
+  //
+  // Found at implementation review. Recorded rather than quietly corrected
+  // because it is CLAUDE.md's fixture trap arriving inside BK-45's own fix: a
+  // wrong claim, encoded in an assertion, so a green suite proved it.
+  check(
+    !noSnapshot.html.includes(escapeHtml(PAID_IN_FULL_LINE)) &&
+      !noSnapshot.text.includes(PAID_IN_FULL_LINE) &&
+      !noSnapshot.html.includes(escapeHtml(NO_CHARGE_LINE)),
+    'and makes NO claim about payment at all — a confirmed row with no snapshot may not be called paid',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-45 — the claim, not the constant');
+// ---------------------------------------------------------------------------
+//
+// CLAUDE.md's copy trap: grep the CLAIM across its grammars, not the constant
+// that states it. These are `verify-cutover.ts`'s own `BOOKED_CLAIM_SHAPES`,
+// applied to the message rather than to a page — the surface that file's
+// CLAIM_SURFACES list does not cover.
+{
+  const BOOKED_CLAIM_SHAPES = [
+    /\byou'?re booked\b/i,
+    /\bconfirm booking\b/i,
+    /\bbooking confirmed\b/i,
+    /\byour booking is confirmed\b/i,
+    /\binstant(?:ly)?\s+confirm/i,
+    /\bconfirmed\s+(?:instantly|immediately|on the spot|right away)\b/i,
+  ];
+  const confirmed = planBookingNotifications({ ...INSURANCE, messageType: 'confirmed' }).customer!;
+  for (const part of ['html', 'text', 'subject'] as const) {
+    const hit = BOOKED_CLAIM_SHAPES.find((r) => r.test(confirmed[part]));
+    check(
+      hit === undefined,
+      `the confirmed ${part} makes no pre-P9 booked claim (${hit?.source ?? ''})`,
+    );
+  }
+  // NOT asserted: that the word "booked" is absent. `CONFIRMED_LEAD` reads "we
+  // have you booked in for the time below", which is ordinary English about a
+  // paid appointment and not the retired STATUS word. Pinning the token rather
+  // than the claim would fail on correct copy.
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,9 +1373,35 @@ console.log('\nBK-23 — a request must never claim a booking');
   );
 
   // --- the confirmed message is unchanged in the ways that matter
+  //
+  // REWRITTEN BY BK-45, NOT DELETED, AND NOT LOOSENED. This used to assert
+  // `/you'?re booked/` — written under BK-23's split to prove the confirmed arm
+  // still made plainly the claim the request arm must not. Decision 3 retires
+  // the word: P9 renamed the status `booked -> confirmed` because "booked" was
+  // the word for the thing that had not happened yet, and the email a paying
+  // customer keeps is the last place to reintroduce it.
+  //
+  // Deleting it would remove the only pin that the two arms are distinguishable
+  // at all, and loosening it to `/confirmed/i` would be satisfied by half the
+  // copy in this file. It asserts the constant.
+  //
+  // ANCHORED ON THE HEADING'S OWN POSITION, and the first version of this pin
+  // was not — it asked whether `CONFIRMED_HEADING` appeared ANYWHERE in the
+  // body, which `CONFIRMED_LEAD` satisfies on its own: the lead opens with the
+  // heading's exact words ("Your assessment is confirmed and we have you booked
+  // in…"). Red-first caught it. Deleting the `<h1>` entirely left the check
+  // green, which is the same vacuity class as a `size > 0` assertion.
   check(
-    /you'?re booked/i.test(confirmedPlan.customer!.html),
-    'the confirmed message still says it plainly',
+    /<h1[^>]*>Your assessment is confirmed, /.test(confirmedPlan.customer!.html),
+    'the confirmed html leads with the confirmed heading, in the h1 itself',
+  );
+  check(
+    confirmedPlan.customer!.text.startsWith(`${CONFIRMED_HEADING}, `),
+    'and the text part opens on it',
+  );
+  check(
+    confirmedPlan.customer!.subject.startsWith(CONFIRMED_HEADING),
+    'and the subject line leads with it',
   );
   check(
     confirmedPlan.customer!.html.includes(CALENDAR_ATTACHED_LINE),

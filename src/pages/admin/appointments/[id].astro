@@ -165,10 +165,13 @@ const deletedFiles = files.filter(f => f.deleted_at != null);
 const customerStamp = appointment ? customerStampState(appointment) : 'not-applicable';
 const internalStamp = appointment ? internalStampState(appointment) : 'not-applicable';
 
-// The confirmation button is offered only for a booked appointment with an
-// email. A cancelled or no-show row must not receive a fresh "You're booked"
-// for a slot that may since belong to somebody else — and the endpoint
-// re-checks this rather than trusting the button's absence.
+// The confirmation button is offered only for a confirmed appointment with an
+// email. A cancelled or no-show row must not be told again that its assessment
+// is confirmed for a slot that may since belong to somebody else — and the
+// endpoint re-checks this rather than trusting the button's absence.
+//
+// Since BK-45 it re-sends the SAME message the customer received when they
+// paid, rather than a fuller one under a different heading.
 const canResend =
   !!appointment &&
   appointment.status === 'confirmed' &&

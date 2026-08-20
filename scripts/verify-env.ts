@@ -160,6 +160,8 @@ console.log('\nBooking notifications without RESEND_API_KEY');
     claimNumber: null,
     smsConsent: false,
     filesAttached: 0,
+  // BK-45. This fixture exercises env handling, not money.
+  settled: null,
   });
 
   const r = await attempt(() => sendBookingNotifications(plan, SEND_NOW));

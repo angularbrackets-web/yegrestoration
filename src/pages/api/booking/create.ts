@@ -251,6 +251,10 @@ async function notify(
       claimNumber: payload.claim_number,
       smsConsent: payload.smsConsent,
       filesAttached,
+      // BK-45. A REQUEST HAS NO SETTLED AMOUNT. Nothing has been approved and
+      // nothing charged; the message quotes the pricing table, which is what a
+      // quote is. The columns are written at approval, by `review.ts`.
+      settled: null,
     });
 
     return await withDeadline(

@@ -17,11 +17,19 @@ import { getDb, SERVICE_LABELS, type Appointment } from '../../../../lib/db';
  * Resend the customer confirmation for one appointment. BK-05 deferred this to
  * the admin tickets; this is it.
  *
- * OFFERED AND ACCEPTED ONLY FOR `booked` ROWS WITH AN EMAIL ADDRESS. The button
- * is hidden otherwise, and this route re-checks rather than trusting that —
- * a cancelled or no-show appointment must not receive a fresh "You're booked"
- * for a time that may since belong to somebody else. Re-checking matters
- * because the row can change between the page render and the click.
+ * OFFERED AND ACCEPTED ONLY FOR `confirmed` ROWS WITH AN EMAIL ADDRESS. The
+ * button is hidden otherwise, and this route re-checks rather than trusting
+ * that — a cancelled or no-show appointment must not be told again that its
+ * assessment is confirmed for a time that may since belong to somebody else.
+ * Re-checking matters because the row can change between the page render and
+ * the click.
+ *
+ * **AND IT RE-SENDS THE MESSAGE THE CUSTOMER ACTUALLY GOT** (BK-45). Until then
+ * this button built `customerConfirmation` while the payment path built the
+ * calendar-boundary message, so clicking it mailed a materially fuller message
+ * under a different heading than the one that arrived when they paid. Both now
+ * call `planForAppointment`, so the two are the same message by construction
+ * rather than by being kept in step.
  *
  * The customer message and only the customer message: `sendCustomerConfirmation`
  * reads `plan.customer` and nothing else, so no admin action can mail the
@@ -76,11 +84,11 @@ export const POST: APIRoute = async ({ request }) => {
     if (!appointment) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
 
     // BK-23: `booked` became `confirmed`, and the guard stays NARROW on purpose.
-    // This button re-sends the "you're booked" confirmation with its calendar
-    // invite. A `pending_review` or `approved_awaiting_payment` row has not been
-    // paid for, so re-sending that message would tell a customer they have an
-    // appointment they have not bought — the single claim this whole flow
-    // exists to stop making. The other statuses get the payment link or the
+    // This button re-sends the confirmation — the terms, the have-ready list,
+    // what was charged and the calendar invite. A `pending_review` or
+    // `approved_awaiting_payment` row has not been paid for, so re-sending that
+    // message would tell a customer they have an appointment they have not
+    // bought — the single claim this whole flow exists to stop making. The other statuses get the payment link or the
     // decline notice through their own paths, not through this one.
     const hasEmail = typeof appointment.email === 'string' && appointment.email.trim() !== '';
     if (appointment.status !== 'confirmed' || !hasEmail) {

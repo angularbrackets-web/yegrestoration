@@ -711,6 +711,8 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
     claimNumber: null,
     smsConsent: false,
     filesAttached: 0,
+    // BK-45. The entry path builds a REQUEST-time plan; no snapshot exists.
+    settled: null,
   });
   const noEmail = planBookingNotifications({
     id: 4814,
@@ -734,6 +736,7 @@ console.log('\nsendCustomerConfirmation — outcomes (AC5)');
     claimNumber: null,
     smsConsent: false,
     filesAttached: 0,
+    settled: null,
   });
 
   const sent = async (): Promise<SendResult> => ({ ok: true });

@@ -143,6 +143,11 @@ export const POST: APIRoute = async ({ request, site }) => {
     claimNumber: row.claim_number,
     smsConsent: row.sms_consent_at !== null,
     filesAttached: 0,
+    // BK-45. The approval message carries its own itemisation through
+    // `ApprovalDetails` — the amounts the office just settled, which are not
+    // yet on the row when this input is built. The decline message names no
+    // money at all. Null on both, and never a second path to the same figures.
+    settled: null,
   };
 
   if (action === 'preview') return preview(row, form, now, detail);

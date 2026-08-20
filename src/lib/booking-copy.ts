@@ -135,6 +135,45 @@ export const CONFIRMED_LEAD =
 export const CONFIRMED_CALENDAR_LINE =
   'A calendar invite is attached — open it to add the appointment to your calendar.';
 
+/**
+ * The two lines BK-45 needed so that a PAID message can carry the assessment
+ * terms without carrying the instructions for paying (client, 2026-08-20).
+ *
+ * ── WHY A NEW LINE RATHER THAN A REWORDED TERM ────────────────────────────
+ *
+ * `FEE_TERMS_INTRO` and `FEE_TERMS_PAYMENT[2]`/`[3]` describe payment as a
+ * thing still ahead of the reader — *"we email you a secure payment link"*,
+ * *"nothing is charged when you send your request"*, *"if we do not have the
+ * payment in time, we may release the time"*. Every one of them is TRUE on the
+ * request message and on the three rendered surfaces, and every one is FALSE in
+ * an email sent seconds after the money arrived. They are not reworded and they
+ * are not forked per-arm: the confirmed message simply does not render them, and
+ * these two lines say the past-tense thing instead.
+ *
+ * The split is finer than "terms versus instructions" by one line, and the extra
+ * line is deliberate. `FEE_TERMS_PAYMENT[0]` and `[1]` say what the RATES are —
+ * they stay, because `FEE_TERMS_ITEMS` prints the standard $399/$699/$1,199 and
+ * a weekend or mould customer's own total does not match any of them. Dropping
+ * the reconciliation would leave two figures on one page with nothing joining
+ * them, which that constant's own header calls the single most likely way this
+ * copy ships subtly wrong.
+ */
+export const PAID_IN_FULL_LINE =
+  'Paid in full — nothing further is due before the visit.';
+
+/**
+ * The $0 approval (`approveFree` → `markPaid({ method: 'none' })`).
+ *
+ * A goodwill booking never receives an approval email — `review.ts` returns
+ * before that send, because there is nothing to pay and no link to send — so
+ * this confirmation is the ONLY message that ever tells that customer what the
+ * visit costs. Silence would invite the phone call, and an itemised block of
+ * `$0.00` rows would read as a pricing error; `approvalMessage`'s own rule for a
+ * zero travel fee is the precedent — a line item for nothing invites the
+ * question of what it might have been.
+ */
+export const NO_CHARGE_LINE = 'There is no charge for this visit.';
+
 // ---------------------------------------------------------------------------
 // The assessment fee terms (BK-27, rewritten for prepay by BK-36)
 //
@@ -611,8 +650,21 @@ export const DECLINED_LEAD =
  */
 export const PAID_HEADING = 'Thanks — payment received';
 
+/**
+ * BK-45 widened this sentence, and the reason is the ticket's whole thesis.
+ *
+ * It used to name three things — the time, the address, the reference — which
+ * was an exhaustive description of what `planFirstConfirmationEmail` carried.
+ * The confirmation now carries the have-ready list, the assessment terms and
+ * what was charged as well, and a page that lists three of six sends a customer
+ * looking elsewhere for the list this ticket just put in their inbox.
+ *
+ * It still promises nothing this page cannot know: the email's CONTENTS are a
+ * property of the builder, not of the payment, and the page continues to assert
+ * no booking state — see the header above on why that distinction is the point.
+ */
 export const PAID_LEAD =
-  'Your confirmation email and calendar invite are on their way. They carry the time, the address and your booking reference.';
+  'Your confirmation email and calendar invite are on their way. They carry the time, the address, your booking reference, what to have ready for the visit and what you paid.';
 
 export const PAID_HELP_LINE = `If it has not arrived within a few minutes, check your junk folder or call or text us on ${SUPPORT_PHONE}.`;
 

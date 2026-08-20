@@ -73,6 +73,7 @@ import {
   type Message,
   type BookingMessageType,
   type NotificationPlan,
+  type SettledAmounts,
 } from './booking-email';
 import {
   buildBookingIcs,
@@ -132,6 +133,12 @@ export function planForPayload(
     claimNumber: payload.claim_number,
     smsConsent: payload.smsConsent,
     filesAttached,
+    // NO SNAPSHOT EXISTS YET (BK-45). This mapper builds the message a booking
+    // sends at CREATION — the public request and the admin entry — and the
+    // amount columns are written at approval, by `review.ts`. Null is the
+    // honest answer, and it is what makes the request message keep quoting the
+    // pricing table, which is correct for a quote.
+    settled: null,
   });
 }
 
@@ -177,7 +184,41 @@ export function planForAppointment(
     // message, never stored back.
     smsConsent: row.sms_consent_at != null,
     filesAttached,
+    settled: settledAmountsOf(row),
   });
+}
+
+/**
+ * The approval snapshot as a value the message layer can render (BK-45).
+ *
+ * ── ALL FOUR NARROWED, AND THE SNAPSHOT DROPPED IF ANY IS MISSING ─────────
+ *
+ * `review.ts` writes `assessment_amount_cents`, `travel_fee_cents`, `gst_cents`
+ * and `total_amount_cents` in ONE SET clause, on both the paid and the free
+ * branch, so a non-null total means the other three are populated. Testing one
+ * and reading four is therefore safe — but the obvious spelling of it is
+ * `?? 0`, and a `?? 0` here would print `$0.00` for a real GST amount in the
+ * record of a completed purchase. So each is narrowed and the whole snapshot is
+ * dropped if any is missing: a partial answer about money is worse than none.
+ *
+ * ── ZERO IS A VALUE, NOT AN ABSENCE ────────────────────────────────────────
+ *
+ * `approveFree` writes a total of 0. That row IS approved and its customer IS
+ * owed a message saying the visit is free, so this returns the snapshot and lets
+ * the renderer decide what zero means. Collapsing zero to null here would make a
+ * goodwill booking indistinguishable from one nobody has approved yet.
+ */
+function settledAmountsOf(row: Appointment): SettledAmounts | null {
+  const { assessment_amount_cents: base, gst_cents: gst, total_amount_cents: total } = row;
+  if (base === null || gst === null || total === null) return null;
+  return {
+    baseCents: base,
+    // `NOT NULL DEFAULT 0` — the one amount column that cannot be missing.
+    travelCents: row.travel_fee_cents,
+    gstCents: gst,
+    totalCents: total,
+    paidCents: row.paid_amount_cents,
+  };
 }
 
 // ---------------------------------------------------------------------------
