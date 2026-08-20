@@ -148,6 +148,25 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   lies in the alarming direction. **Owner: nobody — the probe is documentation,
   not code.**
 
+- **Stripe's receipt gives the customer a different email address and a
+  different phone number than every other surface.** Observed on live booking
+  #36's receipt, 2026-08-20: it closes with *"contact us at
+  `yegrestoration@gmail.com` or call us at `+1 780-720-8856`"*, while
+  `SUPPORT_PHONE` is `(780) 479-3285` and the reply-to on every message this
+  system sends is `info@yegrestoration.ca`.
+
+  So a customer replying to their receipt reaches a Gmail account nothing in
+  this system watches, and calling that number does not reach the line the site
+  promises answers 24/7 — on the one document they keep. It is also the only
+  customer-facing surface with contact details **no code can change**: they come
+  from Stripe's own business/public details settings.
+
+  **Fix is a Dashboard step, not a ticket**: Stripe → Settings → Business
+  details / Public details, set to match `booking-config.ts`. Severity:
+  moderate — nothing breaks, but it is a support channel nobody is watching.
+  **Owner: nobody — configuration, recorded so it is not rediscovered by a
+  customer.**
+
 - **A refund issued in Stripe does not reach this system, and BK-46 just made
   that visible.** There is no refund code anywhere — `refunds.create` appears
   nowhere in `src/`, and the webhook handles no refund event — so a refund taken
