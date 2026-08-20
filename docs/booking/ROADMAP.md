@@ -1307,6 +1307,26 @@ together or the site tells a lie between deploys.
    | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
    | 3 | `migrate --target prod` (bare — 009 is all that is left) | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
 
+   **ROLLOUT PROGRESS — step 1 DONE, 2026-08-19.** `007`, `008` and `010` are
+   applied to production; `009` is correctly still pending. Verified immediately
+   after: the slot index is untouched (`status <> 'cancelled'`, so the live
+   code's arbiter still resolves), the column default is still `'booked'`, and
+   the new CHECK permits `'booked'` **and** the seven new statuses — the three
+   properties the deploy window depends on. 008's rename moved 8 past rows from
+   `booked` to `confirmed`. The live funnel was smoke-tested read-only
+   afterwards: `/api/booking/availability/` 200 with real slots, `/book/` 200.
+
+   Two test appointments (ids 31, 33 — the user's own, "123 Test" / "1 test",
+   both Sun 2026-08-23) were deleted first, on the user's instruction and by
+   explicit id, taking the table 13 → 11. **No future-dated rows remain**, which
+   is why 008's rename had no operational effect at all: the admin panel's
+   `Upcoming` list is built from `status === 'booked'` on the live code, so a
+   future-dated row would have dropped into `Past` with a blank status badge for
+   the length of the window.
+
+   **STEP 4'S URL CARRIES `www.`** — see BK-32. The apex 307-redirects, and
+   Stripe treats any redirect as a delivery failure.
+
    **`--only` IS NOT OPTIONAL IN STEP 1, and this was found during the rollout
    itself on 2026-08-19.** `migrate.ts` applies every pending migration in
    order and had no way to apply a subset — so a bare `--target prod` at step 1
