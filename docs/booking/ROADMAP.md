@@ -120,6 +120,81 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   action as the one sanctioned manual route to `confirmed`. Reviewed tier: it is
   an admin write path that sends customer mail and moves money's worth of state.
 
+- **A column written by a proven route and read by no surface passes every test
+  in the suite.** `markPaid()` writes `paid_at` and `payment_method` — the
+  shared path for both the Stripe webhook and the Interac button — and
+  **nothing renders either one.** After a successful payment the appointment
+  screen shows a badge reading "Confirmed", a panel headed "Amount settled *at
+  approval*", and a **stale "Payment due by …" line**, because `payment_due_at`
+  is never cleared and the due line is conditional on that column being
+  non-null rather than on the row still owing money. So the office cannot see
+  when a booking was paid, or whether the money arrived by card or by
+  e-Transfer — which is also the fact that decides whether a refund is issued
+  in Stripe or at the bank. The settled panel's own comment describes this
+  failure one step earlier in the flow — *"the office could approve an amount
+  and then have no screen anywhere that showed what it was"* — and the same
+  sentence is true today with "approve" replaced by "take payment".
+  Severity: moderate, and it is a dispute-handling failure rather than a
+  transactional one — the money is correct, the record of it is not.
+  **Owner: BK-46.**
+
+- **The appointment header's total omits the travel fee, structurally and at
+  every status.** `[id].astro:87` calls `assessmentQuote({tier, service,
+  slotStart})` and does not pass `travelFeeCents`, which defaults to zero
+  (`booking-pricing.ts:188`). The header's *"$606.38 total incl. GST"* is
+  therefore base + GST, while the "Amount settled at approval" panel below it
+  reads the BK-32 snapshot columns and includes travel. **The user confirmed
+  2026-08-20 that travel is the figure the office adjusts most often**, so the
+  two numbers disagree on any out-of-radius booking, both are labelled in
+  dollars, and neither says which one the customer was charged.
+
+  The same call is also the *chronic* half: it recomputes from today's prices
+  rather than reading the snapshot, and the page's own comment predicted
+  exactly that and was left standing — *"BK-32 adds one, snapshotted at
+  approval, and at that point this display should read the snapshot instead"*.
+  BK-32 shipped; the display did not follow. **Third instance of the
+  stale-comment-becomes-justification shape** after `update.ts:266` and
+  `booking-email.ts:629`. Severity: moderate-high — it is the screen read
+  during a dispute about the amount. **Owner: BK-46.**
+
+- **The Notifications panel reports a "Customer confirmation" that is really the
+  request acknowledgement.** `booking-commit.ts:185` stamps
+  `confirmation_sent_at` when the booking-*received* email goes out, and the
+  detail page renders that column under the label **CUSTOMER CONFIRMATION**. A
+  `pending_review` row therefore states that a confirmation was sent to a
+  customer who has been told only that their request arrived. Same class as
+  `c346fce` (the office email headed "New booking" under a subject reading "NEW
+  REQUEST") and the same audience: the person deciding what to say on the
+  phone. The Resend button is correctly hidden here and `resend.ts:84` refuses
+  any non-`confirmed` row, so this is a labelling failure and **not** a second
+  route to an unpaid confirmation. Severity: moderate. **Owner: BK-46.**
+
+- **Three surfaces still speak pre-P9, and none of them had a constant to
+  follow the rename.** The appointment header labels `created_at` as
+  **BOOKED** and the source as **Booked online** on unpaid `pending_review`
+  rows — the exact word `booking-status.ts` retired because *"'booked' was the
+  word for the thing that had not happened yet"*. The Notifications panel
+  renders **Reminder — Not sent** on every row for a Twilio-gated feature that
+  does not exist until deploy 4, which reads as a delivery that failed. And the
+  confirm step leaves the full "Review this request" form live directly beneath
+  "Confirm the amount", so two amber panels about the same money are on screen
+  with nothing saying which is the pending step. Severity: low, office-facing
+  only. **Owner: BK-47.** Note for whoever builds it: `verify-cutover.ts`'s
+  `BOOKED_CLAIM_SHAPES` covers five surfaces and should have covered this one —
+  it is a claim in a field label, which is precisely the shape CLAUDE.md's
+  copy-inventory trap says a constant-based inventory misses.
+
+- **The decision is the second-to-last panel on the screen the office opens to
+  make it.** On a `pending_review` row, "Review this request" renders after
+  Visit, Customer, Notifications, Files and Get photos; the Payment panel sits
+  equally deep on `approved_awaiting_payment`. **The user confirmed 2026-08-20
+  that the office arrives from the Appointments list and opens one booking to
+  act on it**, so every decision costs five panels of scroll. Not a
+  correctness defect and not a cause of BK-44 — but it is the other half of
+  the same complaint, and BK-44 fixing *which* control is the decision while
+  leaving it below the fold would be a half-fix. Severity: low.
+  **Owner: BK-47.**
+
 - **A pin whose MESSAGE describes the claim while its ASSERTION covers half of
   it.** `verify-booking-email.ts` asserted *"the office subject says REQUEST,
   not \"New booking\""* — and checked only the subject. The office email's BODY
@@ -1329,6 +1404,8 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
 | BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Needs a client answer first: may the office ever confirm by hand? | Reviewed | draft — see `tickets/BK-44.md` |
 | BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | draft — see `tickets/BK-45.md` |
+| BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | draft — see `tickets/BK-46.md` |
+| BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
 | BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
@@ -1423,6 +1500,21 @@ together or the site tells a lie between deploys.
    asks whether two routes overlap, or how a screen reads to the person using
    it. That is a gap in the method, not a gap in coverage, and it is why the
    first real booking found two things 23 green scripts did not.
+
+   **A deliberate read of the same screen on 2026-08-20 found five more, and
+   that is the finding that matters.** Asked to review
+   `/admin/appointments/[id]` end to end against screenshots of #35 rather than
+   to fix BK-44 alone, one pass produced: the header total omitting the travel
+   fee at every status; the header recomputing prices the settled panel
+   snapshots; `paid_at` and `payment_method` written by `markPaid` and rendered
+   by nothing; a "Payment due by …" line that survives payment; and the request
+   acknowledgement labelled "Customer confirmation". None is a route defect and
+   the suite could not have caught any of them by testing routes harder — four
+   are two surfaces disagreeing, and one is a column with a writer and no
+   reader. **Recorded as BK-46 (Reviewed) and BK-47 (Light); see Known traps.**
+   The method correction this argues for is a pin that asserts a RELATIONSHIP
+   between two surfaces — BK-46 owes "header total equals settled total for a
+   row with travel" — rather than a sixth per-route script.
 
    **ROLLOUT — STEPS 1, 2 AND 3 ARE DONE. DEPLOY 2 IS LIVE (2026-08-19).**
 
