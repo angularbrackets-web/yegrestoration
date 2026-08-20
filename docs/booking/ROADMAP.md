@@ -113,12 +113,20 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   office uses for ordinary edits.** Requires a deliberate wrong selection by an
   authenticated user, which is the only reason it is not a release blocker.
 
-  **Owner: BK-44 (new, not yet written).** Constrain the dropdown to
-  transitions that are legal from the row's current status, and guard the same
-  rule server-side in `update.ts` rather than only in the template — a
-  template-only fix is a client-side check on a write path. Leave the Interac
-  action as the one sanctioned manual route to `confirmed`. Reviewed tier: it is
-  an admin write path that sends customer mail and moves money's worth of state.
+  **Owner: BK-44 — FIXED IN CODE 2026-08-20, NOT YET DEPLOYED.** The rule is
+  `editorMaySetStatus` in `booking-status.ts`: the dropdown may not create
+  `approved_awaiting_payment`, and may move a row **into** the invite-holding
+  set only if that row has been paid. `update.ts` enforces it in the WHERE
+  clause of its own UPDATE; the dropdown renders from the same function.
+  **Until the branch is deployed the operational rule below still stands.**
+
+  Two things this cost that are worth carrying forward. **Guarding `confirmed`
+  alone would not have fixed it** — `couldHoldCalendarInvite` covers `completed`
+  and `no_show` too, and `update.ts` mails on the boundary rather than on the
+  status name, so `pending_review -> completed` sends the same "Your assessment
+  is confirmed" and ICS for an unpaid job. And **`paid_at` is never cleared**,
+  so a row re-approved after a previous payment carries a stale stamp; an
+  approved row's crossing is refused outright for that reason.
 
 - **A column written by a proven route and read by no surface passes every test
   in the suite.** `markPaid()` writes `paid_at` and `payment_method` — the
@@ -194,6 +202,28 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   the same complaint, and BK-44 fixing *which* control is the decision while
   leaving it below the fold would be a half-fix. Severity: low.
   **Owner: BK-47.**
+
+- **`approve` and `rollBack` never clear `paid_at` or `payment_method`, so a
+  re-approved booking carries the previous cycle's payment.** Nothing in the
+  system clears either column, and `booking-payment.ts:608-618` even stamps
+  `paid_at` on a `cancelled` / `declined` / `payment_expired` row when money
+  arrives late, without moving the status. A booking that is paid, walked back
+  to `pending_review`, and re-approved at a corrected amount therefore sits at
+  `approved_awaiting_payment` with a live unpaid Checkout Session AND a
+  non-null `paid_at` describing the old money. BK-44 guards the editor against
+  reading that as "paid", but the staleness itself is untouched. **It becomes
+  visible the moment BK-46 renders those columns** — the screen would show a
+  payment date and method belonging to a cycle that was refunded or superseded.
+  Severity: moderate, and it is a record-truth failure rather than a money one.
+  **Owner: BK-46.**
+
+- **BK-47 inherits a copy dependency it will break.** The Update panel says
+  approving is *"in “Review this request” above"*, and that is true only because
+  the Review and Payment panels render before the Update form. **BK-47's whole
+  job is moving panels.** The sentence is derived per status, so it will not go
+  stale on state — only on order. Severity: low, but it is a claim with a shelf
+  life and the shelf is BK-47's. **Owner: BK-47**, which should re-read
+  `decisionPanelNote` in `[id].astro` before moving anything.
 
 - **A pin whose MESSAGE describes the claim while its ASSERTION covers half of
   it.** `verify-booking-email.ts` asserted *"the office subject says REQUEST,
@@ -1402,7 +1432,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
-| BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Needs a client answer first: may the office ever confirm by hand? | Reviewed | draft — see `tickets/BK-44.md` |
+| BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Client answer 2026-08-20: no hand-confirm. | Reviewed | ✅ **committed 2026-08-20** on `deploy-2-prepay` — plan review (2 blockers) and implementation review (2 blockers) both passed after fixes; 12 red-first rows; all 23 verify scripts green. **Not deployed.** |
 | BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | draft — see `tickets/BK-45.md` |
 | BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | draft — see `tickets/BK-46.md` |
 | BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
@@ -1555,9 +1585,15 @@ together or the site tells a lie between deploys.
       it, and BK-23 Task 4 expires it at `slot − 4h` with an apology email if
       nobody does. That is a live operational risk from the moment the flip
       landed, and it is a people problem rather than a code one.
-   4. **Until BK-44 ships the rule for the admin panel is: use "Review the
-      amount →" and "Mark as paid — Interac" only, never the STATUS dropdown.**
-      That hole cost nothing in test mode and costs a free crew dispatch now.
+   4. **BK-44 is FIXED IN CODE but NOT DEPLOYED (2026-08-20), so the rule for
+      the admin panel is unchanged until it ships: use "Review the amount →"
+      and "Mark as paid — Interac" only, never the STATUS dropdown.** That hole
+      cost nothing in test mode and costs a free crew dispatch now. The fix is
+      committed on `deploy-2-prepay`; deploying it is a rollout step and has
+      not been taken.
+
+      The same pass produced **BK-46** and **BK-47** from a deliberate read of
+      the appointment screen — see Known traps. Neither is deployed either.
    5. **`DATABASE_URL` is shared between Preview and Production**, which is why
       no preview deploy can be used to test this flow.
 

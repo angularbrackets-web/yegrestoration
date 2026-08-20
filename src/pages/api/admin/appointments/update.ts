@@ -17,7 +17,13 @@ import {
 import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
 import type { IcsKind } from '../../../../lib/booking-ics';
 import { sendCalendarInvite, withDeadline } from '../../../../lib/booking-notify';
-import { couldHoldCalendarInvite } from '../../../../lib/booking-status';
+import {
+  AWAITING_PAYMENT_STATUSES,
+  AWAITING_REVIEW_STATUSES,
+  couldHoldCalendarInvite,
+  DECISION_ENTRY_STATUSES,
+  INVITE_HOLDING_STATUSES,
+} from '../../../../lib/booking-status';
 import { getDb, SERVICE_LABELS, type AppointmentStatus } from '../../../../lib/db';
 
 /** Postgres unique_violation. The partial index on `slot_start` is what raises it. */
@@ -44,9 +50,26 @@ const UNIQUE_VIOLATION = '23505';
  * status flip is discarded with it; the message says nothing was saved rather
  * than implying a partial write.
  *
- * No transition is otherwise restricted. The office corrects its own mistakes
- * — completed back to booked, no-show back to booked — and restricting that
- * would mean SQL for every slip.
+ * TRANSITIONS ARE RESTRICTED, AND THE RULE IS `editorMaySetStatus` (BK-44).
+ * This paragraph used to read "No transition is otherwise restricted", which
+ * documented a hole as a feature: `review.ts` was split out of this file so the
+ * editor's dropdown could not perform a review decision, and nothing here
+ * enforced the split. Approving with no amount, no deadline and no email was
+ * one selection away, and so was mailing a confirmation and a calendar invite
+ * for a job nobody had paid for.
+ *
+ * The rule lives in `booking-status.ts` because the dropdown and this guard
+ * must not be able to disagree. It is transcribed into the WHERE clause below
+ * rather than evaluated here: a function cannot be called from inside a
+ * statement, and reading the row first to decide is the check-then-act shape
+ * this file refuses everywhere else. `verify-booking-admin-db.ts` pins the
+ * transcription against the function across the whole state space, driven
+ * through this endpoint.
+ *
+ * What the office KEEPS is the correction it actually makes — completed back to
+ * confirmed, no-show back to confirmed, and cancel from anywhere. Those move
+ * within the invite-holding set or out of it, cross no boundary inward, and are
+ * exactly the slips restricting transitions must not cost SQL to undo.
  */
 export const POST: APIRoute = async ({ request }) => {
   let form: FormData;
@@ -92,6 +115,23 @@ export const POST: APIRoute = async ({ request }) => {
   const nextStatus = status ?? null;
   const now = new Date().toISOString();
 
+  // The transition rule's status sets, bound as parameters (BK-44).
+  //
+  // Spread into mutable arrays for the driver, and DERIVED rather than typed
+  // out: `INVITE_HOLDING_STATUSES` comes from `couldHoldCalendarInvite`, and
+  // the two singletons come from `isAwaitingPayment` / `isAwaitingReview`. A
+  // status literal retyped into a query string is the drift this rule exists to
+  // prevent, so there is none below.
+  //
+  // A BOUND PARAMETER IS FINE HERE, unlike `SLOT_HOLD_PREDICATE`, and the
+  // difference is worth stating because the two sit in the same file's mental
+  // model: that one is a string only because an `ON CONFLICT` arbiter cannot be
+  // parameterised without 42P10. This is an ordinary WHERE with no arbiter.
+  const decisionEntry = [...DECISION_ENTRY_STATUSES];
+  const inviteHolding = [...INVITE_HOLDING_STATUSES];
+  const awaitingPayment = [...AWAITING_PAYMENT_STATUSES];
+  const awaitingReview = [...AWAITING_REVIEW_STATUSES];
+
   try {
     // ONE STATEMENT, WITH A SELF-JOIN AGAINST A PRE-UPDATE SNAPSHOT, and the
     // shape is load-bearing rather than clever. BK-14 has to know whether this
@@ -131,16 +171,72 @@ export const POST: APIRoute = async ({ request }) => {
         WHERE id = ${id}
       ) old
       WHERE appointments.id = old.id
+        -- THE TRANSITION GUARD (BK-44), transcribed from editorMaySetStatus.
+        -- Reading appointments.* here reads the PRE-UPDATE row, which is the
+        -- same snapshot old was built from, so the guard and the mail
+        -- boundary below judge one state.
+        AND (
+              -- No status edit at all: a stage, notes or tier save.
+              ${nextStatus}::text IS NULL
+              -- Re-submitting the current status is not a transition.
+           OR ${nextStatus}::text = appointments.status
+           OR (
+                    -- Never conjure a status a decision route owns entry to.
+                    ${nextStatus}::text <> ALL(${decisionEntry}::text[])
+                -- Crossing INTO the invite-holding set needs a payment. Asked
+                -- only of rows arriving from outside it, so movement within is
+                -- free and pre-prepay rows (008 renamed them, 010 never
+                -- backfilled paid_at) stay correctable.
+                AND (
+                      ${nextStatus}::text <> ALL(${inviteHolding}::text[])
+                   OR appointments.status = ANY(${inviteHolding}::text[])
+                   OR appointments.paid_at IS NOT NULL
+                )
+                -- An approved row is markPaid's to confirm. paid_at survives
+                -- from a previous cycle, so it cannot tell this approval's
+                -- money from the last one's.
+                AND NOT (
+                      appointments.status = ANY(${awaitingPayment}::text[])
+                  AND ${nextStatus}::text = ANY(${inviteHolding}::text[])
+                )
+                -- rollBack's rule: never walk an approval backwards while its
+                -- payment link is still live.
+                AND NOT (
+                      appointments.status = ANY(${awaitingPayment}::text[])
+                  AND ${nextStatus}::text = ANY(${awaitingReview}::text[])
+                  AND appointments.stripe_session_id IS NOT NULL
+                )
+              )
+        )
       RETURNING appointments.status AS next_status,
                 old.prev_status, old.id, old.name, old.phone, old.email,
                 old.address, old.city, old.postal_code, old.service,
                 old.slot_start
     `) as UpdatedRow[];
 
-    // No row: the id is well-formed but nothing has it. Same answer the detail
-    // page gives — send them to the list rather than to a 404 they cannot act
-    // on.
-    if (rows.length === 0) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
+    // ZERO ROWS NOW MEANS TWO DIFFERENT THINGS (BK-44). Before the transition
+    // guard it could only be "no such id"; it is now also "that transition is
+    // not this control's to make", and an office member told a booking does not
+    // exist when it does would go looking for a database problem.
+    //
+    // THE READ BELOW IS NOT CHECK-THEN-ACT. Nothing was written — the statement
+    // matched no row and rolled back whole — so there is no window between a
+    // decision and an action, only a message to choose. `markPaid` distinguishes
+    // its own no-op arms the same way and for the same reason.
+    if (rows.length === 0) {
+      let exists: { id: number }[];
+      try {
+        exists = (await sql`SELECT id FROM appointments WHERE id = ${id}`) as { id: number }[];
+      } catch (err) {
+        // The write already failed and we cannot say why. Wrong in the safe
+        // direction: report an error rather than claim a refusal we did not
+        // establish.
+        console.error(`Admin update ${id}: could not tell missing from refused:`, err);
+        return redirect(`${detail}?saved=error`);
+      }
+      if (exists.length === 0) return redirect(`${ADMIN_APPOINTMENTS_PATH}?saved=missing`);
+      return redirect(`${detail}?saved=blocked`);
+    }
 
     // Best-effort, and awaited: post-response work is not guaranteed to run on
     // this platform. Nothing below changes the redirect — the office is
@@ -260,13 +356,27 @@ async function sendBoundaryMail(row: UpdatedRow, now: Date): Promise<void> {
       // THREE messages across this boundary, not two.
       //
       // Before BK-23 the only inward crossing was `cancelled -> booked`, so
-      // "restored" described every one of them. P9 makes
-      // `pending_review -> confirmed` and `approved_awaiting_payment ->
-      // confirmed` reachable — and with `createCheckoutUrl` returning null
-      // until BK-32, the status dropdown is currently the ONLY route to
-      // `confirmed`. Sending the restore copy there tells a customer their
-      // assessment "was cancelled and has now been reinstated" on the first
-      // booking they ever paid for.
+      // "restored" described every one of them. P9 made more crossings
+      // reachable, and this block used to justify itself by saying the status
+      // dropdown was "currently the ONLY route to `confirmed`" because
+      // `createCheckoutUrl` returned null until BK-32. That was true when
+      // written and false the day BK-32 shipped — and it is what left the hole
+      // BK-44 closed looking like a considered decision.
+      //
+      // WHAT IS TRUE NOW, stated carefully, because the sentence this replaces
+      // was true when written and false when read. `markPaid` is the only route
+      // that confirms an UNPAID booking — card, Interac and free-approval
+      // alike — and the dropdown cannot create `confirmed` for a row that has
+      // never been paid. It CAN still produce it for one that has: a paid row
+      // restored from `cancelled`, or from `declined` / `payment_expired` where
+      // the money arrived late and stamped `paid_at` without moving the status.
+      // Those are the inward crossings that still reach this code. Movement
+      // between `confirmed`, `completed` and `no_show` crosses nothing.
+      //
+      // So the restore copy is still the wrong thing to send to most of them:
+      // it tells a customer their assessment "was cancelled and has now been
+      // reinstated", which is a claim only a row that was actually cancelled
+      // has earned.
       //
       // The question is asked of where the row CAME FROM, because that is what
       // the word "reinstated" is a claim about. Only `cancelled` earns it.

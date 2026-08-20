@@ -21,6 +21,7 @@ import {
 } from '../../../lib/booking-admin';
 import {
   APPOINTMENT_STATUSES,
+  editorStatusTargets,
   MAX_FILE_DELETE_NOTE,
   MAX_STORED_ADMIN_NOTES,
   PIPELINE_STAGES,
@@ -37,6 +38,10 @@ import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
   appointmentUploadUrl,
 } from '../../../lib/booking-config';
+import {
+  DECISION_ENTRY_STATUSES,
+  INVITE_HOLDING_STATUSES,
+} from '../../../lib/booking-status';
 import { formatSlot } from '../../../lib/booking-time';
 import { issueAppointmentUploadToken } from '../../../lib/draft-token';
 import AppointmentUpload from '../../../components/AppointmentUpload.svelte';
@@ -200,6 +205,24 @@ const SAVED_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
     text: 'That slot has since been rebooked, so this appointment stays cancelled. Nothing was saved.',
   },
   invalid: { tone: 'warn', text: 'That edit was not valid. Nothing was saved.' },
+  // BK-44. "Nothing at all was saved" is load-bearing rather than emphatic: the
+  // whole edit is ONE statement, so a note, a stage or an assessment typed
+  // alongside a refused status is discarded with it. A message that only
+  // mentioned the status would leave somebody believing their note went in.
+  blocked: {
+    tone: 'warn',
+    // THREE refusal reasons, not two. The live-session walk-back was folded in
+    // after this message was first drafted, and a flash that named only
+    // approving and confirming told somebody who had tried to REOPEN a booking
+    // about two controls they had not touched. Deliberately says no "above":
+    // which panels are on screen depends on the status, and this string cannot
+    // know which one the office was looking at.
+    text:
+      'That status is not set here. Approving is “Review this request”; confirming is the ' +
+      'customer paying or “Mark as paid — Interac”; and a booking cannot be reopened while ' +
+      'its payment link is still live. Nothing at all was saved, including any note or stage ' +
+      'changed at the same time.',
+  },
   error: { tone: 'warn', text: 'The database rejected that change. Nothing was saved.' },
 };
 
@@ -356,6 +379,47 @@ const suggestedQuote =
 const isPendingReview = appointment?.status === 'pending_review';
 /** BK-32 — the only status the Interac action applies to. */
 const isAwaitingPayment = appointment?.status === 'approved_awaiting_payment';
+
+// ── BK-44: what the Update panel may offer, and what it may claim ──────────
+//
+// `editorStatusTargets` is the rule `update.ts`'s WHERE clause is transcribed
+// from. Rendering it here is what stops the dropdown offering a transition the
+// server will refuse; it is not what stops the transition.
+const statusTargets = appointment ? editorStatusTargets(appointment) : [];
+const withheldStatuses = appointment
+  ? APPOINTMENT_STATUSES.filter(s => !statusTargets.includes(s))
+  : [];
+
+// WITHHELD FOR THREE DIFFERENT REASONS, so it takes three sentences.
+//
+// The first version of this derived the LIST per row and then explained it with
+// one fixed sentence — "Those come from approving and from payment" — which is
+// false in every one of the eight states. On an unpaid request the withheld set
+// includes `completed` and `no_show`, and neither of those is produced by
+// approving or by taking money; they are withheld because the booking has never
+// crossed the invite boundary. A claim rendered over a derived list has to be
+// derived too, or it is just a constant wearing a variable's clothes.
+const reopenWithheld = withheldStatuses.includes('pending_review');
+const decisionWithheld = withheldStatuses.filter(s => DECISION_ENTRY_STATUSES.includes(s));
+const untilPaidWithheld = withheldStatuses.filter(
+  s => INVITE_HOLDING_STATUSES.includes(s) && !DECISION_ENTRY_STATUSES.includes(s),
+);
+
+/**
+ * WHERE THE DECISION IS, named ONLY where that control is on the page.
+ *
+ * Half of BK-44 was that the screen never said which panel was the decision.
+ * The obvious fix — a fixed line reading "approving and confirming happen in
+ * the panels above" — would have been false in five of the eight states, since
+ * the review panel renders only under `isPendingReview` and the Interac panel
+ * only under `isAwaitingPayment`. A claim about a control that is not on screen
+ * is the trap this repo keeps paying for, so this is derived, not written once.
+ */
+const decisionPanelNote = isPendingReview
+  ? 'Approving or declining this request is "Review this request", above.'
+  : isAwaitingPayment
+    ? 'Confirming it is the customer paying, or "Mark as paid — Interac", above.'
+    : null;
 
 // ── The confirm step (BK-23 Task 7 guard rail) ─────────────────────────────
 //
@@ -933,8 +997,16 @@ function statusClasses(status: Appointment['status']) {
         customer a message they will act on — so if the status dropdown could
         also produce `approved_awaiting_payment`, the office would be one
         careless selection away from an approved booking with no amount, no
-        deadline and no email. It cannot: `review.ts` is the only path that
-        performs the transition, and it guards on `status = 'pending_review'`.
+        deadline and no email.
+
+        IT COULD, UNTIL BK-44, and this comment said otherwise. The stated
+        reason — "`review.ts` is the only path that performs the transition, and
+        it guards on `status = 'pending_review'`" — described `review.ts`
+        correctly and said nothing at all about `update.ts`, which rendered all
+        eight statuses and guarded none. A separation is only a safety property
+        if BOTH sides enforce it. `update.ts` now does, from the same rule this
+        dropdown renders (`editorStatusTargets`), and the guard is in its WHERE
+        clause rather than in a template.
       -->
       {/*
         WHAT WAS SETTLED, for a row past review.
@@ -1233,7 +1305,7 @@ function statusClasses(status: Appointment['status']) {
               */}
               <p class="text-amber-300/90 text-sm mb-4">
                 This booking has no assessment chosen, so there is no amount to charge.
-                Set one in Update below, then approve.
+                Set one under Update the record below, then approve.
               </p>
               <button
                 type="submit"
@@ -1250,7 +1322,16 @@ function statusClasses(status: Appointment['status']) {
 
       <form method="POST" action={ADMIN_APPOINTMENT_UPDATE_ENDPOINT} class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
         <input type="hidden" name="id" value={String(appointment.id)} />
-        <h2 class="text-white font-semibold mb-1">Update</h2>
+        <h2 class="text-white font-semibold mb-1">Update the record</h2>
+        {/*
+          BK-44. The heading and this line exist to say what this panel is NOT.
+          The office member who found the defect found it by asking which of the
+          two panels accepts a booking — the right question, and one the page
+          did not answer.
+        */}
+        <p class="text-zinc-600 text-xs mb-1">
+          Record-keeping, not a decision.{decisionPanelNote ? ` ${decisionPanelNote}` : ''}
+        </p>
         <p class="text-zinc-600 text-xs mb-5">
           Cancelling frees the slot for online booking but keeps the record. Un-cancelling
           fails if somebody has taken the slot since.
@@ -1264,12 +1345,51 @@ function statusClasses(status: Appointment['status']) {
               name="status"
               class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
             >
-              {APPOINTMENT_STATUSES.map(value => (
+              {/*
+                BK-44. The statuses this row may legally move to, NOT all eight.
+                `editorStatusTargets` is the same function `update.ts`'s WHERE
+                clause is transcribed from, re-exported rather than redeclared —
+                so an option that appears here is one the server will accept,
+                and one that does not appear is one it would refuse.
+
+                THIS IS PRESENTATION, NOT THE GUARD. A template-only fix is a
+                client-side check on a write path; the route refuses regardless,
+                and the pins prove the refusal at the route rather than here.
+
+                The current status is always among the options, by contract —
+                a select that omits its own value submits the FIRST option
+                instead, which would silently un-approve a booking every time
+                somebody saved a note on it.
+              */}
+              {statusTargets.map(value => (
                 <option value={value} selected={value === appointment.status}>
                   {STATUS_LABELS[value]}
                 </option>
               ))}
             </select>
+            {/*
+              A missing option must read as "routed elsewhere", not as broken.
+              Both sentences are derived from what is actually withheld for THIS
+              row, so neither can claim something the state does not support.
+            */}
+            {decisionWithheld.length > 0 && (
+              <p class="text-zinc-600 text-xs mt-1.5">
+                Not listed: {decisionWithheld.map(s => STATUS_LABELS[s]).join(', ')}. That comes
+                from approving{isPendingReview ? ', in “Review this request” above' : ''}.
+              </p>
+            )}
+            {untilPaidWithheld.length > 0 && (
+              <p class="text-zinc-600 text-xs mt-1.5">
+                Not listed until this booking is paid:{' '}
+                {untilPaidWithheld.map(s => STATUS_LABELS[s]).join(', ')}.
+              </p>
+            )}
+            {reopenWithheld && (
+              <p class="text-zinc-600 text-xs mt-1.5">
+                This cannot be reopened while its payment link is live — the customer could still
+                pay it. Decline or cancel instead.
+              </p>
+            )}
           </div>
           <div>
             <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="pipeline_stage">

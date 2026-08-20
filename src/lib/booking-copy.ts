@@ -115,12 +115,17 @@ export const RESTORED_CALENDAR_LINE =
  * is informed their assessment "was cancelled and has now been reinstated" on
  * the first booking they ever paid for. Found in BK-23's implementation review.
  *
- * Deliberately says nothing about payment. This message is sent by the office
- * moving a row to `confirmed`, which under P9 is what a completed payment
- * means, but the transition itself is not proof one arrived — the status
- * dropdown can be driven by hand. Stating the fact (the appointment is
- * confirmed, here is the invite) is true on every path that reaches it;
- * "thank you for your payment" would not be.
+ * Deliberately says nothing about payment, and the REASON changed under BK-44
+ * even though the conclusion did not. It used to be that "the status dropdown
+ * can be driven by hand", so the transition was no proof a payment arrived.
+ * The dropdown can no longer create `confirmed` for a row that has never been
+ * paid — note the qualifier, because the absolute is false: a PAID row restored
+ * from `cancelled`, or from `declined` / `payment_expired` after a late
+ * payment, still reaches `confirmed` through the dropdown. What reaches this
+ * message with no payment behind it at all is `approveFree`, which confirms a
+ * genuinely free assessment through `markPaid` with `payment_method = 'none'`.
+ * Stating the fact (the appointment is confirmed, here is the invite) is true
+ * on every path that reaches it; "thank you for your payment" would not be.
  */
 export const CONFIRMED_HEADING = 'Your assessment is confirmed';
 

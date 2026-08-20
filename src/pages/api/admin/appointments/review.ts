@@ -47,6 +47,14 @@ import { getDb, SERVICE_LABELS, type Appointment } from '../../../../lib/db';
  * the status to `approved_awaiting_payment` by hand would approve a booking
  * with no amount, no deadline and no email.
  *
+ * FOR FIVE MONTHS THAT WAS ONLY A DESCRIPTION OF THIS FILE. Splitting the route
+ * out did not stop the editor doing the thing — `update.ts` rendered all eight
+ * statuses and guarded none — and this paragraph read as though it had.
+ * BK-44 made the other half true: `editorMaySetStatus` in `booking-status.ts`
+ * is the rule, `update.ts` enforces it in the WHERE clause of its own UPDATE,
+ * and the dropdown renders from the same function. A separation is a safety
+ * property only when both sides hold it.
+ *
  * ── EVERY TRANSITION IS A GUARDED UPDATE ───────────────────────────────────
  *
  * `WHERE id = $1 AND status = 'pending_review'` — and zero rows returned means

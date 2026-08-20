@@ -36,7 +36,16 @@
 // reached the send and the mute stopped it" from "the route was never wired to
 // send at all" — which is what the boundary section below asserts, in both
 // directions. It still says nothing about what the message contained.
-import { SLOT_HOLD_PREDICATE } from '../src/lib/booking-status';
+import {
+  APPOINTMENT_STATUSES,
+  couldHoldCalendarInvite,
+  DECISION_ENTRY_STATUSES,
+  editorMaySetStatus,
+  editorStatusTargets,
+  INVITE_HOLDING_STATUSES,
+  SLOT_HOLD_PREDICATE,
+  type AppointmentStatus,
+} from '../src/lib/booking-status';
 import { neon } from '@neondatabase/serverless';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -284,6 +293,37 @@ async function read(id: number): Promise<Row | null> {
   return rows[0] ?? null;
 }
 
+/**
+ * Stamp a fixture as having been paid (BK-44).
+ *
+ * SEVERAL ARMS BELOW USED TO REACH `confirmed` BY POSTING IT TO THE STATUS
+ * DROPDOWN, and one of them said so in a comment: *"it has to be moved to
+ * `confirmed` first for there to be anything to cancel. That step is not
+ * scaffolding; it is the new rule made visible."* It was not the rule. It was
+ * the defect — `review.ts` was split out of `update.ts` precisely so the
+ * dropdown could not produce that transition, and nothing enforced the split.
+ * The suite had the hole baked into its own fixtures, which is part of why 23
+ * green scripts could not see it.
+ *
+ * The arms themselves are testing the right things — the invite boundary, the
+ * CANCEL on every outward crossing, the 23505 un-cancel collision — and none of
+ * that has changed. So the FIXTURE is made honest rather than the assertion
+ * loosened: a row permitted to sit at `confirmed` is a row that paid, which is
+ * exactly what the guard now requires and what `markPaid` has always written.
+ */
+async function markFixturePaid(id: number): Promise<void> {
+  // `paid_at` ONLY. The guard reads that column and no other, and stamping
+  // `payment_status` / `payment_method` alongside it — which the first version
+  // of this helper did — broke two unrelated arms that assert those columns are
+  // untouched until approval. A fixture helper should move the minimum the
+  // thing under test actually reads.
+  await sql`
+    UPDATE appointments
+    SET paid_at = COALESCE(paid_at, ${new Date().toISOString()})
+    WHERE id = ${id}
+  `;
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures. The appointment slots sit years past the public horizon so this run
 // cannot collide with anything a person or another script is doing in the
@@ -389,6 +429,8 @@ try {
   // -------------------------------------------------------------------------
   const locationA = await call(createRoute, entryFields());
   const idA = idFromLocation(locationA);
+  // This fixture is driven to `confirmed` below, so it must have paid its way in.
+  if (idA !== null) await markFixturePaid(idA);
   check(idA !== null, `the redirect names the new appointment, got "${locationA}"`);
   if (idA === null) throw new Error('entry insert did not produce an id');
   createdIds.push(idA);
@@ -490,6 +532,8 @@ try {
   // partial unique index no longer covers the row.
   const locationB = await call(createRoute, entryFields({ name: 'BK-08 rebook' }));
   const idB = idFromLocation(locationB);
+  // This fixture is driven to `confirmed` below, so it must have paid its way in.
+  if (idB !== null) await markFixturePaid(idB);
   check(idB !== null, `the freed slot accepts a new booking, got "${locationB}"`);
   if (idB === null) throw new Error('re-insert into the freed slot failed');
   createdIds.push(idB);
@@ -602,6 +646,8 @@ try {
     }),
   );
   const idD = idFromLocation(withEmail);
+  // Driven to `confirmed` below to open the resend gate, so it must have paid.
+  if (idD !== null) await markFixturePaid(idD);
   check(idD !== null, `the emailable entry saved, got "${withEmail}"`);
   if (idD !== null) {
     createdIds.push(idD);
@@ -614,7 +660,13 @@ try {
 
     // Move it to confirmed and the gate opens. The send itself is muted here,
     // so this asserts the GATE, not that mail went out.
-    await call(updateRoute, { id: String(idD), status: 'confirmed' });
+    //
+    // THE UPDATE IS ASSERTED, not just performed. A refused update would leave
+    // this row `pending_review`, and the resend route refuses that too — so
+    // without the line below a tightened transition guard would make the arm
+    // pass for the wrong reason instead of going red.
+    const opened = await call(updateRoute, { id: String(idD), status: 'confirmed' });
+    check(opened.endsWith('?saved=1'), `the fixture reached confirmed, got "${opened}"`);
     const accepted = await call(resendRoute, { id: String(idD) });
     check(
       !accepted.endsWith('?email=refused'),
@@ -807,6 +859,8 @@ try {
     }),
   );
   const idE = idFromLocation(insuredLocation);
+  // This fixture is driven to `confirmed` below, so it must have paid its way in.
+  if (idE !== null) await markFixturePaid(idE);
   check(idE !== null, `the insured entry saved, got "${insuredLocation}"`);
   if (idE === null) throw new Error('calendar fixture insert failed');
   createdIds.push(idE);
@@ -1041,9 +1095,15 @@ try {
     // BK-23: THE BOUNDARY IS NOW "DID THIS STATUS HOLD AN INVITE", not "is it
     // the word cancelled". An office entry lands in `pending_review`, which
     // never had an invite issued — so it has to be moved to `confirmed` first
-    // for there to be anything to cancel. That step is not scaffolding; it is
-    // the new rule made visible, and the arm immediately below asserts the
-    // other half of it.
+    // for there to be anything to cancel.
+    //
+    // THAT STEP USED TO BE DESCRIBED HERE AS "not scaffolding; the new rule
+    // made visible". It was not the rule — it was BK-44's defect, and this arm
+    // was leaning on it. The fixture is stamped `paid_at` at creation
+    // (`markFixturePaid`) so the crossing below is one a paid booking has
+    // earned, which is what the guard now requires and what `markPaid` has
+    // always written. The arm itself is unchanged and still asserts the
+    // boundary in both directions.
     const preInvite = await callCapturingLogs({ id: String(idE), status: 'pending_review' });
     check(!anyMute(idE).test(preInvite.logs), 'a pending_review row has no invite, so no mail crosses');
     const cancelPending = await callCapturingLogs({ id: String(idE), status: 'declined' });
@@ -1142,6 +1202,8 @@ try {
       }),
     );
     const idG = idFromLocation(withEmailEntry);
+    // This fixture is driven to `confirmed` below, so it must have paid its way in.
+    if (idG !== null) await markFixturePaid(idG);
     check(idG !== null, `the with-email fixture saved, got "${withEmailEntry}"`);
     if (idG !== null) {
       createdIds.push(idG);
@@ -2883,6 +2945,471 @@ try {
     );
 
     console.log('  approved and confirmed through the same markPaid, with no link and no charge');
+  }
+
+
+  // -------------------------------------------------------------------------
+  // BK-44 — the status dropdown may not perform a review decision.
+  //
+  // WHY THESE PINS LOOK DIFFERENT FROM EVERY OTHER ARM IN THIS FILE. The defect
+  // they cover was not found by any of the 23 verify scripts, and the reason is
+  // structural rather than a coverage gap: every script drives ONE route and
+  // asserts what that route does. `verify-booking-review.ts` proves `review.ts`
+  // guards its transitions. The arms above prove `update.ts` writes what it is
+  // told. Both passed while the two routes overlapped, and the overlap was the
+  // bug. A sixth per-route script would not have found it either.
+  //
+  // So the load-bearing assertion here is the INVARIANT one at the end of the
+  // matrix — a property of the whole state space rather than of any single
+  // transition — and it is what goes red if somebody opens a door nobody
+  // thought of, the way `completed` and `no_show` turned out to be doors into
+  // the invite-holding set that guarding `confirmed` alone would have missed.
+  {
+    console.log('\nBK-44 — the editor cannot perform a review decision');
+
+    /** Seed one row at an arbitrary lifecycle state. */
+    async function seedAt(
+      status: AppointmentStatus,
+      opts: { paid?: boolean; session?: string | null } = {},
+    ): Promise<number> {
+      const slot = await freeProbeSlot();
+      const paidAt = opts.paid ? new Date().toISOString() : null;
+      const inserted = (await sql`
+        INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                  slot_start, status, pipeline_stage, admin_notes,
+                                  payment_status, paid_at, payment_method, stripe_session_id)
+        VALUES ('BK44 Probe', '780-555-0199', 'bk44@example.com', 'water', '44 Guard Rd',
+                'private', ${slot.toISOString()}, ${status}, 'assessment', ${MARKER},
+                ${opts.paid ? 'paid' : 'pending'}, ${paidAt},
+                ${opts.paid ? 'stripe' : null}, ${opts.session ?? null})
+        RETURNING id
+      `) as { id: number }[];
+      createdIds.push(inserted[0].id);
+      return inserted[0].id;
+    }
+
+    async function stateOf(id: number): Promise<{ status: AppointmentStatus; paid_at: Date | null }> {
+      const r = (await sql`
+        SELECT status, paid_at FROM appointments WHERE id = ${id}
+      `) as { status: AppointmentStatus; paid_at: Date | null }[];
+      return r[0];
+    }
+
+    // ── The matrix, driven through the ROUTE ───────────────────────────────
+    //
+    // Not through the template and not through `editorMaySetStatus` alone. The
+    // ticket is explicit: a template-only fix is a client-side check on a write
+    // path, so the proof has to be a forbidden transition POSTed to `update.ts`
+    // and refused by it. Every arm below is a real form submission.
+    //
+    // The row is reset between targets rather than reseeded, so one insert
+    // covers eight transitions and the run stays inside a sane number of round
+    // trips.
+    let matrixChecked = 0;
+    let invariantViolations = 0;
+
+    for (const paid of [false, true]) {
+      for (const from of APPOINTMENT_STATUSES) {
+        const id = await seedAt(from, { paid });
+        const paidAtSeed = (await stateOf(id)).paid_at;
+
+        for (const to of APPOINTMENT_STATUSES) {
+          // Reset. `cancelled_at` goes with it: entering and leaving
+          // `cancelled` stamps and clears it, and a stale stamp would make the
+          // next target's arm assert against a row it did not seed.
+          await sql`
+            UPDATE appointments
+            SET status = ${from}, paid_at = ${paidAtSeed?.toISOString() ?? null},
+                cancelled_at = NULL
+            WHERE id = ${id}
+          `;
+
+          const expected = editorMaySetStatus(
+            { status: from, paid_at: paidAtSeed, stripe_session_id: null },
+            to,
+          );
+
+          const location = await call(updateRoute, {
+            id: String(id),
+            status: to,
+            pipeline_stage: 'assessment',
+          });
+          const after = await stateOf(id);
+          matrixChecked++;
+
+          if (expected) {
+            check(
+              location.includes('saved=1'),
+              `${from} -> ${to} (paid=${paid}) should be allowed, got "${location}"`,
+            );
+            check(
+              after.status === to,
+              `${from} -> ${to} (paid=${paid}) should have landed, row is ${after.status}`,
+            );
+          } else {
+            check(
+              location.includes('saved=blocked'),
+              `${from} -> ${to} (paid=${paid}) should be REFUSED at the route, got "${location}"`,
+            );
+            check(
+              after.status === from,
+              `${from} -> ${to} (paid=${paid}) was refused but the row moved to ${after.status}`,
+            );
+          }
+
+          // ── THE RELATIONSHIP ASSERTION ───────────────────────────────────
+          //
+          // Not about this transition — about the whole matrix. No POST to the
+          // editor may leave a row inside the invite-holding set with no
+          // payment behind it, unless it was already inside before the POST.
+          //
+          // This is what a per-route test cannot express. It does not name
+          // `confirmed`, or `completed`, or `no_show`; it names the boundary,
+          // so a fourth status added to `couldHoldCalendarInvite` later is
+          // covered on the day it is added rather than the day somebody
+          // remembers to widen a list.
+          //
+          // WHAT IT CANNOT CATCH, stated so nobody over-trusts it: the guard
+          // derives from `couldHoldCalendarInvite` and so does this assertion,
+          // so a WRONG `couldHoldCalendarInvite` moves both together and stays
+          // green. It catches SQL-versus-TypeScript drift and list-versus-
+          // predicate drift, which is what red rows 4 and 5 demonstrate — not a
+          // mis-defined boundary.
+          if (
+            couldHoldCalendarInvite(after.status) &&
+            after.paid_at === null &&
+            !couldHoldCalendarInvite(from)
+          ) {
+            invariantViolations++;
+            check(
+              false,
+              `INVARIANT: ${from} -> ${to} left an unpaid row at ${after.status}, inside the invite-holding set`,
+            );
+          }
+        }
+      }
+    }
+    check(matrixChecked === 128, `the matrix drove 128 transitions, drove ${matrixChecked}`);
+    check(invariantViolations === 0, 'no editor POST put an unpaid row inside the invite-holding set');
+    console.log(`  ${matrixChecked} transitions driven through update.ts; the invite boundary held`);
+
+    // ── The three consequences the ticket names, asserted by name ──────────
+    //
+    // All three are inside the matrix already. They are restated here because a
+    // matrix failure reports a coordinate, and these three deserve to fail with
+    // their own sentence — they are the reason the ticket exists.
+    {
+      const id = await seedAt('pending_review');
+      let location = await call(updateRoute, { id: String(id), status: 'approved_awaiting_payment' });
+      check(
+        location.includes('saved=blocked') && (await stateOf(id)).status === 'pending_review',
+        'CONSEQUENCE 1: approving by dropdown is refused — no amount, no deadline, no email',
+      );
+
+      location = await call(updateRoute, { id: String(id), status: 'confirmed' });
+      check(
+        location.includes('saved=blocked') && (await stateOf(id)).status === 'pending_review',
+        'CONSEQUENCE 2: confirming an unpaid request by dropdown is refused',
+      );
+
+      // The door guarding `confirmed` alone would have left open. `completed`
+      // crosses the same boundary and mails the same first-confirmation email.
+      location = await call(updateRoute, { id: String(id), status: 'completed' });
+      check(
+        location.includes('saved=blocked') && (await stateOf(id)).status === 'pending_review',
+        'CONSEQUENCE 2, THROUGH THE OTHER DOOR: pending_review -> completed is refused too',
+      );
+      console.log('  the two consequences, and the third door into the same room');
+    }
+
+    // ── What must NOT get harder ───────────────────────────────────────────
+    {
+      for (const from of APPOINTMENT_STATUSES) {
+        if (from === 'cancelled') continue;
+        const id = await seedAt(from);
+        const location = await call(updateRoute, { id: String(id), status: 'cancelled' });
+        check(
+          location.includes('saved=1') && (await stateOf(id)).status === 'cancelled',
+          `cancelling must stay reachable from ${from}, got "${location}"`,
+        );
+      }
+      console.log('  cancel is still reachable from every status');
+    }
+
+    {
+      // The correction `update.ts`'s docstring names, on a row with NO paid_at
+      // — which is every pre-P9 row, because 008 renamed them to `confirmed`
+      // and 010 never backfilled the column. An over-tight rule keyed on
+      // `confirmed` would refuse this and the office would have no route back.
+      const legacy = await seedAt('confirmed');
+      let location = await call(updateRoute, { id: String(legacy), status: 'no_show' });
+      check(
+        location.includes('saved=1') && (await stateOf(legacy)).status === 'no_show',
+        'a legacy confirmed row can still be marked no-show',
+      );
+      location = await call(updateRoute, { id: String(legacy), status: 'confirmed' });
+      check(
+        location.includes('saved=1') && (await stateOf(legacy)).status === 'confirmed',
+        'AND BACK — movement inside the invite set never asks for a payment, so pre-prepay rows stay correctable',
+      );
+
+      // Un-cancelling, both directions of the carve-out.
+      const paidCancel = await seedAt('cancelled', { paid: true });
+      location = await call(updateRoute, { id: String(paidCancel), status: 'confirmed' });
+      check(
+        location.includes('saved=1') && (await stateOf(paidCancel)).status === 'confirmed',
+        'a PAID cancelled booking still un-cancels — the interesting case update.ts is built around',
+      );
+
+      const unpaidCancel = await seedAt('cancelled');
+      location = await call(updateRoute, { id: String(unpaidCancel), status: 'confirmed' });
+      check(
+        location.includes('saved=blocked') && (await stateOf(unpaidCancel)).status === 'cancelled',
+        'a NEVER-PAID cancelled booking does not — that is the hole wearing a different hat',
+      );
+      console.log('  corrections kept, and the carve-out cuts where it should');
+    }
+
+    // ── An approved row is markPaid's to confirm ───────────────────────────
+    //
+    // Found at implementation review, and it is the case a `paid_at`-only rule
+    // could not see: nothing ever CLEARS that column, so a row that has been
+    // paid once, walked back to `pending_review` and re-approved carries the
+    // old stamp while a fresh, unpaid Checkout Session is live. The invite
+    // crossing would have been waved through on the strength of last cycle's
+    // money, skipping the amount columns, the session expiry and the
+    // double-payment detection — and mailing a confirmation for it.
+    {
+      const stale = await seedAt('approved_awaiting_payment', {
+        paid: true,
+        session: 'cs_test_bk44_stale',
+      });
+      for (const target of INVITE_HOLDING_STATUSES) {
+        const location = await call(updateRoute, { id: String(stale), status: target });
+        check(
+          location.includes('saved=blocked'),
+          `an approved row with a stale paid_at cannot be moved to ${target} by hand, got "${location}"`,
+        );
+        check(
+          (await stateOf(stale)).status === 'approved_awaiting_payment',
+          `and it did not move to ${target}`,
+        );
+      }
+      console.log('  a stale paid_at cannot confirm an approval — markPaid owns that crossing');
+    }
+
+    // ── `rollBack`'s rule, applied to the editor ───────────────────────────
+    {
+      const live = await seedAt('approved_awaiting_payment', { session: 'cs_test_bk44_live' });
+      let location = await call(updateRoute, { id: String(live), status: 'pending_review' });
+      check(
+        location.includes('saved=blocked') && (await stateOf(live)).status === 'approved_awaiting_payment',
+        'an approval with a LIVE payment link cannot be walked back — the customer could still pay it',
+      );
+
+      const dead = await seedAt('approved_awaiting_payment', { session: null });
+      location = await call(updateRoute, { id: String(dead), status: 'pending_review' });
+      check(
+        location.includes('saved=1') && (await stateOf(dead)).status === 'pending_review',
+        'with no live session it walks back fine — approveFree already relies on that path',
+      );
+      console.log('  the live-session walk-back is closed, the ordinary one is not');
+    }
+
+    // ── A refused edit changes NOTHING, and mails nothing ──────────────────
+    {
+      const id = await seedAt('pending_review');
+      await sql`
+        UPDATE appointments SET admin_notes = ${`${MARKER} original`}, pipeline_stage = 'assessment'
+        WHERE id = ${id}
+      `;
+      const before = (await sql`
+        SELECT status, pipeline_stage, admin_notes, assessment_tier, cancelled_at, updated_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+
+      const lines: string[] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => {
+        lines.push(args.map((a) => String(a)).join(' '));
+      };
+      let location: string;
+      try {
+        const res = await updateRoute({
+          request: post({
+            id: String(id),
+            status: 'confirmed',
+            pipeline_stage: 'restoration',
+            admin_notes: `${MARKER} this note rode along with a forbidden status`,
+            assessment_tier: 'standard',
+          }),
+        } as never);
+        location = res.headers.get('Location') ?? '';
+      } finally {
+        console.error = original;
+      }
+
+      check(location.includes('saved=blocked'), 'the refused edit reports blocked');
+
+      const after = (await sql`
+        SELECT status, pipeline_stage, admin_notes, assessment_tier, cancelled_at, updated_at
+        FROM appointments WHERE id = ${id}
+      `) as Record<string, unknown>[];
+      // THE WHOLE STATEMENT IS REFUSED, which is why the flash says nothing at
+      // all was saved. A note that survived a refused status would make that
+      // message a lie, and the office would stop believing the next one.
+      for (const col of ['status', 'pipeline_stage', 'admin_notes', 'assessment_tier', 'cancelled_at']) {
+        check(
+          String(after[0][col]) === String(before[0][col]),
+          `a refused edit left ${col} alone (was ${String(before[0][col])}, now ${String(after[0][col])})`,
+        );
+      }
+      check(
+        String(after[0].updated_at) === String(before[0].updated_at),
+        'a refused edit does not even bump updated_at — nothing was written',
+      );
+
+      // `sendCalendarInvite` logs the booking it is muting, so a silent capture
+      // distinguishes "reached the send and the mute stopped it" from "never
+      // wired to send at all". Nothing may reach it across a refusal.
+      check(
+        !lines.some((l) => l.includes(String(id))),
+        'and NO mail was attempted across the refusal — the send was never reached',
+      );
+      console.log('  a refused edit writes nothing and mails nothing');
+    }
+
+    // ── The dropdown and the guard read one source ─────────────────────────
+    {
+      // Contract, not incident: a <select> that omits its own current value
+      // submits the FIRST option instead, so a notes-only save on an approved
+      // booking would silently un-approve it.
+      for (const status of APPOINTMENT_STATUSES) {
+        for (const paid_at of [null, new Date()]) {
+          for (const stripe_session_id of [null, 'cs_test_x']) {
+            check(
+              editorStatusTargets({ status, paid_at, stripe_session_id }).includes(status),
+              `editorStatusTargets always offers the row's own status (${status}, paid=${!!paid_at}, session=${!!stripe_session_id})`,
+            );
+          }
+        }
+      }
+
+      // ── EVERY WITHHELD STATUS HAS A SENTENCE EXPLAINING IT ───────────────
+      //
+      // The Update panel explains an absent option in three groups: decision-
+      // owned ("comes from approving"), invite-holding ("not listed until this
+      // booking is paid"), and reopening ("cannot be reopened while its payment
+      // link is live"). The list is derived per row; so is the reason.
+      //
+      // THIS TIES THE COPY TO THE RULE. A future conjunct that withholds a
+      // status for a fourth reason would render it in a list the page cannot
+      // explain — an option silently missing, which reads as broken rather than
+      // as routed elsewhere, and is the half of BK-44 that was never about the
+      // write path. The partition is asserted, not the wording.
+      for (const status of APPOINTMENT_STATUSES) {
+        for (const paid_at of [null, new Date()]) {
+          for (const stripe_session_id of [null, 'cs_test_x']) {
+            const row = { status, paid_at, stripe_session_id };
+            const targets = editorStatusTargets(row);
+            const withheld = APPOINTMENT_STATUSES.filter(x => !targets.includes(x));
+            const unexplained = withheld.filter(
+              x =>
+                !DECISION_ENTRY_STATUSES.includes(x) &&
+                !INVITE_HOLDING_STATUSES.includes(x) &&
+                x !== 'pending_review',
+            );
+            check(
+              unexplained.length === 0,
+              `every withheld status has a sentence (${status}, paid=${!!paid_at}, session=${!!stripe_session_id}): ${unexplained.join(', ')} has none`,
+            );
+          }
+        }
+      }
+
+      const page = readFileSync(resolve(root, 'src/pages/admin/appointments/[id].astro'), 'utf8');
+      check(
+        page.includes('{statusTargets.map('),
+        'the status dropdown renders editorStatusTargets, not a second list',
+      );
+      check(
+        !page.includes('{APPOINTMENT_STATUSES.map('),
+        'and no longer maps all eight statuses into a <select>',
+      );
+      console.log('  the dropdown offers exactly what the route accepts');
+    }
+
+    // ── The narrowed source scan (the second, weaker overlap pin) ──────────
+    //
+    // Scoped to the ENTRY functions rather than to whole files, deliberately.
+    // A file-wide sweep for `SET status =` goes red against correct code:
+    // `review.ts` also writes `declined` and, in `rollBack`, `pending_review`,
+    // and both of those are legitimately the editor's too. Declining by hand
+    // skips no obligation. Disjointness was the wrong relationship; what
+    // matters is that no status a DECISION creates is one the editor can
+    // conjure from outside the invite boundary.
+    {
+      const reviewSrc = readFileSync(
+        resolve(root, 'src/pages/api/admin/appointments/review.ts'),
+        'utf8',
+      );
+      const paymentSrc = readFileSync(resolve(root, 'src/lib/booking-payment.ts'), 'utf8');
+
+      // Ends at the next TOP-LEVEL declaration, matched at column zero, so a
+      // nested helper stays inside the body and the slice cannot run to the end
+      // of the file. It did, at first: `markPaid` is `export async function`, a
+      // shape a search for `\nasync function ` never matches, so the pin
+      // swallowed every function after it and reported statuses those functions
+      // write. A pin that over-collects fails against correct code, which is
+      // the fastest way to get a pin deleted.
+      function bodyOf(src: string, name: string): string {
+        const at = src.search(new RegExp(`(?:^|\\n)(?:export )?(?:async )?function ${name}\\(`));
+        if (at < 0) throw new Error(`entry function ${name} not found — this pin has gone stale`);
+        const rest = /\n(?:export )?(?:async )?function /g;
+        rest.lastIndex = at + 1;
+        const next = rest.exec(src);
+        return src.slice(at, next ? next.index : src.length);
+      }
+
+      const entries = [
+        bodyOf(reviewSrc, 'approve'),
+        bodyOf(reviewSrc, 'approveFree'),
+        bodyOf(paymentSrc, 'markPaid'),
+      ].join('\n');
+
+      // ASSIGNMENTS ONLY, and this took two goes to get right. A bare search
+      // for `status = '<lit>'` also matches every GUARD — `WHERE id = $1 AND
+      // status = 'pending_review'` — and every comment quoting one, so the pin
+      // reported `pending_review` as something a decision route creates and
+      // failed against correct code. Only the SET clause assigns.
+      const written = new Set<string>();
+      for (const stmt of entries.matchAll(/UPDATE\s+appointments\b([\s\S]*?)\bWHERE\b/g)) {
+        const setClause = stmt[1].replace(/--[^\n]*/g, '');
+        // The leading class is what keeps `payment_status` out of the results.
+        for (const m of setClause.matchAll(/(?:^|[\s,(])status\s*=\s*'([a-z_]+)'/g)) {
+          if ((APPOINTMENT_STATUSES as readonly string[]).includes(m[1])) written.add(m[1]);
+        }
+      }
+      // THE EXACT SET, not `size > 0`. If `bodyOf` ever stops reaching
+      // `markPaid`'s SET clause — the mirror image of the over-collection this
+      // pin already had once — then `written` quietly loses `confirmed`, every
+      // remaining member still passes the check below, and half the
+      // relationship pin evaporates with no red. A pin that can go vacuous is
+      // worse than no pin, because the green is read as coverage.
+      const expected = ['approved_awaiting_payment', 'confirmed'];
+      check(
+        [...written].sort().join(',') === expected.sort().join(','),
+        `the entry functions assign exactly ${expected.join(', ')} — found ${[...written].sort().join(', ') || '(none)'}`,
+      );
+      for (const status of written) {
+        const s = status as AppointmentStatus;
+        check(
+          DECISION_ENTRY_STATUSES.includes(s) || INVITE_HOLDING_STATUSES.includes(s),
+          `${status} is created by a decision route, so the editor must not be able to conjure it`,
+        );
+      }
+      console.log(`  every status the entry functions create (${[...written].join(', ')}) is out of the editor's reach`);
+    }
   }
 
 } finally {

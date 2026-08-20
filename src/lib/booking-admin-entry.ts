@@ -53,12 +53,27 @@ export type { FieldError, ParseOptions };
 
 /** The closed sets the update form validates against. Mirrors the DB CHECKs. */
 /**
- * Re-exported, not redeclared (BK-23). This list is what the admin dropdown
- * renders AND what it validates against, and keeping a second copy here is how
- * the enum, the CHECK and the dropdown drifted into three lists that had to be
+ * Re-exported, not redeclared (BK-23). Keeping a second copy here is how the
+ * enum, the CHECK and the dropdown drifted into three lists that had to be
  * moved by hand together.
+ *
+ * THE DROPDOWN NO LONGER RENDERS THIS LIST — BK-44 narrowed it to
+ * `editorStatusTargets`, re-exported below. This is still what the update form
+ * VALIDATES a submitted value against, as the closed set of legal identifiers;
+ * whether a given one is legal for a given row is the other function's
+ * question.
  */
 export { APPOINTMENT_STATUSES } from './booking-status';
+
+/**
+ * The same treatment for BK-44's transition rule, for the same reason and one
+ * step further: this is not just the list the dropdown renders, it is the list
+ * the update route's WHERE clause enforces. Two copies of it would be a
+ * template that offers what the server refuses, or worse, a template that
+ * offers what the server allows because somebody widened one and not the other.
+ */
+export { editorStatusTargets, editorMaySetStatus } from './booking-status';
+export type { EditorGuardRow } from './booking-status';
 
 export const PIPELINE_STAGES: readonly PipelineStage[] = [
   'assessment',
