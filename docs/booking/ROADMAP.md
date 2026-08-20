@@ -62,6 +62,21 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+- **Deleting an appointment row does not retract a calendar invite already
+  issued for it.** Observed 2026-08-19: two test rows were deleted directly from
+  the database, and one of them had already sent a `REQUEST` ics under the
+  pre-P9 auto-confirm flow. The customer's calendar kept the entry, so the next
+  real booking in that slot showed **two** overlapping invites — one for the live
+  appointment and one for a booking that no longer exists in any table.
+  The product's own cancel path is correct and sends a `CANCEL` under the same
+  UID; a hard `DELETE` bypasses it, because there is no row left to send from.
+  **Therefore:** cancel through the admin panel, never by deleting the row — and
+  if a row must be deleted, the invite has to be cleared out of the recipient's
+  calendar by hand. Severity: low, but it presents as a double-booking, which is
+  the one thing this system's index exists to prevent, so it will be misread as
+  a serious bug by whoever sees it first. **Owner: nobody — no ticket, because
+  no product path does a hard delete today.**
+
 - **The admin status dropdown can perform an approval, which is the one thing
   the review route was split out to prevent.** `review.ts`'s header states the
   design: *"Folding that into the editor would mean the editor's dropdown could
@@ -1379,7 +1394,7 @@ together or the site tells a lie between deploys.
    | 3 · migration 009 | ✅ done, verified |
    | 4 · register the webhook | ✅ done — `booking-payments-test`, **test mode**, `https://www.yegrestoration.ca/api/stripe/webhook/`, 4 Checkout events, Snapshot payload. `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in Vercel, **Production only** |
    | 5 · test-mode run end to end | ✅ **DONE 2026-08-19 — the whole chain is proven on production.** Booking #35: request → office review → confirm-the-amount step → approve ($606.38, deadline Thu Aug 20 11:39 a.m.) → approval email with Pay button and Interac option → Stripe Checkout (itemized: $577.50 assessment + $28.88 GST) → test card → `/book/confirmed/` → **webhook fired, `markPaid` ran, status went to `confirmed`** → customer confirmation with ICS → office calendar invite. Mould + weekend pricing correct at every surface |
-   | 6 · swap live keys | ❌ not started. Needs its OWN webhook registration in live mode with its own `whsec_` — the test one does not carry over |
+   | 6 · swap live keys | ✅ **done 2026-08-20.** Live mode, a NEW webhook registered in live mode with its own `whsec_`, both Vercel vars updated (Production only), redeployed after. Verified from outside: webhook answers `400 {"error":"No signature"}` (both secrets readable), production deploy is newer than the env update, availability 200 / 59 slots, `/book/` 200, deployed commit matches `origin/main`. **⚠ The MODE itself is not verifiable from outside** — the endpoint behaves identically on test or live credentials. Only a real charge distinguishes them |
 
    **Two defects were found by that hands-on test, both of which all 23 gates
    missed, and the pattern matters more than either bug:**
@@ -1432,10 +1447,27 @@ together or the site tells a lie between deploys.
    `whsec_`, and both env vars are scoped **Production only** — deliberately, so
    the value swap cannot put live credentials on a preview.
 
-   **Still outstanding, none of them blocking the deploy:** the GST registration
-   number into the Stripe Dashboard (client), the end-to-end test-mode booking,
-   the live-key swap, and `DATABASE_URL` being shared between Preview and
-   Production (which is why no preview deploy can be used to test this flow).
+   **STILL OUTSTANDING as of 2026-08-20 — the rollout is complete, these are not:**
+
+   1. **A real live booking has never been made.** The live keys are wired but
+      unproven. The check is a real card on the cheapest weekday tier ($399 +
+      GST = $418.95, no weekend multiplier), watching for **`cs_live_`** rather
+      than `cs_test_` in the Stripe URL, then refunding in the dashboard and
+      cancelling the row. Until that runs, "live" is a configuration claim, not
+      an observed fact.
+   2. **The GST registration number is now a LIVE compliance item**, not a
+      to-do. Real receipts are being issued from 2026-08-20. Stripe renders it
+      from Dashboard settings and no code can supply it — see the Known trap.
+   3. **The office has not been briefed on the new workflow.** A real customer
+      booking now produces a REQUEST that does nothing until someone approves
+      it, and BK-23 Task 4 expires it at `slot − 4h` with an apology email if
+      nobody does. That is a live operational risk from the moment the flip
+      landed, and it is a people problem rather than a code one.
+   4. **Until BK-44 ships the rule for the admin panel is: use "Review the
+      amount →" and "Mark as paid — Interac" only, never the STATUS dropdown.**
+      That hole cost nothing in test mode and costs a free crew dispatch now.
+   5. **`DATABASE_URL` is shared between Preview and Production**, which is why
+      no preview deploy can be used to test this flow.
 
    **ROLLOUT PROGRESS — step 1 DONE, 2026-08-19.** `007`, `008` and `010` are
    applied to production; `009` is correctly still pending. Verified immediately
