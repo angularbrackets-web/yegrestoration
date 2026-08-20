@@ -1307,6 +1307,34 @@ together or the site tells a lie between deploys.
    | 2 | **Deploy the code** | The new arbiter is strictly narrower, so it resolves against the index 008 left standing. This is the direction that works, and `verify:booking:commit`'s deploy-window probe is what keeps it true |
    | 3 | `migrate --target prod` (bare — 009 is all that is left) | Rebuilds the index, moves the default, drops `booked` from the CHECK. Only the new code can survive this, which is why it runs last. Re-runnable: it re-sweeps any `booked` row the window produced |
 
+   **ROLLOUT — STEPS 1, 2 AND 3 ARE DONE. DEPLOY 2 IS LIVE (2026-08-19).**
+
+   All ten migrations are applied to production and the code is merged to `main`
+   and deployed (`befce39`). Verified live after 009: the slot index is rebuilt
+   to the three-status deny-list, the column default is `'pending_review'`,
+   `'booked'` is gone from the CHECK, and the funnel serves — availability 200
+   with 60 bookable slots across 15 days, `/book/`, `/book/received/`,
+   `/book/confirmed/` and `/book/payment-cancelled/` all 200, and the Stripe
+   webhook answers `400 {"error":"No signature"}` to an unsigned POST, which is
+   the response that proves the route exists AND both secrets are readable in
+   production.
+
+   **THE CODE CAN NO LONGER BE ROLLED BACK.** 009 rebuilt the index to a
+   predicate the pre-P9 arbiter cannot resolve against, so a Vercel instant
+   rollback would raise 42P10 on every booking. Forward-fix only.
+
+   **What is still TEST MODE:** `STRIPE_SECRET_KEY` is `sk_test_`, and the
+   webhook `booking-payments-test` is registered in test mode at
+   **`https://www.yegrestoration.ca/api/stripe/webhook/`**. Real card payment is
+   NOT live. The live-key swap needs its own webhook registration and its own
+   `whsec_`, and both env vars are scoped **Production only** — deliberately, so
+   the value swap cannot put live credentials on a preview.
+
+   **Still outstanding, none of them blocking the deploy:** the GST registration
+   number into the Stripe Dashboard (client), the end-to-end test-mode booking,
+   the live-key swap, and `DATABASE_URL` being shared between Preview and
+   Production (which is why no preview deploy can be used to test this flow).
+
    **ROLLOUT PROGRESS — step 1 DONE, 2026-08-19.** `007`, `008` and `010` are
    applied to production; `009` is correctly still pending. Verified immediately
    after: the slot index is untouched (`status <> 'cancelled'`, so the live
