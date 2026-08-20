@@ -643,10 +643,42 @@ rework of every call site. Not worth doing until the next ticket needs slots.
   **Owner: BK-32**, recorded as a rollout task rather than an implementation
   one.
 
-  **CLOSED 2026-08-20** — the Dashboard step was taken (`CA GST/HST
-  775654577RT0001`). Kept for the lesson: a configuration step no code can
-  cover is invisible to every gate in the repo, and this one was found by
-  reading the mechanism rather than by any test.
+  **CLOSED 2026-08-20 AND RE-OPENED THE SAME DAY BY THE FIRST REAL RECEIPT.**
+
+  The Dashboard step was taken (`CA GST/HST 775654577RT0001`, under Settings →
+  Billing → **Invoices** → "Invoice tax information") and this entry was marked
+  closed on the strength of it. **The receipt from live booking #36 shows no
+  registration number anywhere.** Observed, not inferred: the emailed receipt
+  lists `On-site restoration assessment × 1 — CA$598.50` and
+  `GST (5%) × 1 — CA$29.93`, and the payment page states **"No tax rate
+  applied."**
+
+  **Why the Dashboard step did not do it**, and the distinction is the whole
+  lesson: that field governs **invoices**. A Checkout Session produces a
+  **receipt**, which is a different artifact, and our GST is a hand-built line
+  item rather than a Stripe Tax rate — so Stripe has no tax registration to
+  render on it and does not.
+
+  **The sentence this entry carried was therefore wrong in BOTH halves.** It
+  said Stripe renders tax info on Checkout receipts from Dashboard settings (it
+  does not, for this shape), and that after the Dashboard step "the number
+  appears on Stripe's receipt and nowhere else" (it appears nowhere at all).
+
+  **The method failure is the one to carry forward: this was marked CLOSED on a
+  configuration step, with the entry's own text saying the only proof was a real
+  receipt, and the receipt not yet in hand.** A configuration change is not
+  evidence of its own effect. Nine hours later the receipt arrived and
+  contradicted it.
+
+  **Severity: HIGH and live.** A GST registrant must give the registration
+  number on a receipt for a supply over $30 so the customer can claim an input
+  tax credit. Every live receipt from 2026-08-20 onward lacks it.
+
+  **The fix is code, not configuration** — the line item NAME is ours and it is
+  what receipts render: `line('GST (5%)', 'Goods and services tax', gstCents)`
+  in `booking-payment.ts` becomes a name carrying the number. Our own approval
+  and confirmation emails are also ours and can carry it. **Owner: needs a
+  ticket.**
 
   **Corrected 2026-08-19.** This entry used to add *"the env var correctly
   drives our emails"*, and BK-32's own rollout note says the same. **It is not
@@ -1722,7 +1754,13 @@ together or the site tells a lie between deploys.
       than `cs_test_` in the Stripe URL, then refunding in the dashboard and
       cancelling the row. Until that runs, "live" is a configuration claim, not
       an observed fact.
-   2. **DONE 2026-08-20 — the GST registration number is on the account.**
+   2. **NOT DONE — RE-OPENED 2026-08-20 by the first live receipt. The number is
+      on the account and NOT on the receipt.** See the Known trap: the Dashboard
+      field governs invoices, and a Checkout Session issues a receipt. Marked
+      done earlier the same day on the configuration step alone; the receipt
+      disproved it. Original note follows.
+
+      **The account-level record (still true, and still not sufficient):**
       `CA GST/HST 775654577RT0001`, added as a Tax ID under Settings → Billing →
       Invoices, confirmed by the user from the Dashboard. Real receipts had been
       issuing since the live-key swap earlier the same day, so the exposure
