@@ -31,16 +31,21 @@
   import {
     EMAILED_LINE,
     FEE_TERMS_ACK_LABEL,
+    FEE_TERMS_CREDIT,
     FEE_TERMS_HEADING,
     FEE_TERMS_INTRO,
     FEE_TERMS_ITEMS,
-    FEE_TERMS_OUTRO,
+    FEE_TERMS_PAYMENT,
+    FEE_TERMS_REFUND,
     AFTER_HOURS_NOTE,
     ASSESSMENT_TIER_DESCRIPTIONS,
     ASSESSMENT_TIER_LEGEND,
     ASSESSMENT_TIER_NAMES,
     QUOTE_HEADING,
     QUOTE_TIMING_NOTE,
+    RECEIVED_HEADING,
+    RECEIVED_HOLD_LINE,
+    RECEIVED_LEAD,
   } from '../lib/booking-copy';
   import {
     reportBookingFunnelEvent,
@@ -651,14 +656,41 @@
 <div
   class="bg-white border border-black/10 rounded-xl p-6 lg:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
 >
+  <!--
+    THE FALLBACK CARD, AND IT SAID "YOU'RE BOOKED" UNTIL BK-36.
+
+    This branch is live, not theoretical: `storeConfirmation()` fails whenever
+    `sessionStorage` refuses the write (private mode, storage pressure), and the
+    handler at the top of this file deliberately keeps the visitor here rather
+    than navigating them to a page with nothing to show. The request IS
+    committed at that point — but under P9 a committed request is
+    `pending_review`. Nobody has looked at it and nobody has paid for it.
+
+    So the old heading was a claim about state that this component is in no
+    position to make, under a checkmark, beside a reference number — the exact
+    shape P9 exists to remove, on the surface a visitor is most likely to
+    screenshot. BK-23 swept `/book/confirmed/`, `BookingConfirmation.svelte` and
+    both messages; `verify-booking-email.ts` pins the claim out of the request
+    EMAIL. Nothing pinned the island, which is how it survived.
+
+    It now renders the request wording from the SAME constants `/book/received/`
+    and the request email use, so the three cannot drift. `verify-cutover.ts`
+    pins that this file makes no booked/confirmed claim at all.
+
+    `result.emailSent` still gates the emailed line, and `EMAILED_LINE` is
+    correct on this branch: the message that went out is the request-received
+    one, which is a copy of the request.
+  -->
   {#if result}
     <div class="text-center py-12">
       <div class="w-16 h-16 rounded-full bg-yeg-amber/20 flex items-center justify-center mx-auto mb-6">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yeg-amber-deep" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
       </div>
-      <h3 class="font-display font-bold text-2xl text-yeg-text mb-2">You're booked</h3>
+      <h3 class="font-display font-bold text-2xl text-yeg-text mb-2">{RECEIVED_HEADING}</h3>
+      <p class="text-yeg-text-secondary mb-3">{RECEIVED_LEAD}</p>
       <p class="text-yeg-text-secondary mb-1">{result.slotLabel}</p>
-      <p class="text-yeg-text-secondary text-sm">
+      <p class="text-yeg-text-secondary text-sm">{RECEIVED_HOLD_LINE}</p>
+      <p class="text-yeg-text-secondary text-sm mt-2">
         Reference #{result.id}. The visit takes about 30 minutes. To cancel or reschedule, call or
         text
         <a class="text-yeg-amber-deep font-semibold" href={PHONE_HREF}>{PHONE_DISPLAY}</a>.
@@ -1020,6 +1052,17 @@
             adjacent in this order: `FEE_TERMS_ACK_LABEL` says "the assessment
             terms above", which is a claim about this markup. Moving the box, or
             putting the SMS consent between them, makes the label a lie.
+
+            THIS IS THE ACKNOWLEDGED COPY, and it is the reason BK-36 could move
+            `/book/`'s informational block below the picker without touching the
+            label's claim: the box the label points at is this one, not that one.
+
+            Order inside the box is a constraint, not layout — HEADING -> INTRO
+            -> ITEMS -> PAYMENT -> REFUND -> CREDIT, then the radios, then the
+            checkbox below. The prose ends on the credit because the last thing
+            read should be the good news, and everything being acknowledged
+            (the tier choice included) sits above the box that acknowledges it.
+            `verify-cutover.ts` pins the whole chain.
           -->
           <div class="rounded-lg p-4 mb-3 text-sm" style="background-color:rgba(0,0,0,0.03)">
             <p class="font-semibold text-yeg-text mb-1">{FEE_TERMS_HEADING}</p>
@@ -1029,9 +1072,13 @@
                 <li>{item}</li>
               {/each}
             </ul>
-            {#each FEE_TERMS_OUTRO as line}
+            {#each FEE_TERMS_PAYMENT as line}
               <p class="text-yeg-text-secondary mt-2">{line}</p>
             {/each}
+            {#each FEE_TERMS_REFUND as line}
+              <p class="text-yeg-text-secondary mt-2">{line}</p>
+            {/each}
+            <p class="text-yeg-text-secondary mt-2">{FEE_TERMS_CREDIT}</p>
 
             <!--
               BK-31. The radios live INSIDE the terms box and at the bottom of
@@ -1140,7 +1187,7 @@
             <input type="checkbox" class="mt-1" bind:checked={values.smsConsent} />
             <span class="text-sm text-yeg-text-secondary">
               Text me a reminder from YEG Restoration before the appointment, at the number above. Message and data rates
-              may apply; reply STOP to opt out. Optional — you're booked either way.
+              may apply; reply STOP to opt out. Optional — your request goes through either way.
             </span>
           </label>
 
@@ -1172,11 +1219,18 @@
           {:else}
             <button type="submit" class="cta-primary disabled:opacity-60 disabled:cursor-not-allowed"
               disabled={busy || !hydrated}>
+              <!--
+                "Send request", not "Confirm booking" (BK-36). The button that
+                commits is the loudest mechanism claim on the page, and under
+                prepay it commits a REQUEST — review and payment both come
+                after. Same defect family as the fallback card above and the
+                homepage's old "Instant confirmation" bullet.
+              -->
               {submitting || leaving
-                ? 'Booking…'
+                ? 'Sending…'
                 : uploadsInFlight > 0
                   ? 'Uploading…'
-                  : 'Confirm booking'}
+                  : 'Send request'}
             </button>
           {/if}
         </div>

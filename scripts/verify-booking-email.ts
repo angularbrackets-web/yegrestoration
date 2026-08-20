@@ -20,14 +20,22 @@ import {
   RECEIVED_NEXT_STEPS,
   EXPIRED_REQUEST_REBOOK_LINE,
   PAYMENT_EXPIRED_REBOOK_LINE,
+  AFTER_HOURS_NOTE,
+  FEE_TERMS_ACK_LABEL,
+  FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
-  FEE_TERMS_OUTRO,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
   HAVE_READY_ITEMS,
   TIMEZONE_NOTE,
   VISIT_LENGTH_LINE,
 } from '../src/lib/booking-copy';
+// The weekend multiplier is asserted against the constants `assessmentQuote`
+// actually multiplies by, not against a retyped "1.5" — two hand-written copies
+// of one number is the drift this whole module exists to prevent.
+import { AFTER_HOURS_DENOMINATOR, AFTER_HOURS_NUMERATOR } from '../src/lib/booking-pricing';
 import {
   declineMessage,
   escapeHtml,
@@ -201,19 +209,11 @@ console.log('\nCustomer confirmation contents');
       check(body.includes(needle), `the ${part} part carries "${item.slice(0, 28)}…"`);
     }
 
-    // BK-27: the fee terms are echoed back to the customer in the message they
-    // keep. Asserted against the CONSTANTS, not retyped prose, so the client's
-    // pending wording sign-off does not turn this gate red — paired with the
-    // figure assertions below, which are what stop the prices vanishing.
-    for (const line of [
-      FEE_TERMS_HEADING,
-      FEE_TERMS_INTRO,
-      ...FEE_TERMS_ITEMS,
-      ...FEE_TERMS_OUTRO,
-    ]) {
-      const needle = part === 'html' ? escapeHtml(line) : line;
-      check(body.includes(needle), `the ${part} part carries the fee terms: "${line.slice(0, 28)}…"`);
-    }
+    // The fee terms used to be asserted HERE, against this fixture only — which
+    // is `messageType: 'confirmed'`. Both customer messages render them, so
+    // half the coverage was missing and deleting the block from the request arm
+    // kept every gate green. Moved to its own section below, parameterised over
+    // both message types. See "BK-36 — the fee terms, on BOTH messages".
   }
   check(customer.subject.includes(INSURANCE.slotLabel), 'the subject carries the slot label');
 
@@ -232,20 +232,20 @@ console.log('\nCustomer confirmation contents');
   // understate what the customer owes by 5%.
   check(figures.includes('GST'), 'and says the figures are before GST');
 
-  // The two terms attached to those figures, asserted on the whole block rather
-  // than on ITEMS — the credit lives in the intro and the refund rule in the
-  // outro, and both would survive every assertion above while being deleted.
+  // The terms attached to those figures, asserted on the JOINED constants
+  // rather than on ITEMS — the credit lives in its own constant, the refund
+  // rule in another, and each would survive every assertion above while being
+  // deleted.
   //
-  // The four terms the client settled on 2026-08-14, each asserted on the joined
-  // constants. Every other terms assertion compares the email to whatever the
-  // constants currently say, precisely so a client wording edit does not redden
-  // the gate. THESE FOUR ARE THE EXCEPTIONS, for the same reason GST is one:
-  // they are the substance of what the customer ticks a box to accept. A
-  // substantive reword of one of them SHOULD stop the build and get a human
-  // look. That is the trade, and it is the opposite of the trade made above.
+  // Every other terms assertion compares the email to whatever the constants
+  // currently say, precisely so a client wording edit does not redden the gate.
+  // THESE ARE THE EXCEPTIONS, for the same reason GST is one: they are the
+  // substance of what the customer ticks a box to accept. A substantive reword
+  // of one of them SHOULD stop the build and get a human look. That is the
+  // trade, and it is the opposite of the trade made above.
   //
-  // MATCHED ON POLARITY, NOT ON PRESENCE — this is the correction that matters.
-  // The first version of the refund check was `/refund/i`, which is satisfied by
+  // MATCHED ON POLARITY, NOT ON PRESENCE — the correction that matters. The
+  // first version of the refund check was `/refund/i`, which is satisfied by
   // "It is FULLY REFUNDABLE if you decide not to go ahead" — the exact negation
   // of the client's decision. A review proved it by writing that sentence and
   // watching every gate stay green. Its red row had only ever DELETED the word,
@@ -253,40 +253,216 @@ console.log('\nCustomer confirmation contents');
   // property while reading like the stronger one. Same defect the earlier review
   // found in the `showForm` pin, in a different costume.
   //
-  // So each check names the accepted PHRASINGS of the correct claim, and the
-  // credit check additionally refuses a negated one. Alternations, not exact
-  // sentences, so "no refunds" or "we deduct it from your invoice" still pass.
-  const terms = [FEE_TERMS_INTRO, ...FEE_TERMS_ITEMS, ...FEE_TERMS_OUTRO].join(' ');
+  // BK-36 MADE THAT WORSE BEFORE IT MADE IT BETTER, and the shape is worth
+  // keeping in view. The prepay refund policy has a WINDOW: full refund at 24h+
+  // notice, none inside 24h. A bare `/no refund/i` cannot tell those apart, and
+  // a bare `/full refund/i` is satisfied by the company-cancel line alone — so
+  // deleting the customer-cancel line entirely would have left both green. Each
+  // of the three refund claims is therefore anchored to the CASE it is about.
+  const terms = [
+    FEE_TERMS_INTRO,
+    ...FEE_TERMS_ITEMS,
+    ...FEE_TERMS_PAYMENT,
+    ...FEE_TERMS_REFUND,
+    FEE_TERMS_CREDIT,
+  ].join(' ');
+
   check(
     /(?:credited?|comes? off|deducted?)/i.test(terms) &&
       /invoice/i.test(terms) &&
       !/(?:not|never|non|no longer|don't|doesn't|won't)\s+\w*\s*(?:credit|deduct)/i.test(terms),
     'and that the fee comes back off the final invoice — stated, and not negated',
   );
+
+  // Refund claim 1 of 3 — the customer cancels IN TIME. Anchored on the window,
+  // not on "full refund": `FEE_TERMS_REFUND[0]` (we cancel) already contains
+  // that phrase, so an unanchored pin would survive this line being deleted and
+  // the terms would read as non-refundable to a customer who gave a week's
+  // notice.
   check(
-    /(?:not refundable|non-?refundable|no refunds?|isn't refundable)/i.test(terms),
-    'and that it is NOT refundable otherwise — the term most likely to be disputed, so it is disclosed where the box is ticked',
+    /24 hours or more[^.]{0,80}refund|refund[^.]{0,80}24 hours or more/i.test(terms),
+    'the terms give a FULL refund at 24 hours notice or more — anchored on the window, because "full refund" alone is satisfied by the company-cancel line',
   );
-  // The other two disclosures the revision named as material and then did not
-  // assert. Both were deletable with every gate green until now: the payment
-  // timing is the answer to the previous review's most material open question
-  // (when does the charge land?), and "nothing is charged when you book" is what
-  // stops a visitor ticking a box beside "$1,199" believing the next button
-  // bills them.
-  // ANCHORED TO THE PAYMENT VERB. The first version matched a bare
-  // `on the day`, which the outro's "Tell the tech on the day which of these
-  // you want" satisfies — a sentence about choosing a TIER, not about when
-  // money changes hands. Deleting "paid at the end of the visit" left this
-  // green. Caught on its own red pass; the timing phrase has to sit within a
-  // clause of the paying for it to mean anything.
+  // Refund claim 2 of 3 — inside the window, including a no-show. Same anchor,
+  // opposite polarity. The client's answer did not name no-shows separately, so
+  // the copy covers them inside this sentence rather than inventing a clause.
   check(
-    /pa(?:id|y|yable|ying)\b[^.]{0,40}(?:end of the visit|at the visit|on site|on the day)/i.test(terms),
-    'and WHEN the fee is payable, which is what the customer is agreeing to',
+    /(?:inside|within) 24 hours[^.]{0,90}(?:not refunded|no refund|not refundable|non-?refundable)/i.test(terms),
+    'and NO refund inside 24 hours, which is where a missed appointment falls',
+  );
+  // Refund claim 3 of 3 — the WALK-AWAY, and it is a different question from
+  // both of the above. This customer had the assessment done and then declined
+  // the restoration work; the 2026-08-18 cancellation answer says nothing about
+  // them. It is the client's own 2026-08-14 term. BK-36's first draft dropped
+  // it while replacing its gate with the two window pins above, so nothing
+  // asserted it because nothing said it — caught in plan review.
+  check(
+    /(?:not refunded|no refund|not refundable|non-?refundable)[^.]{0,90}(?:go ahead|proceed)|(?:go ahead|proceed)[^.]{0,90}(?:not refunded|no refund|not refundable|non-?refundable)/i.test(terms),
+    'and NO refund once the assessment is done and the customer does not go ahead — a different case from either cancellation rule',
+  );
+
+  // WHEN the money moves, and it INVERTED at the prepay flip.
+  //
+  // This pin used to REQUIRE `paid … end of the visit | on site | on the day`.
+  // Under P9 that claim is exactly what must not survive: the customer pays on
+  // a link, days before the visit, after the office approves. So the assertion
+  // is now two — the mechanism must be stated, and the superseded claim must be
+  // refused. Two assertions where there was one, not a loosening.
+  //
+  // THE REFUSAL KEEPS THE PAYMENT-VERB ANCHOR from the version it replaces. A
+  // bare `/on site/i` would fire on `FEE_TERMS_ITEMS[0]`'s "the on-site
+  // assessment" and survives today only because of a hyphen; a pin whose
+  // greenness depends on a hyphen is the next comment in this file.
+  check(
+    !/pa(?:id|y|yable|ying)\b[^.]{0,40}(?:end of the visit|at the visit|on site|on the day)/i.test(terms),
+    'the terms no longer say the assessment is paid on site or on the day — that is the pre-prepay claim, and it must not survive the flip by even one deploy',
+  );
+  // SCOPED TO FEE_TERMS_PAYMENT, not to the joined terms. `FEE_TERMS_INTRO`
+  // also names the payment link, so a joined-string pin stays green with the
+  // whole payment section deleted — and a red row that breaks PAYMENT would
+  // have logged a red that never happened.
+  const payment = [...FEE_TERMS_PAYMENT].join(' ');
+  check(
+    /payment link|link we email|secure link/i.test(payment),
+    'FEE_TERMS_PAYMENT names the payment link — the mechanism that replaced paying on site',
   );
   check(
-    /(?:nothing is charged|not charged|no charge|nothing to pay)/i.test(terms),
-    'and that nothing is charged at booking time — the site never takes money',
+    /(?:nothing is charged|not charged|no charge|nothing to pay)/i.test(payment),
+    'and that nothing is charged when the request is sent — the form never takes money',
   );
+  // The confirmation is CONTINGENT on the payment. Without this the terms
+  // describe a link and never say what paying it accomplishes, which is the one
+  // thing the customer is trying to work out.
+  check(
+    /confirm(?:ed|s)?[^.]{0,80}(?:payment|paid)|(?:payment|paid)[^.]{0,80}confirm(?:ed|s)?/i.test(terms),
+    'and that the appointment is confirmed BY the payment — the whole point of the flip',
+  );
+
+  // THE STANDARD-RATES SENTENCE. `FEE_TERMS_ITEMS` states standard figures
+  // while the form shows the price that actually applies: mould is cheaper
+  // ($385 against $399) and weekends are 1.5x. Without one sentence
+  // reconciling them, a mould customer reads $399 in the box and $385 beside
+  // the button with no way to know which is real. It is the single most likely
+  // way this copy ships subtly wrong, because nothing about it looks like an
+  // error — which is exactly why it gets a pin rather than a comment.
+  check(
+    /standard rates?/i.test(payment) && /booking form|before you send/i.test(payment),
+    'the terms say the listed figures are STANDARD rates and point at the form for the price that applies — the sentence a mould or weekend customer needs to reconcile two different numbers',
+  );
+
+  // THE WEEKEND SURCHARGE, and it must agree with the code that charges it.
+  //
+  // Client, 2026-08-18: "Yes weekend is extra". Two sentences state this fact —
+  // `AFTER_HOURS_NOTE` beside the inflated figure on the form, gated on the
+  // slot, and `FEE_TERMS_PAYMENT` unconditionally in the terms, which is the
+  // only one a homepage visitor or an email reader ever sees. They are two
+  // sentences rather than one shared string because they do different jobs; the
+  // risk that buys is that they drift to two different multipliers, so both are
+  // pinned against the constants `assessmentQuote` actually multiplies by.
+  const multiplier = String(AFTER_HOURS_NUMERATOR / AFTER_HOURS_DENOMINATOR);
+  check(
+    payment.includes(multiplier),
+    `FEE_TERMS_PAYMENT states the weekend multiplier the code charges (${multiplier})`,
+  );
+  check(
+    AFTER_HOURS_NOTE.includes(multiplier),
+    `and so does AFTER_HOURS_NOTE, so the two cannot drift (${multiplier})`,
+  );
+  check(
+    /Saturday/i.test(payment) && /Sunday/i.test(payment),
+    'and it names Saturday and Sunday, in plain words rather than as a formula',
+  );
+
+  // TWO WORDS THAT MAY NEVER APPEAR IN THIS COPY, asserted at the constants —
+  // which is where the prohibition actually lives. `verify-cutover.ts` asserts
+  // the same two against `dist/` after the build, which is the BK-29 lesson;
+  // this one is exact and fails with a better message.
+  //
+  // "deductible": deductible rebating by contractors is explicitly illegal in
+  // several US jurisdictions and reads as claims-fraud territory to Canadian
+  // insurers. The credit is against OUR invoice and this copy never names what
+  // the customer's share is called. (The word is used elsewhere on the site,
+  // where it explains coverage rather than pricing an assessment. Different
+  // claim, different page, not this block's to make.)
+  const allTerms = [FEE_TERMS_HEADING, terms, FEE_TERMS_ACK_LABEL].join(' ');
+  check(
+    !/deductible/i.test(allTerms),
+    'no fee-terms constant contains the word "deductible"',
+  );
+  // …and nothing says the ASSESSMENT is billed to an insurer. The $699/$1,199
+  // language describes documentation the CUSTOMER receives and can hand to
+  // their adjuster; it never says who pays.
+  const INSURER_BILLING_SHAPES = [
+    /billed to your insur\w+/i,
+    /your insurance (?:pays|covers|is billed)/i,
+    /we bill your (?:insurance|insurer)/i,
+    /(?:covered|paid) by your insurance/i,
+    /insurance (?:pays|covers) (?:for )?(?:the |this )?assessment/i,
+  ];
+  check(
+    !INSURER_BILLING_SHAPES.some((r) => r.test(allTerms)),
+    'and no fee-terms constant states or implies the assessment is billed to an insurer',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-36 — the fee terms, on BOTH messages and in BOTH arms');
+// ---------------------------------------------------------------------------
+//
+// THE HOLE THIS CLOSES. `customerConfirmation()` renders the terms block into
+// the request-received message AND the paid-confirmation message — BK-23's
+// deliberate split, four renders in total. Every terms assertion in this file
+// used to run against the `INSURANCE` fixture, which is `messageType:
+// 'confirmed'`, so deleting the block from the REQUEST arm left every gate
+// green. That is the message every web customer receives first, and the one
+// BK-31's refused blocker B3 named.
+//
+// ORDER IS ASSERTED, NOT JUST PRESENCE. "The block ends on the credit" is an
+// ordering claim — the refund and no-refund language sits in the middle so the
+// last thing read is the good news — and a presence loop cannot tell the
+// difference between that and the reverse.
+{
+  for (const messageType of ['request', 'confirmed'] as const) {
+    const customer = planBookingNotifications({ ...INSURANCE, messageType }).customer!;
+
+    for (const part of ['html', 'text'] as const) {
+      const body = customer[part];
+      const needle = (line: string) => (part === 'html' ? escapeHtml(line) : line);
+
+      for (const line of [
+        FEE_TERMS_HEADING,
+        FEE_TERMS_INTRO,
+        ...FEE_TERMS_ITEMS,
+        ...FEE_TERMS_PAYMENT,
+        ...FEE_TERMS_REFUND,
+        FEE_TERMS_CREDIT,
+      ]) {
+        check(
+          body.includes(needle(line)),
+          `the ${messageType} ${part} part carries the fee terms: "${line.slice(0, 28)}…"`,
+        );
+      }
+
+      // The render order, in the message the customer keeps. `indexOf` over the
+      // first line of each section: they are distinct strings, so a section
+      // moved past another moves its index with it.
+      const at = (line: string) => body.indexOf(needle(line));
+      const chain: [string, number][] = [
+        ['HEADING', at(FEE_TERMS_HEADING)],
+        ['INTRO', at(FEE_TERMS_INTRO)],
+        ['ITEMS', at(FEE_TERMS_ITEMS[0])],
+        ['PAYMENT', at(FEE_TERMS_PAYMENT[0])],
+        ['REFUND', at(FEE_TERMS_REFUND[0])],
+        ['CREDIT', at(FEE_TERMS_CREDIT)],
+      ];
+      for (let i = 1; i < chain.length; i++) {
+        check(
+          chain[i - 1][1] >= 0 && chain[i][1] > chain[i - 1][1],
+          `the ${messageType} ${part} part renders ${chain[i][0]} after ${chain[i - 1][0]}`,
+        );
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

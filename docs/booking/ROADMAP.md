@@ -925,6 +925,12 @@ resume after P7 with the amendments noted in their rows.
 
 ### P8 — Fee terms + homepage availability (client change request 2026-08-13)
 
+> **⚠ P8's payment narrative is SUPERSEDED by P9 (2026-08-16/18).** The fee
+> figures, the three tiers and the credit stand. "Paid at the end of the visit",
+> "nothing is charged at booking", "tell the tech on the day" and blanket
+> non-refundability do not — see P9 below and `prepay-flow-spec.md` §6 item 4,
+> which recorded this marker as outstanding. **BK-36** rewrote the copy.
+
 Client decisions relayed 2026-08-13: (1) new assessment fee conditions — free
 when the customer proceeds with us; otherwise $699 for a cause-of-loss report
 and estimate, or up to $1,200 including an insurance sketch/diagram — shown on

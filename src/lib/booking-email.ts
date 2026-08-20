@@ -36,10 +36,12 @@ import {
 import {
   CALENDAR_ATTACHED_LINE,
   CANCEL_LINE,
+  FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
-  FEE_TERMS_OUTRO,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
   HAVE_READY_HEADING,
   HAVE_READY_ITEMS,
   TIMEZONE_NOTE,
@@ -368,12 +370,25 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     // the confirmed message carries it because it is the one the customer keeps
     // after paying, and terms that vanish from the record of a completed
     // purchase are terms nobody can point at afterwards.
+    //
+    // SO THIS IS FOUR RENDERS, NOT TWO — {request, confirmed} x {html, text} —
+    // and until BK-36 the verify script only ever exercised the CONFIRMED one.
+    // Deleting the block from the request arm left every gate green, on the
+    // message every web customer receives first. `verify-booking-email.ts` now
+    // runs the terms assertions over both message types and both arms.
+    //
+    // ORDER IS A CONSTRAINT, not layout: HEADING -> INTRO -> ITEMS -> PAYMENT
+    // -> REFUND -> CREDIT, the same on all five renders across the site. The
+    // block ends on the credit because the last thing read should be the good
+    // news; the refund and no-refund language sits in the middle. Pinned.
     `<h2 style="font-size:16px;margin:24px 0 8px;">${escapeHtml(FEE_TERMS_HEADING)}</h2>`,
     `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_INTRO)}</p>`,
     '<ul style="margin:0 0 16px;padding-left:20px;">',
     ...FEE_TERMS_ITEMS.map((item) => `<li style="margin:4px 0;">${escapeHtml(item)}</li>`),
     '</ul>',
-    ...FEE_TERMS_OUTRO.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    ...FEE_TERMS_PAYMENT.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    ...FEE_TERMS_REFUND.map((line) => `<p style="margin:0 0 8px;">${escapeHtml(line)}</p>`),
+    `<p style="margin:0 0 8px;">${escapeHtml(FEE_TERMS_CREDIT)}</p>`,
     // BK-31. The tier list above is the menu; this is what THIS customer chose
     // and what it comes to. Written back to them in the message they keep,
     // because the figure on the form is the one thing they cannot re-check
@@ -420,7 +435,10 @@ function customerConfirmation(input: BookingNotificationInput): Message | null {
     `${FEE_TERMS_HEADING}:`,
     FEE_TERMS_INTRO,
     ...FEE_TERMS_ITEMS.map((item) => `  - ${item}`),
-    ...FEE_TERMS_OUTRO.flatMap((line) => ['', line]),
+    ...FEE_TERMS_PAYMENT.flatMap((line) => ['', line]),
+    ...FEE_TERMS_REFUND.flatMap((line) => ['', line]),
+    '',
+    FEE_TERMS_CREDIT,
     ...(input.assessmentTier ? ['', `You chose: ${assessmentSummary(input)}`] : []),
     ...(isRequest ? [] : ['', CALENDAR_ATTACHED_LINE]),
     '',

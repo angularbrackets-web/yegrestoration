@@ -6,10 +6,12 @@ import BookingForm from '../components/BookingForm.svelte';
 import { BUSINESS } from '../data/services';
 import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
 import {
+  FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
-  FEE_TERMS_OUTRO,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
 } from '../lib/booking-copy';
 
 // BK-27 reworded the rendered header and pinned the template; BK-29 finished
@@ -100,24 +102,6 @@ const schemas = [
           tell you honestly whether we can get to you.
         </p>
 
-        <!--
-          BK-27. The terms in full, before the form rather than after it: a
-          visitor decides whether to spend the next three steps on this page
-          knowing what the visit can cost. Step 3 shows them again above the
-          checkbox that acknowledges them — that repetition is deliberate, and
-          both renderings read the same constants, so a client wording change
-          lands in both.
-        -->
-        <div class="mt-5 rounded-xl border border-black/10 bg-black/[0.03] px-5 py-4">
-          <p class="text-sm font-semibold text-yeg-text">{FEE_TERMS_HEADING}</p>
-          <p class="text-sm text-yeg-text-secondary mt-1">{FEE_TERMS_INTRO}</p>
-          <ul class="mt-2 space-y-1 text-sm text-yeg-text-secondary list-disc pl-5">
-            {FEE_TERMS_ITEMS.map((item) => <li>{item}</li>)}
-          </ul>
-          {FEE_TERMS_OUTRO.map((line) => (
-            <p class="text-sm text-yeg-text-secondary mt-2">{line}</p>
-          ))}
-        </div>
       </header>
 
       <!--
@@ -125,6 +109,42 @@ const schemas = [
         above the fold, and its submit button stays disabled until hydration.
       -->
       <BookingForm client:load />
+
+      <!--
+        BK-27's terms, BELOW the picker since BK-36.
+
+        They used to render inside the <header> above, which put the friction on
+        the first screen and the converting element — the calendar — below it.
+        The order was backwards: these are the qualification on an offer that has
+        not been made yet. A visitor who has picked a time is a visitor with a
+        reason to read them.
+
+        THIS IS THE INFORMATIONAL COPY. Step 3 renders the same constants again,
+        directly above the checkbox that acknowledges them, and THAT is the
+        acknowledged copy — which is why FEE_TERMS_ACK_LABEL's "the terms above"
+        stays true no matter where this block sits. The repetition is deliberate
+        and both renderings read `booking-copy.ts`, so a client wording change
+        lands in both or in neither. Never a second copy of the strings.
+
+        Order is a constraint, not a layout choice: HEADING -> INTRO -> ITEMS ->
+        PAYMENT -> REFUND -> CREDIT. The block ends on the credit because the
+        last thing read should be the good news, and `verify-cutover.ts` pins
+        both the order and the fact that this box renders after the island.
+      -->
+      <div class="mt-8 rounded-xl border border-black/10 bg-black/[0.03] px-5 py-4">
+        <p class="text-sm font-semibold text-yeg-text">{FEE_TERMS_HEADING}</p>
+        <p class="text-sm text-yeg-text-secondary mt-1">{FEE_TERMS_INTRO}</p>
+        <ul class="mt-2 space-y-1 text-sm text-yeg-text-secondary list-disc pl-5">
+          {FEE_TERMS_ITEMS.map((item) => <li>{item}</li>)}
+        </ul>
+        {FEE_TERMS_PAYMENT.map((line) => (
+          <p class="text-sm text-yeg-text-secondary mt-2">{line}</p>
+        ))}
+        {FEE_TERMS_REFUND.map((line) => (
+          <p class="text-sm text-yeg-text-secondary mt-2">{line}</p>
+        ))}
+        <p class="text-sm text-yeg-text-secondary mt-2">{FEE_TERMS_CREDIT}</p>
+      </div>
 
       <!-- Escape hatch for anyone not ready to commit -->
       <p class="text-sm text-yeg-text-secondary text-center mt-6">

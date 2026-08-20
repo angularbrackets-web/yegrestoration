@@ -2,10 +2,12 @@
 import ContactForm from '../components/ContactForm.svelte';
 import NextOpening from '../components/NextOpening.svelte';
 import {
+  FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
   FEE_TERMS_INTRO,
   FEE_TERMS_ITEMS,
-  FEE_TERMS_OUTRO,
+  FEE_TERMS_PAYMENT,
+  FEE_TERMS_REFUND,
 } from '../lib/booking-copy';
 
 interface Props {
@@ -290,16 +292,39 @@ const { showForm = false } = Astro.props;
                 anything.
               </p>
               <ul class="space-y-2 mb-6 text-sm text-yeg-text-secondary">
-                <li>Instant confirmation — no waiting for a callback</li>
                 <!--
+                  BK-36 rewrote the first line. It said "Instant confirmation —
+                  no waiting for a callback", which under prepay was false twice
+                  over: submission produces a REQUEST, and confirmation waits on
+                  a human review AND a payment. It was the most load-bearing
+                  false sentence left on the site after the flip, because it was
+                  a promise about the mechanism made in the visitor's own words —
+                  one screen above the terms box that describes the real one.
+
+                  The comment here used to assign it to BK-23. BK-36 took it
+                  instead: splitting one card's copy across two tickets is how
+                  one half ships reworded beside the other half still lying, and
+                  this is a copy change with a copy reviewer.
+
+                  THE GENERAL RULE, and it is the one worth carrying: a copy
+                  inventory built from "where does the constant render" misses
+                  every sentence that describes the same mechanism in its own
+                  words. BK-29 paid for this once already, in `dist/` rather
+                  than in source.
+
                   BK-22 made a photo mandatory, so the old "photos optional"
-                  line went false. It is customer-facing copy about the booking
-                  form that lives outside the island, and no gate reads it —
-                  `verify-cutover.ts` sweeps CTAs and paths, not claims — so it
-                  is only ever as true as the last person to remember it.
-                  The line above it ("Instant confirmation") goes false with
-                  BK-23 and is that ticket's to rewrite.
+                  line went false too and is the second one below.
+
+                  The insurance line is TRUE and stays exactly as written. It is
+                  also the sentence FEE_TERMS_ITEMS[1] leans on, and it must
+                  never drift toward "your insurance pays" or "we bill your
+                  insurer" — that shape is a pinned prohibition on this file,
+                  because nothing may state or imply the ASSESSMENT is billed to
+                  an insurer. (The site says we bill insurers for restoration
+                  WORK in plenty of other places. Different claim, different
+                  page, not this card's to make.)
                 -->
+                <li>Pick a time online instead of playing phone tag — every request is reviewed before we confirm it</li>
                 <li>Send a photo or two — we arrive with the right equipment</li>
                 <li>Insurance claim? We document it the way your adjuster needs</li>
               </ul>
@@ -320,9 +345,13 @@ const { showForm = false } = Astro.props;
                 <ul class="mt-2 space-y-1 text-xs text-yeg-text-secondary list-disc pl-5">
                   {FEE_TERMS_ITEMS.map((item) => <li>{item}</li>)}
                 </ul>
-                {FEE_TERMS_OUTRO.map((line) => (
+                {FEE_TERMS_PAYMENT.map((line) => (
                   <p class="text-xs text-yeg-text-secondary mt-2">{line}</p>
                 ))}
+                {FEE_TERMS_REFUND.map((line) => (
+                  <p class="text-xs text-yeg-text-secondary mt-2">{line}</p>
+                ))}
+                <p class="text-xs text-yeg-text-secondary mt-2">{FEE_TERMS_CREDIT}</p>
               </div>
 
               {/*
