@@ -1699,9 +1699,24 @@ together or the site tells a lie between deploys.
       it, and BK-23 Task 4 expires it at `slot − 4h` with an apology email if
       nobody does. That is a live operational risk from the moment the flip
       landed, and it is a people problem rather than a code one.
-   4. **BK-44 is FIXED IN CODE but NOT DEPLOYED (2026-08-20), so the rule for
-      the admin panel is unchanged until it ships: use "Review the amount →"
-      and "Mark as paid — Interac" only, never the STATUS dropdown.** That hole
+   4. **DEPLOYED 2026-08-20 — BK-44, BK-45 and BK-46 are on production
+      (`8854dd7`), merged fast-forward from `deploy-2-prepay` into `main`.**
+      The dropdown hole is closed, the paying customer's confirmation carries
+      the terms and what they paid, and the appointment screen states one total
+      instead of two. **The operational rule below no longer describes a
+      workaround — it describes what the code now enforces**, which is the
+      point of the ticket rather than a note about it.
+
+      **This deploy CAN be rolled back**, unlike the 2026-08-19 one: no
+      migration, no new env var, no new route, and `main`'s previous commit
+      (`95cb48f`) is already post-009 code. A Vercel instant rollback returns to
+      it safely. That is worth recording because the "forward-fix only" warning
+      above is about the P9 cutover and does not apply to everything after it.
+
+      **What was true until it shipped**, kept for the record: BK-44 was fixed
+      in code but not deployed, so the rule for the admin panel was use
+      "Review the amount →" and "Mark as paid — Interac" only, never the STATUS
+      dropdown. That hole
       cost nothing in test mode and costs a free crew dispatch now. The fix is
       committed on `deploy-2-prepay`; deploying it is a rollout step and has
       not been taken.
@@ -1717,10 +1732,15 @@ together or the site tells a lie between deploys.
       The same pass produced **BK-46** and **BK-47** from a deliberate read of
       the appointment screen — see Known traps. Neither is deployed either.
 
-      **Four tickets now sit against this branch and none of them is on
-      production: BK-44 committed, BK-45 implemented and reviewed but not yet
-      committed, BK-46 and BK-47 still drafts. Deploying is a decision the user
-      has not made, and no ticket may take it as a step of its own.**
+      **BK-44, BK-45 and BK-46 shipped together on 2026-08-20. BK-47 is still a
+      draft and is the only P9 ticket not on production.** It is layout and copy
+      on the same admin screen BK-46 just changed, so it is safe to leave.
+
+      **Two defects were deliberately shipped rather than fixed**, both recorded
+      in Known traps with owners and neither visible to a customer: nothing
+      clears `paid_at` on re-approval (the display is guarded, the column still
+      lies to a query), and `confirmation_sent_at` cannot answer "has this
+      customer heard from us" because five senders stamp nothing.
    5. **`DATABASE_URL` is shared between Preview and Production**, which is why
       no preview deploy can be used to test this flow.
 
