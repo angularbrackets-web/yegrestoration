@@ -148,6 +148,44 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   lies in the alarming direction. **Owner: nobody — the probe is documentation,
   not code.**
 
+- **The live cycle proved the happy path and FIVE paths remain unexercised in
+  production.** Booking #36 (2026-08-20) ran request → review → approve → card
+  → confirm → refund → cancel on real live keys, and every surface was correct.
+  What it did **not** touch, recorded so nobody reads "tested live" as "tested":
+
+  - **A travel fee.** #36 had `travel_fee_cents = 0` — so **BK-46's headline
+    fix, the header omitting travel, was never seen working in production.** It
+    is covered by assertions and by no observation. The single most valuable
+    next test is a booking with a non-zero travel fee, checking the header total
+    matches the settled panel.
+  - **Interac.** "Mark as paid — Interac" has never run against a real row. It
+    is the second entry point to `markPaid` and the only one an office member
+    triggers by hand.
+  - **The $0 goodwill approval** (`approveFree`), which reaches `markPaid` with
+    `method: 'none'` and is the only path where a customer receives no approval
+    email at all.
+  - **Decline**, and both **expiry sweeps** (payment expiry, and BK-23 Task 4's
+    stale-request sweep at slot−4h). The cron has never fired on a real row.
+  - **"Resend confirmation"**, which BK-45 made send the same message as the
+    payment path — proven by assertion, not by a click.
+
+  None is a known defect. Severity: low individually; the note exists because
+  "we tested it live" is the kind of sentence that stops further testing.
+  **Owner: nobody — it is a test plan, not a ticket.**
+
+- **The payment deadline can land in the middle of the night, and nobody has
+  decided whether that is wanted.** `PAYMENT_WINDOW_HOURS = 12`, so booking #36
+  — approved at 3:58 p.m. for a slot three days out — told the customer *"Please
+  pay by Fri, Aug 21 · 3:58 a.m."* The formula is `min(approved_at + 12h,
+  slot_start − 4h)` and it worked exactly as specified; the deadline is simply
+  an unsociable hour, and if it passes the slot is released.
+
+  P9 records these as *"business-feel numbers the client may move"*, and this is
+  the first observation of what the number produces in practice. Options if it
+  is unwanted: raise the window, or round the deadline forward to a civil hour.
+  Both are one constant and one function. **Not a defect. Owner: a client
+  decision nobody has been asked for.**
+
 - **Stripe's receipt gives the customer a different email address and a
   different phone number than every other surface.** Observed on live booking
   #36's receipt, 2026-08-20: it closes with *"contact us at

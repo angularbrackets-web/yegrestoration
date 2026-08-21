@@ -85,6 +85,35 @@ Read the area's `ROADMAP.md` before starting anything.
   helper moves the minimum the thing under test actually reads: that one's first
   version also stamped `payment_status` and broke two unrelated arms.
 
+- **A configuration change is not evidence of its own effect.** BK-48. The GST
+  registration number was entered in the Stripe dashboard on 2026-08-20 and the
+  compliance item was marked CLOSED the same morning — **by an entry whose own
+  text said the only proof was a real receipt, written while no receipt
+  existed.** Nine hours later the first real charge produced a receipt with no
+  registration number on it: the dashboard field governs *invoices*, a Checkout
+  Session issues a *receipt*, and the two are different artifacts. The fix was
+  code, in a line item name. The same day, the ROADMAP's own recorded
+  health-check probe reported a live webhook as broken, because the documented
+  `curl` omitted the content type the real caller sends. **Therefore:** an item
+  whose effect lands on an artifact nobody has looked at is not closed — it is
+  *pending an artifact*. Close it when the artifact arrives, and write the probe
+  so it produces the artifact rather than something adjacent to it.
+
+- **A negative assertion is shaped for the claim it was written against, and
+  covers no other claim of the same class.** BK-48 hit this twice in one
+  ticket. The `$0` confirmation was guarded by *"renders no computed amount"* —
+  `!/\$[\d,]+\.\d{2}/` — which a GST registration number walks straight
+  through, carrying no dollar sign and no decimals. The ticket documented that
+  hole in its own plan review, and then shipped relying on `!/\$\d/` one file
+  over to keep the same number off the cancellation email. Implementation review
+  found the second instance three hours after the first was written down.
+  **Therefore:** when adding a claim to a surface that has negative pins, ask
+  what those pins actually match rather than what they are named — and add the
+  new claim to the banned list rather than assuming an existing guard is about
+  the category. Sibling of the copy-inventory trap above: that one is about
+  finding every place a claim is *made*, this one about every place it is
+  *forbidden*.
+
 - **A rule rewrite invalidates every case enumerated under the old rule,
   including the cases in the same document.** BK-44's plan tabulated
   `approved_awaiting_payment -> confirmed` as forbidden, with its reasons. Plan
