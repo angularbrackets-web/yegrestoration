@@ -12,6 +12,114 @@ policy/claim fields, media upload, SMS).
 
 Process rules are in `/CLAUDE.md`. Ticket files are in `tickets/`.
 
+---
+
+## START HERE — session handoff, 2026-08-21
+
+**Written at the end of the session that built BK-33, so the next one does not
+have to reconstruct it or guess.** Everything below is either an answer somebody
+gave, a decision somebody made, or a question nobody has answered yet. Where a
+thing is undecided it says so; do not resolve those in planning.
+
+### Where the code stands
+
+**BK-33 (refund mechanics) is COMMITTED, REVIEWED, and NOT DEPLOYED.** Plan
+review 9 blockers / 10 should-fix / 5 nits; implementation review 2 blockers /
+10 should-fix / 7 nits; **all 41 findings accepted, none refused**. Typecheck 0,
+build clean, all 23 verify scripts green, **28 red-observed rows**. Migration 011
+is applied to the **Neon dev branch only**.
+
+`main` is otherwise as it was: Deploy 2 live with real Stripe keys, BK-44/45/46/48
+deployed. **BK-47 is the only other P9 draft and was deliberately not built.**
+
+### THE THREE STEPS THAT SHIP IT, AND THE ONE THAT IS EASY TO SKIP
+
+See "BK-33's ROLLOUT" in §P9 for the table. The step that matters most:
+**the four refund event types are NOT on the live Stripe webhook endpoint**,
+which carries only the four Checkout events. Until they are added — in the
+Dashboard, live mode AND test mode — `reconcileRefund` never fires and the entire
+dashboard-refund half of the ticket is **inert in production with every gate
+green**. And per BK-48's lesson, adding them does not close the ticket: only a
+real refund taken in the live dashboard, observed reconciling on a real row,
+does.
+
+### The four product answers this session got, and what they overturned
+
+The user was asked before planning, and answered:
+
+1. **ONE action, not two controls.** A dedicated **"Cancel and refund"** panel
+   that refunds and cancels together. **This killed the Scope's *"Refund in full*
+   *checkbox, defaulted ON"*** — there is no company-side reason field to default
+   it off, and the only cancel control is the status dropdown inside "Update the
+   record", the panel that says of itself that it is record-keeping and not a
+   decision. The bullet's INTENT survives and drove the design: the refund must
+   be impossible to forget.
+2. **The cancellation email names the refund — only when the customer paid and
+   only when we are refunding.** A no-refund cancellation is byte-identical to
+   what shipped before, and that is pinned.
+3. **The office sees the REAL processing fee**, read from Stripe at the confirm
+   step, not an estimate.
+4. **The refund amount is an editable field**, so partial refunds are issued from
+   the screen.
+
+**Answer 4 forced answer 2's content:** with partials reachable, "a refund has
+been issued" with no figure misleads a customer refunded $300 of $628.43. The
+email names the amount, and a pin keeps the booking's full total OUT of it.
+
+### Decisions taken WITHOUT the user, all overturnable
+
+Recorded in BK-33's Assumptions log as A02-A08. The ones most worth a second
+opinion: the fee is fetched at the confirm step rather than on every page render
+(A02); `refund.created` is ignored in favour of `charge.refunded`, which carries
+the running total (A03); a partial refund still cancels, because that is what the
+action is (A04); no `booking-config.ts` refund constants were added, because
+nothing branches on them (A05); and `refund.updated` with `succeeded` is ignored
+rather than reconciled, which deviates from the ticket's own Task 5 table (A07).
+
+### QUESTIONS THE USER HAS NOT ANSWERED — do not resolve these in planning
+
+1. **The refund email's opening line.** It drops `CANCELLED_LEAD`'s *"as
+   requested"* and reads *"We've cancelled the assessment below and sent your
+   payment back. Nothing further is needed from you."* Reasoning: on a
+   company-side cancellation "as requested" is false, and it would sit in the
+   same message as the customer's money. **Customer-facing copy — the user was
+   asked to check it and has not.**
+2. **Should a partial refund ever NOT cancel the booking?** Today it always
+   cancels (A04). A goodwill adjustment on a job still going ahead would need a
+   different control.
+3. **Interac / on-site refunds are recorded nowhere.** Build a "record a refund
+   taken outside Stripe" write, or accept it and use the notes field? See Known
+   traps.
+4. **What is next** — BK-47 (cosmetic), or Deploy 3's BK-25 / BK-24?
+5. **The payment deadline landing at 3:58 a.m.** (booking #36's real deadline).
+   Raise `PAYMENT_WINDOW_HOURS`, or round to a civil hour. One constant either
+   way. Nobody has been asked.
+6. **Open client question #6** — whether "credited against your final invoice"
+   matches how an insurance job actually settles.
+
+### Operational items only the user can do
+
+Briefing the office (a live risk since the P9 flip, and now including "refunds
+happen in the admin panel, not in Stripe"); confirming `775654577RT0001` actually
+appears on a real receipt (**BK-48 is still pending that artifact**); and the
+Stripe Business/Public details step that fixes the receipt's unwatched Gmail
+address and wrong phone number.
+
+### Two things a new session will otherwise get wrong
+
+- **The rollout list below still says "a real live booking has never been
+  made".** It is stale: booking #36 was charged $628.43 on a real card on
+  2026-08-20, refunded and cancelled. Left in place rather than edited because
+  the paragraph around it carries other history; read it with this correction.
+- **A crashed verify script prints no `✗`.** The suite is not idempotent against
+  its own wreckage — a run killed mid-flight leaves probe rows that make the next
+  run die on a unique index, and that crash reads as a pass to any harness
+  counting failure markers. It cost one falsely-green red-first row this session.
+  See `CLAUDE.md`'s seventh process trap. **Clear the probe rows after any
+  interrupted run before believing a result.**
+
+---
+
 ## Locked — do not relitigate
 
 Reviewers and planners: treat this section as settled. Raise it only if a ticket
@@ -173,6 +281,34 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   "we tested it live" is the kind of sentence that stops further testing.
   **Owner: nobody — it is a test plan, not a ticket.**
 
+- **A VERIFY SCRIPT THAT CRASHES PRINTS NO `✗`, SO A RED-FIRST CHECK COUNTING
+  FAILURES READS IT AS A PASS.** Found 2026-08-20 while red-firsting BK-33.
+  `verify-booking-admin-db.ts` died part-way through on a `23505` from probe
+  rows a timed-out earlier run had left behind — `cs_test_cronprobe0001`
+  already exists — and everything after that point, **including BK-44's
+  192-transition matrix**, never executed. The harness in use was
+  `npm run --silent verify:... | grep -c "✗"`, which returned **0**, and 0 was
+  being read as "the assertion did not go red".
+
+  So one red row was recorded as green that was not: removing the refund clause
+  from `update.ts`'s WHERE — the SQL transcription of the BK-33 rule — appeared
+  to change nothing, when in fact the test that would have caught it was not
+  running. **The measurement was wrong in the direction that hides a missing
+  pin**, which is the worst direction, and it would have shipped a rule whose
+  route-level half was unpinned.
+
+  Two things follow, and the second is the general one. **A red-first check must
+  require the run to have COMPLETED** — assert the exit code and the presence of
+  the script's own summary line, not the count of failure markers. And
+  **`verify-booking-admin-db.ts` is not idempotent against its own wreckage**:
+  its cleanup runs at the end, so any run killed mid-flight leaves rows that
+  make the NEXT run crash on a unique index, and the crash surfaces as a stack
+  trace among expected error logs rather than as a failure. Severity: low for
+  production, high for the method — it is a gate that lies in the reassuring
+  direction. **Owner: nobody — the harness is not code in the repo, but the
+  non-idempotent fixture is, and a ticket that made the probe ids unique per run
+  would close it.**
+
 - **The payment deadline can land in the middle of the night, and nobody has
   decided whether that is wanted.** `PAYMENT_WINDOW_HOURS = 12`, so booking #36
   — approved at 3:58 p.m. for a slot three days out — told the customer *"Please
@@ -185,6 +321,46 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   is unwanted: raise the window, or round the deadline forward to a civil hour.
   Both are one constant and one function. **Not a defect. Owner: a client
   decision nobody has been asked for.**
+
+- **`reconcileRefund` writes the total the EVENT carried, and Stripe does not
+  guarantee event order.** BK-33, found at implementation review. The figure is
+  deliberately an overwrite rather than an addition, and it is deliberately
+  allowed to move DOWN — that is how a failed refund corrects the record, since
+  Stripe lowers `charge.amount_refunded` when one fails. The residual is the
+  terminal out-of-order case: a delayed `charge.refunded` for an earlier,
+  smaller refund arriving after a later one leaves the row reporting the smaller
+  figure permanently. No further event arrives to correct it, and because the
+  booking is by then released and no refund of ours is in flight, **no flag is
+  raised either** — the record diverges quietly, which is the class of defect
+  BK-33 exists to remove.
+
+  Stripe protects the money throughout: its own over-refund refusal is what
+  stops the wrong figure becoming a wrong refund. This is a record-truth
+  residual only.
+
+  **The fix, in the same spirit as the rule it follows ("Stripe's latest word
+  wins"):** retrieve the charge in the `reconcile-refund` arm and write its
+  CURRENT `amount_refunded` rather than the payload's snapshot — same authority,
+  no ordering assumption. Not taken inside BK-33 because it adds a Stripe call
+  and a failure mode to the webhook, which deserves its own consideration rather
+  than a late edit to a money path. Severity: low, and lower still until a
+  booking is partially refunded twice. **Owner: unassigned, needs a ticket.**
+
+- **A REFUND OF AN e-TRANSFER OR AN ON-SITE PAYMENT IS RECORDED NOWHERE, and
+  that is BK-33's headline defect surviving one payment method over.** BK-33
+  refunds through Stripe, so its action refuses a row whose `payment_method` is
+  `interac`, `onsite` or `none` and tells the office to send the money back the
+  way it arrived. Nothing then records that they did: `payment_status` stays
+  `paid`, and `paymentReceipt` keeps rendering **"Marked paid by X —
+  e-Transfer"** on a booking that was refunded in full at the bank.
+
+  That is the exact sentence BK-33 was filed to remove from the card path,
+  reachable through the other one. It is a trap rather than a blocker only
+  because **"Mark as paid — Interac" has never run against a real row** (see the
+  five-untested-paths note above), so no such booking exists yet. The fix is
+  either a "record a refund taken outside Stripe" write, or making the office
+  note it in `admin_notes` and accepting that the panel lies. Severity:
+  moderate. **Owner: unassigned, needs a ticket.**
 
 - **Stripe's receipt gives the customer a different email address and a
   different phone number than every other surface.** Observed on live booking
@@ -205,7 +381,17 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   **Owner: nobody — configuration, recorded so it is not rediscovered by a
   customer.**
 
-- **A refund issued in Stripe does not reach this system, and BK-46 just made
+- **RESOLVED IN CODE 2026-08-20 by BK-33 — NOT DEPLOYED, and the reconciliation
+  half is ALSO pending a Stripe Dashboard step (see the rollout note).** The
+  webhook now handles `charge.refunded`, `refund.updated`, `refund.failed` and
+  `charge.refund.updated`, and `reconcileRefund` writes Stripe's own running
+  total onto the row. **It is inert in production until those four event types
+  are added to the live endpoint**, which today carries only the four Checkout
+  events — a configuration change whose effect lands on an artifact nobody has
+  looked at, which is the shape this document has now been bitten by twice.
+  Original entry follows.
+
+  **A refund issued in Stripe does not reach this system, and BK-46 just made
   that visible.** There is no refund code anywhere — `refunds.create` appears
   nowhere in `src/`, and the webhook handles no refund event — so a refund taken
   in the Stripe dashboard leaves `payment_status = 'paid'`, `paid_at` stamped
@@ -369,7 +555,9 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   and half-correcting a paragraph is worse than either state. Recorded so BK-47
   does not go looking for a string that is no longer there.)
 
-- **`approve` and `rollBack` never clear `paid_at` or `payment_method`, so a
+- **RESOLVED 2026-08-20 by BK-33 — kept in full because it took three tickets
+  and the reason it survived two of them is the lesson.**
+  **`approve` and `rollBack` never clear `paid_at` or `payment_method`, so a
   re-approved booking carries the previous cycle's payment.** Nothing in the
   system clears either column, and `booking-payment.ts:608-618` even stamps
   `paid_at` on a `cancelled` / `declined` / `payment_expired` row when money
@@ -392,9 +580,47 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   `rollBack` — a write path, on a system taking live card payments — separable
   from a display fix and deliberately not done inline. It remains a record-truth
   defect: a query over `paid_at` still returns rows that were not paid on that
-  cycle. **Owner: unassigned, needs a ticket.** Whoever writes it decides whether
-  re-approval clears the columns or whether that history is worth keeping
-  somewhere else.
+  cycle. **Owner: unassigned, needs a ticket.** *(Superseded — see the close
+  below.)*
+
+  **BK-33 ADDED THREE MORE COLUMNS TO THIS SET AND CLOSED THE CASE THAT MATTERS,
+  2026-08-20.** `stripe_refund_id`, `refunded_amount_cents` and `refunded_at`
+  are equally uncleared by `approve` and `rollBack`. What made that different
+  from `paid_at` is that BK-33's invite-crossing rule READS the refund state, so
+  a stale value would not merely mislead a query — it would refuse a legitimate
+  transition forever. Plan review caught it: keying the rule on `refunded_at`
+  would have barred a booking that was refunded, re-approved and **genuinely
+  re-paid** from ever re-entering the invite-holding set, while every screen
+  showed it as paid. Two answers, both taken: the rule keys on `payment_status`
+  (the column the payment path maintains — BK-46's own reasoning), and
+  `markPaid`'s confirm UPDATE now clears all five refund columns, so the re-pay
+  path recovers.
+
+  **AND THEN IMPLEMENTATION REVIEW CLOSED THE WHOLE ITEM, WHICH IS WHY THIS
+  ENTRY IS NOW RESOLVED RATHER THAN AMENDED AGAIN.** An earlier revision of this
+  paragraph ended *"`approve` and `rollBack` still clear nothing"*; that
+  sentence was true when written and false a few hours later, which is the
+  stale-comment shape this document records three other instances of — caught
+  here in the document itself rather than in code.
+
+  BK-33's reviewer found the residual was not a query-truth defect at all any
+  more. `approve` sets `payment_status = 'pending'`, which moves a row OUT of
+  the refunded set the new rule reads, while `paid_at` stays stamped from the
+  cycle whose money went back — so a refunded booking re-approved and never
+  re-paid could be edited `declined -> confirmed`, dispatching a crew and
+  mailing a fresh REQUEST ics on money the customer already had. Neither version
+  of BK-33's case table enumerated it.
+
+  **`approve`, `approveFree` and `rollBack` now clear `paid_at`,
+  `payment_method`, `paid_amount_cents`, `payment_reference` and all five refund
+  columns**, and the hole is pinned by a red row (R24).
+
+  **The transferable part is not the fix.** This item sat open across three
+  tickets because the judgement *"the display is guarded, so a stale column is
+  harmless"* was correct every time it was made. It stopped being correct the
+  moment a RULE started reading those columns rather than a screen. **A stale
+  column is only ever as harmless as the least demanding thing that reads it,
+  and what reads it changes.** **Owner: BK-33 — RESOLVED.**
 
 - **BK-47 inherits a copy dependency it will break.** The Update panel says
   approving is *"in “Review this request” above"*, and that is true only because
@@ -1667,7 +1893,7 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | ✅ **implemented 2026-08-20** — plan review returned 6 blockers, all fixed; `appointmentMoney` replaces the header's own derivation; the due line asks whether the row owes; a Payment received panel gives `paid_at`/`payment_method` their first reader; the mail label tells the truth. 10 red-first rows. **Not deployed.** |
 | BK-48 | **The GST registration number is on no receipt we issue** — the Dashboard tax ID governs invoices, a Checkout Session issues a receipt, and our GST is a hand-built line item, so Stripe rendered no registrant. Found by the receipt from the first real charge, 2026-08-20 | Reviewed | ✅ **DEPLOYED 2026-08-20** (`85b2515`) — plan review 3 blockers, implementation review 2 blockers, all fixed; the number is a constant carried by the Stripe line item name and both money emails; 7 red-first rows |
 | BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
-| BK-33 | Refund mechanics — `refunds.create`, company-cancel refund in one action, reconciliation webhook. **Customer-cancel policy values are now answered (24h), so only the mechanism is left** | Reviewed | draft |
+| BK-33 | **Refund mechanics** — `refundPayment()` with a DATABASE claim as the dedupe (a Stripe idempotency key is not one: keys are pruned at 24h and concurrent same-key requests are not saved), a one-action **"Cancel and refund"** panel with an editable amount and a confirm step showing the real fee read from Stripe, the reconciliation webhook for dashboard refunds, refunded arms on `paymentReceipt`, and the invite-crossing rule extended so a refunded booking cannot be un-cancelled back to `confirmed`. **Migration 011** (additive, five columns) | Reviewed | ✅ **implemented 2026-08-20** — plan review returned **9 blockers / 10 should-fix / 5 nits, all 25 accepted, none refused**; four of the blockers would each have moved or misreported money on an ordinary path. Acceptance criteria written at plan review. **NOT DEPLOYED**, and closure additionally depends on an artifact — see the rollout note |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
 | BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | ✅ **DEPLOYED 2026-08-16** (`5a2fe4a`) — reviewed, all findings resolved. Left `verify:booking:admin:db` red (see Known traps); repaired 2026-08-16 |
@@ -1953,6 +2179,22 @@ together or the site tells a lie between deploys.
    (service-area badge) and 6 (photo gallery + unseen-files badge).
 4. **Twilio-gated.** BK-34b; BK-06 with the reminder query filtered to
    `status = 'confirmed'`; escalation transport swaps email → owner SMS.
+
+**BK-33's ROLLOUT — THREE STEPS, AND THE THIRD IS NOT OPTIONAL.**
+
+| # | Step | Why |
+| --- | --- | --- |
+| 1 | `migrate --target prod --only 011-refunds` | Five columns and one partial index. Additive only — no rename, no narrowed CHECK, no rebuilt index that live code names — so it may go **before** the deploy under the rule 008's outage produced. Already applied to the dev branch |
+| 2 | Deploy the code | No new env var. The new admin endpoint is pinned against the generated route table rather than against `astro dev` |
+| 3 | **Add four event types to the LIVE Stripe webhook endpoint** — `charge.refunded`, `refund.updated`, `refund.failed`, `charge.refund.updated` — and to the test-mode endpoint | The live endpoint carries **four Checkout events** and nothing else. Without this the entire reconciliation half is **inert in production with every gate green**, which is exactly the shape BK-48 was filed for three days earlier |
+
+**AND THE TICKET DOES NOT CLOSE ON STEP 3.** Adding the event types is a
+configuration change, and *"a configuration change is not evidence of its own
+effect"* — the same sentence that marked the GST item closed nine hours before a
+real receipt disproved it. BK-33 closes when **a real refund taken in the live
+Stripe dashboard, on a real row, is observed reconciling**: `payment_status`
+moved off `paid`, `refunded_amount_cents` matching Stripe, and the row flagged.
+Until then it is *pending an artifact*.
 5. **Independent, pull in anytime.** BK-26, BK-28.
 
 Dependency edges: `BK-32 → BK-31` (needs a tier to charge), `BK-32 → BK-23`

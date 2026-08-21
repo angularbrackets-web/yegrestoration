@@ -114,6 +114,21 @@ Read the area's `ROADMAP.md` before starting anything.
   finding every place a claim is *made*, this one about every place it is
   *forbidden*.
 
+- **A crashed verify script prints no `✗`, so red-first measured by counting
+  failures reads a crash as a pass.** BK-33, 2026-08-20. A red-first harness of
+  `npm run --silent verify:… | grep -c "✗"` returned **0** for a break that
+  should have been loud — because `verify-booking-admin-db.ts` had died
+  part-way through on a unique-index violation from probe rows an earlier
+  timed-out run left behind, and **BK-44's 192-transition matrix never ran at
+  all**. One row was logged green that was not: deleting the SQL transcription
+  of BK-33's new rule from `update.ts`'s WHERE appeared to change nothing, when
+  the only test that could catch it was not executing. The measurement failed in
+  the direction that hides a missing pin. **Therefore:** a red-first check must
+  establish that the run COMPLETED — assert the exit code and the script's own
+  summary line — never that a marker count is zero. And a suite whose fixtures
+  clean up only at the end is not idempotent against its own wreckage: after any
+  interrupted run, clear the probe rows before believing the next result.
+
 - **A rule rewrite invalidates every case enumerated under the old rule,
   including the cases in the same document.** BK-44's plan tabulated
   `approved_awaiting_payment -> confirmed` as forbidden, with its reasons. Plan
