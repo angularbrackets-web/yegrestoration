@@ -9,8 +9,12 @@
  */
 
 import { TIMEZONE } from './booking-config';
-import { assessmentQuote, isAfterHoursSlot } from './booking-pricing';
-import { isAwaitingPayment, LIVE_STATUSES } from './booking-status';
+import { assessmentQuote, formatCents, isAfterHoursSlot } from './booking-pricing';
+import {
+  isAwaitingPayment,
+  LIVE_STATUSES,
+  REFUNDED_PAYMENT_STATUSES,
+} from './booking-status';
 import type { Appointment, AppointmentStatus } from './db';
 
 // ---------------------------------------------------------------------------
@@ -52,6 +56,19 @@ export const ADMIN_APPOINTMENT_REVIEW_ENDPOINT = '/api/admin/appointments/review
 
 /** "Mark as paid — Interac" (BK-32). The second caller of `markPaid()`. */
 export const ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT = '/api/admin/appointments/mark-paid/';
+
+/**
+ * "Cancel and refund" (BK-33). The only caller of `refundPayment()`.
+ *
+ * A sibling of `create` / `update` / `review` / `resend` / `mark-paid` /
+ * `file-delete`, none of which is a dynamic route — so it cannot collide the
+ * way `/api/admin/files/delete/` would have collided with
+ * `/api/admin/files/[id].ts` (ROADMAP, Known traps). The segment carries no
+ * dot either, so `trailingSlash: 'always'`'s pre-filesystem 308 does not strip
+ * it. Both facts are pinned against the GENERATED route table in
+ * `verify-stripe-webhook.ts` rather than argued for here.
+ */
+export const ADMIN_APPOINTMENT_REFUND_ENDPOINT = '/api/admin/appointments/refund/';
 
 /**
  * BK-40's soft delete.
@@ -516,6 +533,21 @@ export function appointmentMoney(row: MoneyBearingAppointment): AppointmentMoney
  * `total > 0` is not defensive. `approveFree` leaves a $0 row at
  * `approved_awaiting_payment` with `payment_status = 'pending'` until `markPaid`
  * moves it, and a row that owes $0.00 does not owe.
+ *
+ * ── AND A REFUNDED ROW ANSWERS `false`, FOR A REASON WORTH WRITING DOWN ────
+ *
+ * `payment_status !== 'paid'` is true of `refunded` and `partially_refunded`,
+ * so the verdict rests entirely on `isAwaitingPayment`. **The tempting
+ * explanation — "a refunded row is cancelled" — is FALSE**, and BK-33's plan
+ * review caught it as a stated reason rather than as a bug: the reconciliation
+ * webhook deliberately does NOT cancel a booking refunded from the Stripe
+ * dashboard, so refunded rows sitting at `confirmed` are a state the system
+ * guarantees exists.
+ *
+ * The true reason is narrower: `approved_awaiting_payment` is the only status
+ * this asks about, and no refunded row is at it — `review.ts`'s `approve`
+ * overwrites `payment_status` to `'pending'` on the way in, which is the same
+ * fact the invite-crossing rule in `booking-status.ts` turns on.
  */
 export function stillOwesPayment(
   row: Pick<Appointment, 'status' | 'payment_status' | 'total_amount_cents'>,
@@ -555,10 +587,47 @@ export function stillOwesPayment(
 export function paymentReceipt(
   row: Pick<
     Appointment,
-    'payment_status' | 'payment_method' | 'paid_at' | 'interac_marked_by' | 'interac_marked_at'
+    | 'payment_status'
+    | 'payment_method'
+    | 'paid_at'
+    | 'interac_marked_by'
+    | 'interac_marked_at'
+    | 'paid_amount_cents'
+    | 'refunded_amount_cents'
+    | 'refunded_at'
   >,
-): { line: string; at: Date | null } | null {
-  if (row.payment_status !== 'paid' || row.payment_method === null) return null;
+): { line: string; at: Date | null; refunded: boolean } | null {
+  if (row.payment_method === null) return null;
+
+  // ── THE REFUNDED ARMS (BK-33), AND WHY SILENCE WAS THE WRONG ANSWER ──────
+  //
+  // This function gated on `payment_status === 'paid'` alone, so the day
+  // `refunded` became reachable the whole panel would have VANISHED from a
+  // refunded booking — and a screen that says nothing about money reads as
+  // *never paid*, which is a different false statement from the one BK-33 was
+  // filed to remove. A negative pin that only stops the wrong claim, without
+  // requiring the right one, would have passed that silently: the trap
+  // `CLAUDE.md` records as "a negative assertion is shaped for the claim it was
+  // written against".
+  //
+  // The figures come from `refunded_amount_cents` — Stripe's own running total
+  // for the charge — against `paid_amount_cents`, WHAT ARRIVED. Never against
+  // `total_amount_cents`, which `db.ts` is explicit is the quote: a customer
+  // who paid a corrected amount and got it all back must not read as partially
+  // refunded because the quote said something else.
+  if (REFUNDED_PAYMENT_STATUSES.includes(row.payment_status)) {
+    const back = row.refunded_amount_cents;
+    const paid = row.paid_amount_cents;
+    const line =
+      back === null
+        ? 'Refunded — the amount is not recorded here; check Stripe'
+        : paid !== null && back < paid
+          ? `Partially refunded — ${formatCents(back)} of ${formatCents(paid)} sent back`
+          : `Refunded in full — ${formatCents(back)} sent back`;
+    return { line, at: row.refunded_at, refunded: true };
+  }
+
+  if (row.payment_status !== 'paid') return null;
 
   // Exhaustive over the four non-null methods rather than a switch with a
   // default: a fifth must be a typecheck error here, not a blank line on the
@@ -582,5 +651,6 @@ export function paymentReceipt(
   return {
     line: LINES[row.payment_method],
     at: row.payment_method === 'interac' ? (row.interac_marked_at ?? row.paid_at) : row.paid_at,
+    refunded: false,
   };
 }

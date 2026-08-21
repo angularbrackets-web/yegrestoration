@@ -125,6 +125,12 @@ export const POST: APIRoute = async ({ request }) => {
           ? 'double'
           : outcome === 'paid-after-release'
             ? 'late'
+            // BK-33. Money on a booking whose payment already went back. A
+            // DIFFERENT message from 'late', because the office's next move is
+            // different: there, money is owed to a booking that will not
+            // happen; here, a second charge may need returning.
+            : outcome === 'paid-after-refund'
+            ? 'afterrefund'
             : outcome === 'missing'
               ? 'missing'
               : outcome === 'not-applicable'

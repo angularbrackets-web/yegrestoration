@@ -41,7 +41,10 @@ import {
   type CheckoutRequest,
   type StripeGateway,
 } from '../src/lib/booking-payment';
-import { ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT } from '../src/lib/booking-admin';
+import {
+  ADMIN_APPOINTMENT_MARK_PAID_ENDPOINT,
+  ADMIN_APPOINTMENT_REFUND_ENDPOINT,
+} from '../src/lib/booking-admin';
 import { paymentDeadline } from '../src/lib/booking-review';
 import { plannedAction } from '../src/pages/api/stripe/webhook';
 
@@ -81,9 +84,13 @@ function fakeGateway(options: {
   expireThrows?: Error;
   /** What `retrieve` reports when `expire` errored — how 'already-inactive' is reached. */
   statusAfterExpireError?: string;
+  /** BK-33. What `createRefund` throws, and what `chargeFee` answers. */
+  refundThrows?: unknown;
+  fee?: number | null;
 } = {}) {
   const created: { params: any; idempotencyKey: string }[] = [];
   const expired: string[] = [];
+  const refunded: { params: any; idempotencyKey: string }[] = [];
   const gateway: StripeGateway = {
     createSession: async (params, idempotencyKey) => {
       created.push({ params, idempotencyKey });
@@ -103,8 +110,21 @@ function fakeGateway(options: {
       if (options.expireThrows) throw options.expireThrows;
     },
     sessionStatus: async () => options.statusAfterExpireError ?? null,
+    // BK-33. Unused by the checkout arms below; present because the gateway is
+    // ONE type. A refund driven through a fake is the only way any guard in
+    // BK-33 can be seen red — against a real key it would move real money.
+    createRefund: async (params, idempotencyKey) => {
+      refunded.push({ params, idempotencyKey });
+      if (options.refundThrows) throw options.refundThrows;
+      return {
+        id: 're_test_a1b2c3',
+        amount: params.amount ?? 0,
+        status: 'succeeded',
+      };
+    },
+    chargeFee: async () => options.fee ?? null,
   };
-  return { gateway, created, expired };
+  return { gateway, created, expired, refunded };
 }
 
 // ---------------------------------------------------------------------------
@@ -623,6 +643,32 @@ console.log('\nThe deployed route table — the check astro dev cannot make');
       )})`,
     );
 
+    // ── BK-33's ENDPOINT, PINNED THE SAME WAY AND FOR THE SAME REASON ────
+    //
+    // A new admin POST route, and the ROADMAP records two ways one can be
+    // unreachable in production while every local gate is green: a dynamic
+    // sibling swallowing it, and `trailingSlash: 'always'`'s pre-filesystem 308
+    // stripping any last segment containing a dot. Neither is visible under
+    // `astro dev`, which routes by Astro's own matcher. So this reads the
+    // GENERATED table, and it reads the endpoint CONSTANT the form posts to
+    // rather than a literal — a literal would keep passing while the form
+    // posted at nothing.
+    const refundPath = resolvePath(new URL(ADMIN_APPOINTMENT_REFUND_ENDPOINT, ORIGIN).pathname);
+    check(refundPath.hops.length === 0, 'the refund endpoint resolves without a redirect');
+    const refundRoute = config.routes.find(
+      (r) => !r.handle && r.src && r.dest && new RegExp(r.src).test(refundPath.path),
+    );
+    check(
+      refundRoute?.dest === '_render',
+      `and reaches the SSR function (matched ${JSON.stringify(refundRoute?.dest ?? null)})`,
+    );
+    check(
+      refundRoute?.src?.includes('refund') === true,
+      `by its OWN route, not a dynamic sibling that happens to match (src ${JSON.stringify(
+        refundRoute?.src ?? null,
+      )})`,
+    );
+
     console.log('  the slashed webhook resolves; the unslashed one 308s, as the control');
   }
 }
@@ -723,9 +769,50 @@ console.log('\nWhat each event type actually decides');
   // EVERYTHING ELSE IS IGNORED, and this is the arm the source pin could not
   // make. A non-2xx tells Stripe to retry for days and to email the account
   // owner about a failing endpoint.
+  // ── BK-33: THE REFUND ARMS ────────────────────────────────────────────
+  //
+  // `charge.refunded` USED TO BE IN THE IGNORED LIST BELOW, and that is worth
+  // recording rather than quietly deleting: the assertion was correct about the
+  // code and the code was the defect. A refund taken in the Stripe dashboard
+  // reached nothing, so the row kept `payment_status = 'paid'` and the admin
+  // screen stated "Payment received — Paid by card" on a booking refunded in
+  // full. Moving this event out of that list is the fix, stated where the old
+  // behaviour was pinned.
+  const refundEvent = (type: string, status: string) => ({ type, data: { object: { status } } });
+
+  check(
+    plannedAction(paid('charge.refunded')) === 'reconcile-refund',
+    'a refunded charge reconciles — the DASHBOARD path, which is how the office actually refunds',
+  );
+  check(
+    plannedAction(refundEvent('refund.failed', 'failed')) === 'refund-failed',
+    'a failed refund is flagged',
+  );
+  check(
+    plannedAction(refundEvent('refund.updated', 'failed')) === 'refund-failed',
+    'and so is a refund UPDATED to failed',
+  );
+  check(
+    plannedAction(refundEvent('refund.updated', 'canceled')) === 'refund-failed',
+    'and one updated to canceled',
+  );
+  check(
+    plannedAction(refundEvent('charge.refund.updated', 'failed')) === 'refund-failed',
+    'and the same on the charge.refund.updated twin, which Stripe sends for some payment methods',
+  );
+  // A SUCCEEDED refund update adds nothing `charge.refunded` did not carry, and
+  // acting on both would race two events for one row.
+  check(
+    plannedAction(refundEvent('refund.updated', 'succeeded')) === 'ignore',
+    'a refund updated to SUCCEEDED is ignored — charge.refunded carries the running total',
+  );
+  check(
+    plannedAction(refundEvent('refund.created', 'succeeded')) === 'ignore',
+    'and so is refund.created, for the same reason',
+  );
+
   for (const other of [
     'payment_intent.succeeded',
-    'charge.refunded',
     'customer.created',
     'invoice.paid',
     'radar.early_fraud_warning.created',
@@ -734,7 +821,7 @@ console.log('\nWhat each event type actually decides');
     check(plannedAction(paid(other)) === 'ignore', `${other} is ignored rather than erroring`);
   }
 
-  console.log('  five events decided, everything else a deliberate no-op');
+  console.log('  twelve events decided, everything else a deliberate no-op');
 }
 
 if (failures > 0) {

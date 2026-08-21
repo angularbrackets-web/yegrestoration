@@ -9,6 +9,7 @@ import { migration as m007 } from './007-assessment-tier';
 import { migration as m008 } from './008-review-lifecycle';
 import { migration as m009 } from './009-review-lifecycle-contract';
 import { migration as m010 } from './010-payments';
+import { migration as m011 } from './011-refunds';
 
 /** Applied in order. Append only — never reorder or rename an applied entry. */
 export const migrations: Migration[] = [
@@ -22,6 +23,7 @@ export const migrations: Migration[] = [
   m008,
   m009,
   m010,
+  m011,
 ];
 
 export type { Migration, Sql } from './types';

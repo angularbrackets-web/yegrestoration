@@ -18,6 +18,7 @@ import {
   PAYMENT_ROUTE_LABELS,
   PIPELINE_STAGE_LABELS,
   STATUS_LABELS,
+  ADMIN_APPOINTMENT_REFUND_ENDPOINT,
   appointmentMoney,
   paymentReceipt,
   stillOwesPayment,
@@ -36,6 +37,8 @@ import {
   formatCents,
 } from '../../../lib/booking-pricing';
 import { paymentDeadline, amountField, parseAmountCents } from '../../../lib/booking-review';
+import { refundableCents, type RefundOutcome } from '../../../lib/booking-payment';
+import { couldHoldCalendarInvite, REFUNDED_PAYMENT_STATUSES } from '../../../lib/booking-status';
 import { TRAVEL_FEE_CENTS_PER_KM, TRAVEL_FEE_FREE_RADIUS_KM, gstFor } from '../../../lib/booking-pricing';
 import {
   APPOINTMENT_UPLOAD_TTL_HOURS,
@@ -334,6 +337,114 @@ const REVIEW_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
   error: { tone: 'warn', text: 'The database rejected that decision. Nothing changed.' },
 };
 
+/**
+ * BK-33 — the outcomes of "Cancel and refund".
+ *
+ * Every refusal below moved NO money and says so in its first clause, because
+ * the one question an office member has after clicking a refund button that did
+ * not work is whether the money went anyway. Every success says what the
+ * customer has been told, because this is the one action where they hear from
+ * us about money.
+ */
+type Flash = { tone: 'ok' | 'warn'; text: string };
+
+/**
+ * EXHAUSTIVE OVER `RefundOutcome`, so a ninth outcome cannot ship with no
+ * message. The route redirects with the outcome string verbatim; a miss renders
+ * nothing at all, which on the one irreversible control on this screen is the
+ * worst possible answer — and that is exactly what implementation review found
+ * for four of them.
+ *
+ * The same shape, and the same reason, as `MONEY_STAGE` and
+ * `STATUS_ENTRY_OWNER`: the compiler is made to ask.
+ */
+const REFUND_MESSAGES: Record<RefundOutcome, Flash> = {
+  refunded: {
+    tone: 'ok',
+    text: 'Refunded in full and cancelled. The customer has been emailed the amount and told it takes 5 to 10 business days to reach their statement.',
+  },
+  'partially-refunded': {
+    tone: 'ok',
+    text: 'Part of the payment was refunded and the booking is cancelled. The customer has been emailed the amount that went back — not the original total — and told it takes 5 to 10 business days.',
+  },
+  // Not an error and deliberately quiet: this is a second click, not a second
+  // refund. The same posture as the Interac button's "already".
+  'already-refunding': {
+    tone: 'ok',
+    text: 'A refund is already in progress on this booking, so nothing was sent twice. Reload in a moment; if it stays this way, check the charge in Stripe before trying again.',
+  },
+  // THE LOUD ONE. Money moved and the row did not record it.
+  'refunded-not-cancelled': {
+    tone: 'warn',
+    text: 'THE MONEY WENT BACK BUT THIS BOOKING COULD NOT BE UPDATED. Do NOT refund again in Stripe. Cancel it here with the status dropdown below — that will not attempt a second refund — and read the attention note above.',
+  },
+  // ── KEYED BY THE OUTCOME STRINGS, AND THE PREVIEW'S ALIASES BESIDE THEM ──
+  //
+  // Implementation review found these written ONLY in the preview step's
+  // hyphenless spellings — `notcard`, `nocharge`, `notpaid`, `toomuch` — while
+  // `RefundOutcome` emits `not-card`, `no-charge`, `not-paid`, `too-much`. The
+  // flash lookup misses, `flashes` filters falsy, and the office clicks the
+  // irreversible button and the page comes back with NOTHING ON IT.
+  //
+  // Not a corner: a genuine double click whose first request settles before the
+  // second claims lands on `not-paid`, and the browser shows the SECOND
+  // response. So the ordinary double-click was the silent one.
+  //
+  // `REFUND_FLASHES` below is typed as a `Record<RefundOutcome, …>`, which makes
+  // a future outcome with no message a TYPECHECK ERROR rather than a blank
+  // screen — the same reason `MONEY_STAGE` and `STATUS_ENTRY_OWNER` are
+  // exhaustive records.
+  'not-card': {
+    tone: 'warn',
+    text: 'This booking was not paid by card, so there is no Stripe charge to refund and nothing was moved. Send the money back the way it arrived — an e-Transfer goes back from the bank — and note it in the office notes below.',
+  },
+  'no-charge': {
+    tone: 'warn',
+    text: 'No Stripe charge is recorded against this booking, so there is nothing to refund here. Nothing was moved. Find the payment in Stripe and refund it there.',
+  },
+  'not-paid': {
+    tone: 'warn',
+    text: 'There is nothing left to refund on this booking — it was never paid by card, or all of it has already gone back. Nothing was moved.',
+  },
+  'too-much': {
+    tone: 'warn',
+    text: 'That is more than is left to refund on this booking. Nothing was moved.',
+  },
+  'invalid-amount': { tone: 'warn', text: 'That was not a valid amount. Nothing was moved.' },
+  // The refundable balance moved between the confirm screen and the click —
+  // somebody else refunded in Stripe, or a second tab got there first.
+  'changed-underneath': {
+    tone: 'warn',
+    text: 'This booking changed while you were looking at it — the refunded amount is not what the confirmation showed. Nothing was moved. Reload the page and check what has already gone back.',
+  },
+  'stripe-error': {
+    tone: 'warn',
+    text: 'Stripe refused the refund, so nothing was moved and nothing was changed. Try again; if it keeps failing, refund it by hand in the Stripe dashboard.',
+  },
+  // The one case where we genuinely do not know. Says so.
+  'stripe-unknown': {
+    tone: 'warn',
+    text: 'STRIPE DID NOT ANSWER, so we cannot tell whether that refund went through. Nothing was recorded and the customer has not been told. Check the charge in Stripe before doing anything else — this booking will refuse further refunds until somebody clears it.',
+  },
+  missing: { tone: 'warn', text: 'That appointment no longer exists. Nothing was moved.' },
+  error: { tone: 'warn', text: 'The database rejected that. Nothing was moved.' },
+};
+
+/**
+ * The PREVIEW step's own refusals, which never reach `refundPayment` and so are
+ * not `RefundOutcome` values. Separate record rather than a widened one,
+ * because widening it to `Record<string, …>` is what let four real outcomes go
+ * missing in the first place.
+ */
+const REFUND_PREVIEW_MESSAGES: Record<string, Flash> = {
+  notcard: REFUND_MESSAGES['not-card'],
+  nocharge: REFUND_MESSAGES['no-charge'],
+  notpaid: REFUND_MESSAGES['not-paid'],
+  toomuch: REFUND_MESSAGES['too-much'],
+  amount: REFUND_MESSAGES['invalid-amount'],
+  invalid: { tone: 'warn', text: 'That request was not valid. Nothing was moved.' },
+};
+
 /** BK-32 — the outcomes of "Mark as paid — Interac". */
 const PAID_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
   paid: {
@@ -355,6 +466,11 @@ const PAID_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
     tone: 'warn',
     text: 'The slot for this booking had already been released, so the payment was recorded but the booking was NOT confirmed. Nothing was refunded automatically — read the attention note below.',
   },
+  // BK-33. Money arriving on a booking whose payment has already gone back.
+  afterrefund: {
+    tone: 'warn',
+    text: 'This booking was already REFUNDED, so nothing about its payment record was changed — the refund still stands. Nothing was refunded automatically either. Find this payment in Stripe and decide by hand whether it is a second charge to send back.',
+  },
   notawaiting: {
     tone: 'warn',
     text: 'This booking is not awaiting payment, so there was nothing to mark. Nothing changed.',
@@ -365,6 +481,7 @@ const PAID_MESSAGES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
 
 const reviewFlash = Astro.url.searchParams.get('review');
 const paidFlash = Astro.url.searchParams.get('paid');
+const refundFlash = Astro.url.searchParams.get('refund');
 
 const flashes = [
   emailFlash ? EMAIL_MESSAGES[emailFlash] : null,
@@ -372,6 +489,9 @@ const flashes = [
   filesFlash ? FILE_MESSAGES[filesFlash] : null,
   reviewFlash ? REVIEW_MESSAGES[reviewFlash] : null,
   paidFlash ? PAID_MESSAGES[paidFlash] : null,
+  refundFlash
+    ? (REFUND_MESSAGES[refundFlash as RefundOutcome] ?? REFUND_PREVIEW_MESSAGES[refundFlash] ?? null)
+    : null,
 ].filter((f): f is { tone: 'ok' | 'warn'; text: string } => !!f);
 
 /**
@@ -416,9 +536,24 @@ const withheldStatuses = appointment
 // derived too, or it is just a constant wearing a variable's clothes.
 const reopenWithheld = withheldStatuses.includes('pending_review');
 const decisionWithheld = withheldStatuses.filter(s => DECISION_ENTRY_STATUSES.includes(s));
-const untilPaidWithheld = withheldStatuses.filter(
+
+// BK-33 PARTITIONS THE THIRD SENTENCE RATHER THAN ADDING A FOURTH BESIDE IT.
+//
+// `untilPaidWithheld` used to be every withheld invite-holding status, under
+// the sentence "Not listed until this booking is paid" — which is FALSE of a
+// booking that WAS paid and then refunded, and that is now a reachable state on
+// this very screen. Two sentences firing over the same statuses would have the
+// screen give two different reasons for one omission, which is worse than the
+// wrong one alone. So the set is split at the source: a refunded row gets the
+// refund sentence and no other, an unpaid row gets the payment sentence.
+const invitesWithheld = withheldStatuses.filter(
   s => INVITE_HOLDING_STATUSES.includes(s) && !DECISION_ENTRY_STATUSES.includes(s),
 );
+const isRefundedRow = appointment
+  ? REFUNDED_PAYMENT_STATUSES.includes(appointment.payment_status)
+  : false;
+const untilPaidWithheld = isRefundedRow ? [] : invitesWithheld;
+const refundedWithheld = isRefundedRow ? invitesWithheld : [];
 
 /**
  * WHERE THE DECISION IS, named ONLY where that control is on the page.
@@ -477,6 +612,64 @@ const confirming =
  * prevent it on the route it controls; the dropdown was the other way in.
  */
 const settled = money?.kind === 'settled' ? money : null;
+
+// ── BK-33: the refund control, and the confirm step in front of it ────────
+//
+// The panel renders on a CARD row with a recorded payment intent and something
+// left to refund — which deliberately INCLUDES rows already `cancelled`,
+// `declined` or `payment_expired`. `markPaid`'s paid-after-release branch
+// records real money on those, and a booking that took money and then lost its
+// slot is exactly the one somebody has to be able to refund.
+const refundable = appointment ? refundableCents(appointment) : 0;
+const canRefund =
+  appointment !== undefined &&
+  appointment !== null &&
+  appointment.payment_method === 'stripe' &&
+  appointment.stripe_payment_intent_id !== null &&
+  // THE SAME CONDITION THE CLAIM'S WHERE ASKS (implementation review).
+  //
+  // Dropped from the first version in favour of `refundable > 0` alone, which
+  // let two rows render a control that would refuse: a row RE-APPROVED after a
+  // previous payment carries `payment_status = 'pending'` with a stale
+  // `paid_amount_cents` and intent, so it offered "Cancel and refund", passed
+  // the preview, showed a confirm panel with a real Stripe fee, and then
+  // refused at the claim. A control that gets all the way to a confirm screen
+  // and then declines is worse than one that is not there.
+  (appointment.payment_status === 'paid' ||
+    appointment.payment_status === 'partially_refunded') &&
+  refundable > 0;
+
+// The confirm step. Same round trip as the approval's, and a DIFFERENT query
+// parameter on purpose: `confirm` is `review.ts`'s, and one stale link of each
+// kind would put two amber panels about two different amounts on one screen.
+//
+// Everything shown is derived from what the route normalised, and none of it is
+// trusted for a decision — `refundPayment` re-derives the balance from the row
+// it claims. A tampered link can show a wrong fee; it cannot cause a wrong
+// refund.
+const refundConfirmRequested = Astro.url.searchParams.get('refundconfirm') === '1';
+const refundConfirmCents = parseAmountCents(Astro.url.searchParams.get('amount'));
+const refundAlreadyRaw = Number.parseInt(Astro.url.searchParams.get('already') ?? '', 10);
+const refundFeeRaw = Number.parseInt(Astro.url.searchParams.get('fee') ?? '', 10);
+const refundConfirming =
+  refundConfirmRequested &&
+  canRefund &&
+  refundConfirmCents !== null &&
+  refundConfirmCents > 0 &&
+  refundConfirmCents <= refundable &&
+  Number.isInteger(refundAlreadyRaw) &&
+  refundAlreadyRaw >= 0
+    ? {
+        amountCents: refundConfirmCents,
+        alreadyCents: refundAlreadyRaw,
+        // NULL IS AN ANSWER, not a missing value. The route omits the parameter
+        // when Stripe could not be read, and the panel then says the fee is
+        // kept without naming a figure — rather than inventing one, or refusing
+        // to let the office refund because a read failed.
+        feeCents: Number.isInteger(refundFeeRaw) && refundFeeRaw >= 0 ? refundFeeRaw : null,
+        partial: refundConfirmCents < refundable,
+      }
+    : null;
 
 /** BK-46 findings 3 and 4: what the row still owes, and how it was paid. */
 const owes = appointment ? stillOwesPayment(appointment) : false;
@@ -1179,8 +1372,24 @@ function statusClasses(status: Appointment['status']) {
         leave exactly one corner where money arrived and no screen said so.
       */}
       {receipt && (
-        <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6">
-          <h2 class="text-white font-semibold mb-1">Payment received</h2>
+        <section class={`bg-zinc-900 border rounded-xl p-6 mb-6 ${receipt.refunded ? 'border-amber-700/60' : 'border-zinc-800'}`}>
+          {/*
+            BK-33. THE HEADING IS PART OF THE CLAIM, which is why it is derived
+            rather than fixed. "Payment received" over a refunded booking is the
+            defect this ticket was filed for — the screen stating confidently
+            that we hold money that went back on 2026-08-20. Changing only the
+            LINE underneath and leaving the heading would have moved the false
+            sentence up two lines rather than removing it.
+
+            It is also why the panel does not simply disappear on a refunded
+            row, which is what gating on `payment_status === 'paid'` alone would
+            have done: a screen that says nothing about money reads as NEVER
+            PAID, which is a different false statement, and one a negative pin
+            written against "Paid by card" would never have caught.
+          */}
+          <h2 class="text-white font-semibold mb-1">
+            {receipt.refunded ? 'Refunded' : 'Payment received'}
+          </h2>
           <p class="text-sm text-zinc-200">{receipt.line}</p>
           {receipt.at && (
             <p class="text-zinc-500 text-xs mt-1">{formatAdminTimestamp(receipt.at)}</p>
@@ -1193,7 +1402,8 @@ function statusClasses(status: Appointment['status']) {
             when they agree: restating the total under a heading that already
             says "received" is noise.
           */}
-          {appointment.paid_amount_cents !== null &&
+          {!receipt.refunded &&
+            appointment.paid_amount_cents !== null &&
             appointment.total_amount_cents !== null &&
             appointment.paid_amount_cents !== appointment.total_amount_cents && (
               <p class="text-amber-300 text-xs mt-2">
@@ -1201,7 +1411,188 @@ function statusClasses(status: Appointment['status']) {
                 {formatCents(appointment.total_amount_cents)} settled.
               </p>
             )}
+          {/*
+            BK-33. SILENT ON A REFUNDED ROW, and that is the same claim-shape
+            question as the heading above. "$628.43 arrived against $606.38
+            settled" is written in the present tense about money we hold; under
+            a heading reading "Refunded" it contradicts the line directly above
+            it. The refunded arms of `paymentReceipt` already name both figures
+            that matter — what went back, and what had arrived.
+          */}
+          {receipt.refunded && refundable > 0 && (
+            <p class="text-amber-300 text-xs mt-2">
+              {formatCents(refundable)} of this payment has not been refunded.
+            </p>
+          )}
         </section>
+      )}
+
+      {/*
+        THE REFUND CONFIRM STEP (BK-33).
+
+        Rendered from what the route normalised, and the button in here is the
+        one that moves money. Everything above it is what the office is about to
+        do to a real customer's card.
+
+        `refundconfirm`, not `confirm` — that parameter belongs to the approval
+        round trip, and a stale link of each kind would otherwise put two amber
+        panels about two different amounts on one screen.
+      */}
+      {refundConfirming && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REFUND_ENDPOINT}
+          class="bg-zinc-900 border border-amber-500 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+          {/*
+            The SAME strings the route normalised, re-posted into the same field
+            it re-parses — one parser, one spelling, so the figure confirmed and
+            the figure refunded cannot be two numbers. `already` goes back too:
+            it is part of the claim's WHERE, so a balance that moved while this
+            panel was on screen refuses instead of refunding against it.
+          */}
+          <input type="hidden" name="amount" value={amountField(refundConfirming.amountCents)} />
+          <input type="hidden" name="already" value={String(refundConfirming.alreadyCents)} />
+
+          <h2 class="text-white font-semibold mb-1">Confirm this refund</h2>
+          <p class="text-zinc-500 text-xs mb-5">
+            Nothing has moved yet. The button below sends money to {appointment.name}'s card and
+            cannot be undone.
+          </p>
+
+          <dl class="text-sm mb-5 max-w-sm">
+            <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+              <dt class="text-zinc-400">Refunding</dt>
+              <dd class="text-amber-400 font-semibold">
+                {formatCents(refundConfirming.amountCents)}
+              </dd>
+            </div>
+            {refundConfirming.partial && (
+              <div class="flex justify-between gap-4 py-1.5 border-b border-zinc-800">
+                <dt class="text-zinc-400">Left after this</dt>
+                <dd class="text-zinc-200">
+                  {formatCents(refundable - refundConfirming.amountCents)}
+                </dd>
+              </div>
+            )}
+            <div class="flex justify-between gap-4 py-1.5">
+              <dt class="text-zinc-400">Stripe keeps</dt>
+              {/*
+                THE REAL FIGURE, READ FROM STRIPE, and null when it could not be
+                read. An estimate would be a second number on a money screen
+                that Stripe could contradict — the shape BK-46 was filed for.
+
+                "on the original charge" is load-bearing: Stripe returns NO part
+                of the processing fee on ANY refund, so this same figure is kept
+                whether $50 or the whole $628.43 goes back. Wording it as the fee
+                "on this refund" would imply it scales, and it does not.
+              */}
+              <dd class="text-zinc-200">
+                {refundConfirming.feeCents === null
+                  ? 'its processing fee'
+                  : formatCents(refundConfirming.feeCents)}
+              </dd>
+            </div>
+          </dl>
+          <p class="text-zinc-600 text-xs mb-5 max-w-md">
+            Stripe does not give back the processing fee it took on the original charge, so this
+            refund costs the business that fee whatever amount goes back.
+          </p>
+
+          <div class="flex flex-wrap gap-3 items-center">
+            <button
+              type="submit"
+              name="action"
+              value="refund"
+              class="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+            >
+              Refund {formatCents(refundConfirming.amountCents)} and cancel
+            </button>
+            <a
+              href={adminAppointmentPath(appointment.id)}
+              class="text-zinc-400 hover:text-zinc-200 text-sm underline underline-offset-4"
+            >
+              Change the amount
+            </a>
+          </div>
+        </form>
+      )}
+
+      {/*
+        "CANCEL AND REFUND" (BK-33). ONE ACTION, AND THAT IS THE WHOLE POINT.
+
+        Until this shipped the office had to do two things in two systems, in
+        one order, with nothing enforcing or recording either: refund in Stripe
+        FIRST, then cancel here. Miss the second and the slot stays blocked;
+        miss the first and nothing anywhere says so — and the cancellation email
+        said "nothing further is needed from you" and mentioned money not at
+        all, so the customer had no reason to expect a refund either.
+
+        IT IS ITS OWN PANEL AND NOT A CHECKBOX ON THE STATUS DROPDOWN. The
+        ticket's draft specified the checkbox; it was written against the screen
+        BK-46 replaced. The dropdown lives in "Update the record", which says of
+        itself that it is record-keeping and not a decision, and BK-44 exists
+        because a decision hiding in that panel cost a free crew dispatch.
+
+        THE AMOUNT IS A FIELD HERE, unlike the Interac button's deliberate
+        absence of one. The difference is real: marking an e-Transfer paid is an
+        assertion that the settled amount ARRIVED, and a box to type a different
+        one would make this screen a second place a price is decided. A refund
+        is not a price — it is how much of money we already hold goes back, and
+        a partial refund is an ordinary answer to "we cancelled the second half
+        of the job".
+      */}
+      {canRefund && !refundConfirming && (
+        <form
+          method="POST"
+          action={ADMIN_APPOINTMENT_REFUND_ENDPOINT}
+          class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-6"
+        >
+          <input type="hidden" name="id" value={String(appointment.id)} />
+
+          <h2 class="text-white font-semibold mb-1">Cancel and refund</h2>
+          <p class="text-zinc-500 text-xs mb-4 max-w-md">
+            Sends money back to the card and cancels this booking in one step
+            {couldHoldCalendarInvite(appointment.status)
+              ? ', clearing the calendar invite'
+              : ''}
+            . The customer is emailed the amount and told it takes 5 to 10 business days to
+            reach their statement.
+            {refundable !== (appointment.paid_amount_cents ?? 0)
+              ? ` ${formatCents(refundable)} of ${formatCents(appointment.paid_amount_cents ?? 0)} is left to refund.`
+              : ''}
+          </p>
+
+          <label class="block text-zinc-400 text-xs uppercase tracking-wide mb-1.5" for="refund-amount">
+            Amount ($)
+          </label>
+          <input
+            type="text"
+            inputmode="decimal"
+            id="refund-amount"
+            name="amount"
+            value={amountField(refundable)}
+            class="w-full max-w-xs bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none mb-1.5"
+          />
+          <p class="text-zinc-600 text-xs mb-4 max-w-md">
+            Pre-filled with everything still refundable. Type less to refund part of it — a
+            case-by-case exception, or a job where only some of the work was cancelled.
+          </p>
+
+          <button
+            type="submit"
+            name="action"
+            value="preview"
+            class="border border-amber-600 hover:border-amber-400 text-amber-300 font-semibold text-sm rounded-lg px-5 py-2.5 transition-colors"
+          >
+            Review this refund →
+          </button>
+          <p class="text-zinc-600 text-xs mt-3 max-w-md">
+            Nothing moves yet. The next screen shows the amount and what Stripe keeps in fees,
+            and the button there is the one that refunds.
+          </p>
+        </form>
       )}
 
       {/*
@@ -1548,6 +1939,19 @@ function statusClasses(status: Appointment['status']) {
               <p class="text-zinc-600 text-xs mt-1.5">
                 Not listed until this booking is paid:{' '}
                 {untilPaidWithheld.map(s => STATUS_LABELS[s]).join(', ')}.
+              </p>
+            )}
+            {/*
+              BK-33. THE SAME OMISSION, A DIFFERENT REASON, AND THE TWO NEVER
+              FIRE TOGETHER. Telling somebody a refunded booking is "not listed
+              until this booking is paid" is false — it WAS paid — and it points
+              them at a payment control for a booking whose money has gone back.
+            */}
+            {refundedWithheld.length > 0 && (
+              <p class="text-zinc-600 text-xs mt-1.5">
+                Not listed because this booking has been refunded:{' '}
+                {refundedWithheld.map(s => STATUS_LABELS[s]).join(', ')}. Putting it back on
+                would send a crew out on money the customer already has.
               </p>
             )}
             {reopenWithheld && (

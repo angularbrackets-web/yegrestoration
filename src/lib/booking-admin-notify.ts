@@ -58,6 +58,11 @@ import {
   CANCELLED_HEADING,
   CANCELLED_LEAD,
   CANCELLED_REBOOK_LINE,
+  CANCELLED_REFUNDED_LEAD,
+  REFUNDED_HEADING,
+  REFUNDED_LEAD,
+  REFUND_TIMING_LINE,
+  refundedAmountLine,
   RESTORED_CALENDAR_LINE,
   CONFIRMED_HEADING,
   CONFIRMED_LEAD,
@@ -84,12 +89,15 @@ import {
   type IcsKind,
 } from './booking-ics';
 import {
+  sendCalendarInvite,
   sendCustomerConfirmation,
   withDeadline,
   type NotifyDeps,
   type SendOutcome,
 } from './booking-notify';
 import type { BookingPayload } from './booking-payload';
+import { formatCents } from './booking-pricing';
+import { couldHoldCalendarInvite, type AppointmentStatus } from './booking-status';
 import { formatSlot } from './booking-time';
 import type { Appointment, getDb } from './db';
 
@@ -360,12 +368,36 @@ export function planCalendarInvite(event: IcsEvent, kind: IcsKind, now: Date): M
  * moment somebody adds `${event.name}` to this line, and a guard that only
  * appears once the hole does is a guard nobody adds.
  */
+/**
+ * ── `kind` MAY BE NULL, AND `calendarLine` WITH IT (BK-33) ─────────────────
+ *
+ * Every message this built used to cross the calendar boundary, so an ics was
+ * unconditional. A refund does not have to: `markPaid`'s paid-after-release
+ * branch records real money on rows that are ALREADY `cancelled`, `declined` or
+ * `payment_expired`, and refunding one of those crosses nothing. That customer
+ * still has to be told their money is coming back — so this builds the same
+ * message shape with no attachment and no calendar sentence, rather than a
+ * second builder existing to say one thing differently. BK-45 is the record of
+ * what two builders for one event costs.
+ *
+ * ── AND `refundLines`, WHICH RENDER UNDER THE LEAD ────────────────────────
+ *
+ * Absent on every arm that is not about money, which is what keeps the
+ * no-refund cancellation byte-identical to the message that shipped before this
+ * ticket.
+ */
 function planBoundaryEmail(
   event: IcsEvent,
   email: string,
   now: Date,
-  kind: IcsKind,
-  copy: { heading: string; lead: string; calendarLine: string; phoneLine: string },
+  kind: IcsKind | null,
+  copy: {
+    heading: string;
+    lead: string;
+    calendarLine: string | null;
+    phoneLine: string;
+    refundLines?: readonly string[];
+  },
 ): Message {
   const when = `${formatSlot(event.slotStart)} (${TIMEZONE_NOTE})`;
   const where = [event.address, event.city, event.postalCode].filter(Boolean).join(', ');
@@ -381,13 +413,18 @@ function planBoundaryEmail(
     '<div style="font-family:-apple-system,Segoe UI,sans-serif;color:#1a1a1a;max-width:560px;">',
     `<h1 style="font-size:22px;margin:0 0 16px;">${escapeHtml(copy.heading)}</h1>`,
     `<p style="margin:0 0 16px;">${escapeHtml(copy.lead)}</p>`,
+    ...(copy.refundLines ?? []).map(
+      (line) => `<p style="margin:0 0 16px;">${escapeHtml(line)}</p>`,
+    ),
     '<table style="border-collapse:collapse;width:100%;">',
     ...rows.map(
       ([label, value]) =>
         `<tr><td style="padding:8px 12px;background:#f5f5f5;font-weight:600;width:140px;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(value)}</td></tr>`,
     ),
     '</table>',
-    `<p style="margin:16px 0;">${escapeHtml(copy.calendarLine)}</p>`,
+    ...(copy.calendarLine
+      ? [`<p style="margin:16px 0;">${escapeHtml(copy.calendarLine)}</p>`]
+      : []),
     `<p style="margin:16px 0;">${escapeHtml(copy.phoneLine)}</p>`,
     `<p style="margin:24px 0 0;color:#666;font-size:13px;">YEG Restoration · ${escapeHtml(SUPPORT_PHONE)}</p>`,
     '</div>',
@@ -398,10 +435,10 @@ function planBoundaryEmail(
     '',
     copy.lead,
     '',
+    ...(copy.refundLines ?? []).flatMap((line) => [line, '']),
     ...rows.map(([label, value]) => `${`${label}:`.padEnd(11)}${value}`),
     '',
-    copy.calendarLine,
-    '',
+    ...(copy.calendarLine ? [copy.calendarLine, ''] : []),
     copy.phoneLine,
     '',
     `YEG Restoration · ${SUPPORT_PHONE}`,
@@ -421,19 +458,83 @@ function planBoundaryEmail(
     // argument. An office-attendee ICS mailed to a customer names the office as
     // the invitee of their own appointment and prints their own phone number
     // back at them.
-    attachments: [
-      icsAttachment(buildBookingIcs(event, kind, now, icsCustomer(email)), kind, event.id),
-    ],
+    attachments: kind
+      ? [icsAttachment(buildBookingIcs(event, kind, now, icsCustomer(email)), kind, event.id)]
+      : [],
   };
 }
 
-/** "We cancelled it" — plus the METHOD:CANCEL that clears their calendar. */
-export function planCancellationEmail(event: IcsEvent, email: string, now: Date): Message {
+/**
+ * What went back to the customer, when a message is about a refund (BK-33).
+ *
+ * `amountCents` is WHAT WAS REFUNDED, and it is the only figure that reaches
+ * the customer. The booking's total is deliberately absent: on a partial refund
+ * a message carrying both numbers cannot tell the reader which one arrived, and
+ * a pin holds the total out of it.
+ */
+export type RefundNotice = { amountCents: number };
+
+/** The two sentences a refund owes a customer, in the order they read. */
+function refundLinesFor(refund: RefundNotice): readonly string[] {
+  return [refundedAmountLine(formatCents(refund.amountCents)), REFUND_TIMING_LINE];
+}
+
+/**
+ * "We cancelled it" — plus the METHOD:CANCEL that clears their calendar.
+ *
+ * ── THE REFUND ARM (BK-33) ────────────────────────────────────────────────
+ *
+ * With `refund` absent this is byte-for-byte the message that shipped before
+ * BK-33, and `verify-booking-ics.ts` pins that rather than trusting it.
+ *
+ * With `refund` present the LEAD CHANGES as well as the body, and the swap is
+ * the point rather than a detail: `CANCELLED_LEAD` opens *"as requested"*,
+ * which is a claim about who asked. On a company-side cancellation it is false,
+ * and this is the one message where it would sit beside the customer's money.
+ * See `CANCELLED_REFUNDED_LEAD`.
+ */
+export function planCancellationEmail(
+  event: IcsEvent,
+  email: string,
+  now: Date,
+  refund?: RefundNotice,
+): Message {
   return planBoundaryEmail(event, email, now, 'cancel', {
     heading: CANCELLED_HEADING,
-    lead: CANCELLED_LEAD,
+    lead: refund ? CANCELLED_REFUNDED_LEAD : CANCELLED_LEAD,
     calendarLine: CANCELLED_CALENDAR_LINE,
     phoneLine: CANCELLED_REBOOK_LINE,
+    refundLines: refund ? refundLinesFor(refund) : undefined,
+  });
+}
+
+/**
+ * MONEY GOING BACK ON A BOOKING THAT WAS ALREADY OFF — no ics, no cancellation
+ * claim (BK-33).
+ *
+ * This arm exists because the refund notice must NOT be gated on the calendar
+ * boundary. `markPaid`'s paid-after-release branch records real money on rows
+ * that are already `cancelled`, `declined` or `payment_expired`; refunding one
+ * of those crosses no boundary, so the boundary mailer sends nothing — and the
+ * customer whose money we just returned would have heard from us not at all, on
+ * exactly the path the ticket added this copy for.
+ *
+ * No `CANCEL` ics: their calendar was cleared when the booking was released,
+ * and a second CANCEL under the same UID for an event they no longer hold is
+ * noise at best.
+ */
+export function planRefundNotice(
+  event: IcsEvent,
+  email: string,
+  now: Date,
+  refund: RefundNotice,
+): Message {
+  return planBoundaryEmail(event, email, now, null, {
+    heading: REFUNDED_HEADING,
+    lead: REFUNDED_LEAD,
+    calendarLine: null,
+    phoneLine: CANCELLED_REBOOK_LINE,
+    refundLines: refundLinesFor(refund),
   });
 }
 
@@ -530,5 +631,201 @@ export async function sendConfirmationAndStamp(
   } catch (err) {
     console.error(`Booking ${plan.bookingId} confirmation failed:`, err);
     return 'failed';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The invite boundary (BK-14/BK-16/BK-23, moved here by BK-33)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a status edit's mail needs to know: the new status, and the old row
+ * beside it.
+ *
+ * Every field outside `status` is unchanged by the edit that produced it, so a
+ * caller may read them from a pre-UPDATE snapshot — which is what `update.ts`'s
+ * self-join does, at no second query and with no window to be stale in.
+ */
+export type BoundaryRow = {
+  next_status: string;
+  prev_status: string;
+  id: number;
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  city: string;
+  postal_code: string | null;
+  /**
+   * The LABEL, not the key — injected by the caller for the reason this
+   * module's header gives: `SERVICE_LABELS` is a value in `db.ts` beside the
+   * Neon import, and importing it here would put this module out of reach of a
+   * `tsx` verify script. Moving `sendBoundaryMail` in was not a licence to
+   * break the constraint that made the move safe.
+   */
+  service_label: string;
+  /** `timestamptz` — the driver returns a `Date`. */
+  slot_start: Date;
+};
+
+/**
+ * The mail a status edit owes: the office's calendar artifact, and — since
+ * BK-16 — the customer's written notice carrying their own copy of it.
+ *
+ * ── WHY THIS LIVES HERE AND NOT IN `update.ts` (BK-33) ────────────────────
+ *
+ * It was a private function of the update route until a second route needed to
+ * cross the same boundary: "Cancel and refund" cancels a booking, so it owes
+ * the identical CANCEL ics to the identical two audiences. Copying it would
+ * have produced two functions that are both "the cancellation", differing by
+ * whatever drifts first — which is BK-45 exactly: `markPaid` and the Resend
+ * button sent two different messages both called "the confirmation", and a
+ * customer got a materially different email depending on which control somebody
+ * clicked.
+ *
+ * ── AND IT TOOK `NotifyDeps` IN THE SAME MOVE ─────────────────────────────
+ *
+ * It called `sendCalendarInvite` with no deps, so the only observable of these
+ * sends was a mute line carrying no message content: **which message a
+ * cancelled customer receives was checkable by reading the source and by
+ * nothing else.** That is the shape of defect BK-45 was filed for, and
+ * `booking-payment.ts`'s own header records the lesson —
+ * *"without it the whole of this module would be verified by reading it, which
+ * is precisely how the fixed-idempotency-prefix defect survived two reviews."*
+ * Moving a function without its seam would have carried the gap into a second
+ * caller instead of closing it.
+ *
+ * ── THE RULE IS THE INVITE BOUNDARY, not the status names ─────────────────
+ *
+ * It used to be the CANCELLED boundary, keyed on the literal `'cancelled'`,
+ * because that was the only status a booking could leave the calendar through.
+ * P9 added two more: a `confirmed` row can now be edited to `payment_expired`
+ * or `declined`, and under the old rule each of those would have left a live
+ * invite on two calendars with nothing to clear it.
+ *
+ * So the question is asked of the STATUSES rather than of one name: did the old
+ * status hold an invite, and does the new one? Crossing that boundary outward
+ * sends a CANCEL; crossing it inward sends a fresh REQUEST — same UID, and a
+ * SEQUENCE strictly greater because it comes from a later clock. Everything
+ * else sends nothing: a re-submit that keeps the status, and the ordinary
+ * `confirmed → completed` / `confirmed → no_show` edits, which do not change
+ * whether a crew is expected somewhere.
+ *
+ * `couldHoldCalendarInvite` is deliberately not "is it live" — invites issue at
+ * payment-confirmed, so `pending_review` and `approved_awaiting_payment` never
+ * had one, and moving between those and `declined` correctly sends nothing.
+ *
+ * ── `refund` IS THREADED, BUT IT DOES NOT DECIDE WHETHER TO SEND ──────────
+ *
+ * A refund reaching this function rides along on a crossing that was happening
+ * anyway. **It must never be the reason a send happens or does not**, because
+ * this function's first act is to return when no boundary is crossed — and a
+ * refund on an already-released row crosses nothing. That customer's notice is
+ * `planRefundNotice`, sent by the refund path itself. Hanging a money message
+ * off a calendar test is how one gets silently skipped.
+ *
+ * A 23505 never reaches here — the statement threw, and the row is untouched.
+ *
+ * **ONE DEADLINE OVER BOTH SENDS, RUN CONCURRENTLY.** Two serial
+ * `POST_COMMIT_BUDGET_MS` windows would stack on a request that has already run
+ * an UPDATE, and the platform's function limit is what a stacked pair blows
+ * through — the same reasoning the admin entry route states for its own
+ * `Promise.all`. The two cannot collapse into one another at Resend either:
+ * they share a per-transition idempotency prefix but go to different addresses,
+ * and the sender appends `:<to>`.
+ *
+ * **Cannot fail its caller.** The status edit has already committed; neither a
+ * calendar artifact nor a courtesy email may turn it into a `?saved=error` for
+ * a change that saved.
+ */
+export async function sendBoundaryMail(
+  row: BoundaryRow,
+  now: Date,
+  deps: NotifyDeps = {},
+  refund?: RefundNotice,
+): Promise<void> {
+  // Cast rather than validate: these came out of a CHECK-constrained column,
+  // and `parseAppointmentUpdate` already refused anything outside the set on
+  // the way in.
+  const hadInvite = couldHoldCalendarInvite(row.prev_status as AppointmentStatus);
+  const hasInvite = couldHoldCalendarInvite(row.next_status as AppointmentStatus);
+  if (hadInvite === hasInvite) return;
+
+  const kind: IcsKind = hadInvite ? 'cancel' : 'request';
+
+  try {
+    const event = inviteEventFromAppointment(row, row.service_label);
+
+    // The resend route's guard, and for the same reason: a column that is
+    // present but blank is not an address, and handing `''` to Resend is a
+    // failed send rather than a skip.
+    const email = typeof row.email === 'string' && row.email.trim() !== '' ? row.email : null;
+
+    const sends: Promise<[string, SendOutcome]>[] = [
+      sendCalendarInvite(planCalendarInvite(event, kind, now), {
+        id: row.id,
+        kind,
+        now,
+        audience: 'office',
+      }, deps).then((outcome) => ['office', outcome] as [string, SendOutcome]),
+    ];
+
+    if (email) {
+      // THREE messages across this boundary, not two.
+      //
+      // Before BK-23 the only inward crossing was `cancelled -> booked`, so
+      // "restored" described every one of them. P9 made more crossings
+      // reachable, and this block used to justify itself by saying the status
+      // dropdown was "currently the ONLY route to `confirmed`" because
+      // `createCheckoutUrl` returned null until BK-32. That was true when
+      // written and false the day BK-32 shipped — and it is what left the hole
+      // BK-44 closed looking like a considered decision.
+      //
+      // WHAT IS TRUE NOW, stated carefully, because the sentence this replaces
+      // was true when written and false when read. `markPaid` is the only route
+      // that confirms an UNPAID booking — card, Interac and free-approval
+      // alike — and the dropdown cannot create `confirmed` for a row that has
+      // never been paid. It CAN still produce it for one that has: a paid row
+      // restored from `cancelled`, or from `declined` / `payment_expired` where
+      // the money arrived late and stamped `paid_at` without moving the status.
+      // Those are the inward crossings that still reach this code. Movement
+      // between `confirmed`, `completed` and `no_show` crosses nothing.
+      //
+      // So the restore copy is still the wrong thing to send to most of them:
+      // it tells a customer their assessment "was cancelled and has now been
+      // reinstated", which is a claim only a row that was actually cancelled
+      // has earned.
+      //
+      // The question is asked of where the row CAME FROM, because that is what
+      // the word "reinstated" is a claim about. Only `cancelled` earns it.
+      const message =
+        kind === 'cancel'
+          ? planCancellationEmail(event, email, now, refund)
+          : row.prev_status === 'cancelled'
+            ? planRestoreEmail(event, email, now)
+            : planFirstConfirmationEmail(event, email, now);
+      sends.push(
+        sendCalendarInvite(message, { id: row.id, kind, now, audience: 'customer' }, deps).then(
+          (outcome) => ['customer', outcome] as [string, SendOutcome],
+        ),
+      );
+    }
+
+    const outcomes = await withDeadline(
+      Promise.all(sends),
+      POST_COMMIT_BUDGET_MS,
+      // The deadline's answer, one entry per send that was attempted. Wrong in
+      // the safe direction: the log says nothing went out rather than claiming
+      // something did.
+      sends.map((_, i) => [i === 0 ? 'office' : 'customer', 'failed'] as [string, SendOutcome]),
+    );
+
+    for (const [audience, outcome] of outcomes) {
+      if (outcome === 'failed') {
+        console.error(`Admin update ${row.id}: the ${audience} calendar ${kind} did not send.`);
+      }
+    }
+  } catch (err) {
+    console.error(`Admin update ${row.id} calendar ${kind} failed:`, err);
   }
 }

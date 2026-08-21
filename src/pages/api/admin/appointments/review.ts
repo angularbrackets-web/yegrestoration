@@ -356,6 +356,32 @@ async function approve(
       UPDATE appointments
       SET status                  = 'approved_awaiting_payment',
           payment_status          = 'pending',
+          -- BK-33. THE PREVIOUS CYCLE'S MONEY IS CLEARED ON RE-APPROVAL, and
+          -- this stopped being optional the day a RULE started reading it.
+          --
+          -- The ROADMAP has carried "approve and rollBack never clear paid_at"
+          -- as a record-truth defect with no owner: a query over paid_at
+          -- returned rows that were not paid on that cycle, the DISPLAY was
+          -- guarded because paymentReceipt keys on payment_status, and that was
+          -- judged good enough. BK-33 falsified the judgement. Its
+          -- invite-crossing guard asks paid_at IS NOT NULL AND payment_status
+          -- NOT IN (refunded, partially_refunded) — and THIS statement moves a
+          -- row out of the refunded set while leaving paid_at stamped. So a
+          -- booking that was refunded, walked back here, re-approved and never
+          -- re-paid could be edited to confirmed from declined or expired, and
+          -- a crew would be dispatched on money the customer already has.
+          --
+          -- Implementation review found it; neither version of the ticket's
+          -- case table enumerated it, which is the rule-rewrite trap exactly.
+          paid_at                 = NULL,
+          payment_method          = NULL,
+          paid_amount_cents       = NULL,
+          payment_reference       = NULL,
+          stripe_refund_id        = NULL,
+          refunded_amount_cents   = NULL,
+          refunded_at             = NULL,
+          refund_claim_key        = NULL,
+          refund_started_at       = NULL,
           approved_at             = ${now.toISOString()},
           assessment_amount_cents = ${baseCents},
           travel_fee_cents        = ${travelCents},
@@ -557,6 +583,17 @@ async function rollBack(sql: ReturnType<typeof getDb>, id: number, now: Date): P
       UPDATE appointments
       SET status                  = 'pending_review',
           payment_status          = 'not_required',
+          -- BK-33, same reason as approve above: rollBack returns the row to
+          -- pending_review, out of the refunded set the crossing rule reads.
+          paid_at                 = NULL,
+          payment_method          = NULL,
+          paid_amount_cents       = NULL,
+          payment_reference       = NULL,
+          stripe_refund_id        = NULL,
+          refunded_amount_cents   = NULL,
+          refunded_at             = NULL,
+          refund_claim_key        = NULL,
+          refund_started_at       = NULL,
           approved_at             = NULL,
           assessment_amount_cents = NULL,
           travel_fee_cents        = 0,
@@ -669,6 +706,32 @@ async function approveFree(
       UPDATE appointments
       SET status                  = 'approved_awaiting_payment',
           payment_status          = 'pending',
+          -- BK-33. THE PREVIOUS CYCLE'S MONEY IS CLEARED ON RE-APPROVAL, and
+          -- this stopped being optional the day a RULE started reading it.
+          --
+          -- The ROADMAP has carried "approve and rollBack never clear paid_at"
+          -- as a record-truth defect with no owner: a query over paid_at
+          -- returned rows that were not paid on that cycle, the DISPLAY was
+          -- guarded because paymentReceipt keys on payment_status, and that was
+          -- judged good enough. BK-33 falsified the judgement. Its
+          -- invite-crossing guard asks paid_at IS NOT NULL AND payment_status
+          -- NOT IN (refunded, partially_refunded) — and THIS statement moves a
+          -- row out of the refunded set while leaving paid_at stamped. So a
+          -- booking that was refunded, walked back here, re-approved and never
+          -- re-paid could be edited to confirmed from declined or expired, and
+          -- a crew would be dispatched on money the customer already has.
+          --
+          -- Implementation review found it; neither version of the ticket's
+          -- case table enumerated it, which is the rule-rewrite trap exactly.
+          paid_at                 = NULL,
+          payment_method          = NULL,
+          paid_amount_cents       = NULL,
+          payment_reference       = NULL,
+          stripe_refund_id        = NULL,
+          refunded_amount_cents   = NULL,
+          refunded_at             = NULL,
+          refund_claim_key        = NULL,
+          refund_started_at       = NULL,
           approved_at             = ${now.toISOString()},
           assessment_amount_cents = ${baseCents},
           travel_fee_cents        = ${travelCents},

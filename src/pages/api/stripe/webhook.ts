@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 
 export const prerender = false;
 
-import { markPaid } from '../../../lib/booking-payment';
+import { markPaid, reconcileRefund } from '../../../lib/booking-payment';
 import { getDb, type Appointment, type StripeEvent } from '../../../lib/db';
 import { readEnv } from '../../../lib/env';
 
@@ -172,11 +172,18 @@ export const POST: APIRoute = async ({ request }) => {
  * seven times. A pure function makes the property assertable instead of
  * describable.
  */
-export type WebhookAction = 'confirm' | 'flag-failed' | 'ignore';
+export type WebhookAction =
+  | 'confirm'
+  | 'flag-failed'
+  /** BK-33 — a refund happened at Stripe; make the row say so. */
+  | 'reconcile-refund'
+  /** BK-33 — a refund did NOT go through. Flag it and write no money state. */
+  | 'refund-failed'
+  | 'ignore';
 
 export function plannedAction(event: {
   type: string;
-  data: { object: { payment_status?: string } };
+  data: { object: { payment_status?: string; status?: string } };
 }): WebhookAction {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -198,6 +205,39 @@ export function plannedAction(event: {
       // two different customer emails about one lapse.
       return 'ignore';
 
+    // ── BK-33: REFUNDS, INCLUDING ONES NOBODY HERE ISSUED ─────────────────
+    //
+    // The office will sometimes refund in the Stripe dashboard, and before
+    // BK-33 nothing in this system heard about it: the row kept
+    // `payment_status = 'paid'` and the admin screen stated "Payment
+    // received — Paid by card" on a booking refunded in full. This arm is the
+    // only thing that can close that.
+    //
+    // `charge.refunded` and not `refund.created`, and the choice matters: the
+    // Charge carries `amount_refunded`, Stripe's RUNNING TOTAL for the charge,
+    // which is what makes a dashboard refund, a screen refund and a redelivery
+    // of either converge on one figure instead of summing.
+    case 'charge.refunded':
+      return 'reconcile-refund';
+
+    // A refund object's own updates. `succeeded` adds nothing the charge event
+    // did not already carry; a FAILED or CANCELED refund is the case worth
+    // hearing about, and it is flagged rather than acted on — see `handle`.
+    case 'refund.failed':
+      return 'refund-failed';
+
+    case 'refund.updated':
+    case 'charge.refund.updated':
+      return event.data.object.status === 'failed' || event.data.object.status === 'canceled'
+        ? 'refund-failed'
+        : 'ignore';
+
+    case 'refund.created':
+      // Deliberately ignored. It describes the same money as `charge.refunded`
+      // and carries no running total, so acting on both races two events for
+      // one row.
+      return 'ignore';
+
     default:
       // Stripe sends dozens of event types and an endpoint that errors on the
       // unfamiliar ones is an endpoint Stripe disables. A non-2xx makes it
@@ -213,6 +253,92 @@ async function handle(
 ): Promise<void> {
   const action = plannedAction(event as never);
   if (action === 'ignore') return;
+
+  // ── THE REFUND ACTIONS COME FIRST, AND THE ORDER IS LOAD-BEARING (BK-33) ─
+  //
+  // The narrowing below returns for anything that is not a Checkout Session,
+  // which is every refund event there is. A `plannedAction` arm added without
+  // touching it would be INERT — while `verify-stripe-webhook.ts`, which
+  // asserts `plannedAction`, stayed green. That is the "assertion that cannot
+  // fail" family this repo has caught eight times, and plan review caught it
+  // here as a ninth before it shipped. The refund work is therefore dispatched
+  // above the narrowing and asserted against a real row, not only as a routing
+  // decision.
+  if (action === 'reconcile-refund') {
+    // A Charge. `payment_intent` is the link to our row — the column BK-32
+    // recorded as the one "BK-33 issues its refund from".
+    if (event.type !== 'charge.refunded') return;
+    const charge = event.data.object;
+    const intentId =
+      typeof charge.payment_intent === 'string'
+        ? charge.payment_intent
+        : (charge.payment_intent?.id ?? null);
+    if (intentId === null) {
+      console.error(`Stripe charge ${charge.id} was refunded but names no payment intent.`);
+      return;
+    }
+    await reconcileRefund(
+      sql,
+      intentId,
+      charge.amount_refunded,
+      charge.amount,
+      null,
+      new Date(),
+    );
+    return;
+  }
+
+  if (action === 'refund-failed') {
+    // ── FLAG ONLY. NO MONEY STATE IS WRITTEN, AND THAT IS THE DECISION ────
+    //
+    // The tempting handler restores `payment_status = 'paid'` and clears the
+    // refund columns when the failed refund's id matches `stripe_refund_id`.
+    // Plan review killed it: a charge can carry SEVERAL refunds and that column
+    // holds ONE id. Refund A of $300 succeeds, refund B is issued and its id
+    // replaces A's, B fails, the guard matches — and the arm erases a refund
+    // that genuinely went back, restoring "Payment received — Paid by card"
+    // over returned money. That is this ticket's headline defect, recreated by
+    // this ticket's own code.
+    //
+    // Stripe lowers `charge.amount_refunded` when a refund fails, so the
+    // corrected running total arrives on a `charge.refunded` event and
+    // `reconcileRefund` writes it from the authoritative side. Here, a human is
+    // told and nothing is guessed.
+    if (
+      event.type !== 'refund.failed' &&
+      event.type !== 'refund.updated' &&
+      event.type !== 'charge.refund.updated'
+    ) {
+      return;
+    }
+    const refund = event.data.object;
+    const intentId =
+      typeof refund.payment_intent === 'string'
+        ? refund.payment_intent
+        : (refund.payment_intent?.id ?? null);
+    if (intentId === null) {
+      console.error(`Stripe refund ${refund.id} failed but names no payment intent.`);
+      return;
+    }
+    const rows = (await sql`
+      SELECT id FROM appointments WHERE stripe_payment_intent_id = ${intentId}
+    `) as { id: number }[];
+    const id = rows[0]?.id;
+    if (id === undefined) {
+      console.error(`Stripe refund ${refund.id} failed; no booking carries intent ${intentId}.`);
+      return;
+    }
+    await flag(
+      sql,
+      id,
+      `A REFUND FAILED AT STRIPE: refund ${refund.id} for ${refund.amount} cents did not go ` +
+        `through (status '${refund.status ?? 'unknown'}'). The money may still be ours. ` +
+        'NOTHING here was changed — check the charge in Stripe and issue the refund again if ' +
+        'the customer is owed it. The customer may already have been told a refund was on its way.',
+      null,
+    );
+    return;
+  }
 
   // Both remaining actions are about a Checkout Session, and nothing else
   // reaches here — so the narrowing is safe and is stated rather than cast
@@ -400,15 +526,30 @@ async function flag(
     } else {
       // Guarded: a row that has since been PAID by another route must not be
       // walked back to 'failed' by a late event about the card attempt.
+      //
+      // ── THE STATUS IS GUARDED; THE NOTE IS NOT ──────────────────────────
+      //
+      // BK-33 widened the guard from a bare `<> 'paid'` so a late
+      // `async_payment_failed` on a REFUNDED row cannot walk it to 'failed' and
+      // erase the record that money went back. Putting both writes under one
+      // predicate then made that event COMPLETELY silent — no status change and
+      // no note — which is safe but uninformative, and this file's own header
+      // argues at length that a payment event nobody hears about is the failure
+      // mode worth spending code on. A CASE separates them: the note always
+      // lands, the status moves only where it may.
       await sql`
         UPDATE appointments
-        SET payment_status = ${paymentStatus},
+        SET payment_status = CASE
+              WHEN payment_status IN ('paid', 'refunded', 'partially_refunded')
+                THEN payment_status
+              ELSE ${paymentStatus}
+            END,
             needs_attention = CASE
               WHEN needs_attention IS NULL OR needs_attention = '' THEN ${line}
               ELSE needs_attention || ${`\n\n${line}`}
             END,
             updated_at = ${now}
-        WHERE id = ${id} AND payment_status <> 'paid'
+        WHERE id = ${id}
       `;
     }
   } catch (err) {

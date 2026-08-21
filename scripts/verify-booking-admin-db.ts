@@ -43,6 +43,7 @@ import {
   editorMaySetStatus,
   editorStatusTargets,
   INVITE_HOLDING_STATUSES,
+  REFUNDED_PAYMENT_STATUSES,
   SLOT_HOLD_PREDICATE,
   type AppointmentStatus,
 } from '../src/lib/booking-status';
@@ -110,7 +111,7 @@ const { GET: availability } = await import('../src/pages/api/booking/availabilit
 // before the module is imported — same swap-then-import ordering as the DB URL.
 process.env.CRON_SECRET = process.env.CRON_SECRET ?? 'verify-cron-secret';
 const { GET: expiryCron } = await import('../src/pages/api/cron/expire-payments');
-const { markPaid } = await import('../src/lib/booking-payment');
+const { markPaid, refundPayment, reconcileRefund } = await import('../src/lib/booking-payment');
 const { GET: fileRoute } = await import('../src/pages/api/admin/files/[id]');
 const { claimedFilePathname } = await import('../src/lib/booking-files');
 const { UNTICKED_NOTE } = await import('../src/lib/booking-admin-entry');
@@ -3133,33 +3134,758 @@ try {
   // thought of, the way `completed` and `no_show` turned out to be doors into
   // the invite-holding set that guarding `confirmed` alone would have missed.
   {
+// ---------------------------------------------------------------------------
+console.log('\nBK-33 — refunds: the money, the claim, and the two records');
+// ---------------------------------------------------------------------------
+//
+// EVERY ARM IS DRIVEN THROUGH THE INJECTED GATEWAY, against a REAL ROW.
+//
+// A refund is irreversible and takes real money, so not one guard here may be
+// evidenced by reading source: the fake is the only way to see a refusal, an
+// API error and a hang without a live key. And the row is real because the
+// dedupe lives in the DATABASE — a claim column with an exclusive WHERE — so an
+// assertion against an in-memory object would prove nothing about the property
+// that actually stops a double refund.
+{
+  const PAID = 62843;
+
+  /** Records every refund it is asked for, and answers however told to. */
+  function refundGateway(options: { throws?: unknown; fee?: number | null } = {}) {
+    const calls: { params: any; idempotencyKey: string }[] = [];
+    const gateway = {
+      createSession: async () => ({ id: 'cs_x', url: null, amount_total: null }),
+      expireSession: async () => {},
+      sessionStatus: async () => null,
+      createRefund: async (params: any, idempotencyKey: string) => {
+        calls.push({ params, idempotencyKey });
+        if (options.throws) throw options.throws;
+        return { id: `re_${calls.length}`, amount: params.amount ?? 0, status: 'succeeded' };
+      },
+      chargeFee: async () => options.fee ?? 1852,
+    };
+    return { gateway, calls };
+  }
+
+  /**
+   * Mail goes to an array rather than to Resend.
+   *
+   * ── THE MUTE HAS TO COME OFF, AND THAT IS NOT A SHORTCUT ────────────────
+   *
+   * `BOOKING_NOTIFY_DISABLED` short-circuits the senders BEFORE they consult
+   * `deps.send`, so under it the only observable is a log line carrying no
+   * message content. BK-45 records that this is exactly why "which message the
+   * paying customer receives" was invisible for a whole deploy. Nothing reaches
+   * the network with the flag off — `deps.send` is consulted before any API key
+   * is read — and it is restored in a `finally`, because every arm after this
+   * one depends on it.
+   */
+  async function withMailbox<T>(
+    run: (deps: { send: (m: any) => Promise<{ ok: boolean }> }) => Promise<T>,
+  ): Promise<{ result: T; sent: { to: string; text: string }[] }> {
+    const sent: { to: string; text: string }[] = [];
+    const deps = {
+      send: async (message: { to: string; text: string }) => {
+        sent.push({ to: message.to, text: message.text });
+        return { ok: true };
+      },
+    };
+    const previousMute = process.env.BOOKING_NOTIFY_DISABLED;
+    try {
+      delete process.env.BOOKING_NOTIFY_DISABLED;
+      const result = await run(deps);
+      return { result, sent };
+    } finally {
+      if (previousMute !== undefined) process.env.BOOKING_NOTIFY_DISABLED = previousMute;
+    }
+  }
+
+  /**
+   * A CONFIRMED, CARD-PAID ROW — the fixture a refund actually applies to.
+   *
+   * Every payment column is stamped the way `markPaid` leaves them, because a
+   * fixture that is only half paid would let an arm pass for the wrong reason:
+   * the claim's WHERE names `payment_method`, `stripe_payment_intent_id`,
+   * `paid_amount_cents` AND `payment_status`, so a missing one refuses for a
+   * reason the arm was not written about.
+   */
+  //
+  // EVERY SEED GETS ITS OWN SESSION AND INTENT ID. `stripe_session_id` carries a
+  // UNIQUE index (migration 010), so a shared fixture id fails on the second
+  // seed — and the intent has to be unique anyway, because `reconcileRefund`
+  // finds its row BY the intent and a shared one would reconcile whichever row
+  // the SELECT happened to return first.
+  let refundProbe = 0;
+  async function seedPaid(
+    opts: { status?: string; intent?: string | null; alreadyRefunded?: number | null } = {},
+  ): Promise<{ id: number; intent: string }> {
+    const slot = await freeProbeSlot();
+    const now = new Date().toISOString();
+    refundProbe++;
+    const session = `cs_test_bk33_${refundProbe}`;
+    const intent = opts.intent === undefined ? `pi_test_bk33_${refundProbe}` : opts.intent;
+    const inserted = (await sql`
+      INSERT INTO appointments (name, phone, email, service, address, payment_route,
+                                slot_start, status, pipeline_stage, admin_notes,
+                                assessment_tier, assessment_amount_cents, travel_fee_cents,
+                                gst_cents, total_amount_cents,
+                                payment_status, paid_at, payment_method, paid_amount_cents,
+                                stripe_session_id, stripe_payment_intent_id,
+                                refunded_amount_cents)
+      VALUES ('BK33 Probe', '780-555-0133', 'bk33@example.com', 'water', '33 Refund Rd',
+              'private', ${slot.toISOString()}, ${opts.status ?? 'confirmed'}, 'assessment',
+              ${MARKER}, 'standard', 39900, 20000, 2995, ${PAID},
+              ${opts.alreadyRefunded ? 'partially_refunded' : 'paid'}, ${now}, 'stripe', ${PAID},
+              ${session}, ${intent},
+              ${opts.alreadyRefunded ?? null})
+      RETURNING id
+    `) as { id: number }[];
+    createdIds.push(inserted[0].id);
+    return { id: inserted[0].id, intent: intent ?? '' };
+  }
+
+  const stateOfRow = async (id: number) =>
+    (
+      (await sql`
+        SELECT status, payment_status, paid_at, refunded_amount_cents, refunded_at,
+               stripe_refund_id, refund_claim_key, needs_attention, cancelled_at
+        FROM appointments WHERE id = ${id}
+      `) as any[]
+    )[0];
+
+  // ── THE HAPPY PATH ────────────────────────────────────────────────────
+  {
+    const { id, intent } = await seedPaid();
+    const { gateway, calls } = refundGateway();
+    const { result } = await withMailbox((deps) =>
+      refundPayment(
+        sql,
+        id,
+        { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+        { gateway, ...deps },
+      ),
+    );
+    check(result.outcome === 'refunded', `a full refund reports 'refunded', got '${result.outcome}'`);
+    check(calls.length === 1, `and asked Stripe exactly once, got ${calls.length}`);
+    check(calls[0]?.params.amount === PAID, 'for the amount typed');
+    check(
+      calls[0]?.params.payment_intent === intent,
+      'against the payment intent the row records',
+    );
+    // NO `reason`. Stripe's three values are 'duplicate', 'fraudulent' and
+    // 'requested_by_customer'; none describes a company cancellation, and
+    // 'fraudulent' would add the card and the email to Radar's block lists.
+    check(calls[0]?.params.reason === undefined, 'and with NO reason — see the route note');
+
+    const after = await stateOfRow(id);
+    check(after.status === 'cancelled', `the booking is cancelled, got '${after.status}'`);
+    check(after.cancelled_at !== null, 'and stamped with when');
+    check(after.payment_status === 'refunded', `payment_status is refunded, got '${after.payment_status}'`);
+    check(Number(after.refunded_amount_cents) === PAID, 'the refunded total is recorded');
+    check(after.refunded_at !== null, 'and when');
+    check(after.stripe_refund_id === 're_1', "Stripe's own refund id is kept for a human");
+    // THE CLAIM IS RELEASED, or a later deliberate partial refund could never
+    // claim in its turn.
+    check(after.refund_claim_key === null, 'and the claim is released');
+    // AND NOTHING IS FLAGGED. This is the assertion that catches the defect
+    // plan review found: an unconditional reconcile flag would leave a
+    // permanent red banner reading "still CONFIRMED and still holding its slot"
+    // on this ticket's own happy path.
+    check(
+      after.needs_attention === null,
+      `a successful refund raises no alarm, got ${JSON.stringify(after.needs_attention)}`,
+    );
+  }
+
+  // ── THE DOUBLE CLICK: ONE REFUND, NOT TWO ─────────────────────────────
+  {
+    const { id } = await seedPaid();
+    const { gateway, calls } = refundGateway();
+    const input = { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() };
+    // Concurrent, because that is what a double click is. Serialising them here
+    // would test a different thing entirely.
+    const [a, b] = await Promise.all([
+      refundPayment(sql, id, input, { gateway }),
+      refundPayment(sql, id, input, { gateway }),
+    ]);
+    const outcomes = [a.outcome, b.outcome].sort();
+    check(
+      calls.length === 1,
+      `a double click reaches Stripe ONCE, got ${calls.length} call(s) — this is the money one`,
+    );
+    // THE LOSER MOVED NO MONEY, whatever it is called. It reports
+    // `already-refunding` when it lost the claim while the winner was still in
+    // flight, and `not-paid` when the winner had already settled — "there is
+    // nothing left to refund" is the honest answer to the second, and it is the
+    // sentence the flash renders. Asserting one specific string would be
+    // asserting a race's timing.
+    check(
+      outcomes.filter(o => o === 'refunded' || o === 'partially-refunded').length === 1,
+      `exactly ONE of the two moved money, got ${outcomes.join(' + ')}`,
+    );
+    check(
+      Number((await stateOfRow(id)).refunded_amount_cents) === PAID,
+      'and the recorded total is the single refund, not the sum of two',
+    );
+  }
+
+  // ── TWO DIFFERENT AMOUNTS AT ONCE ─────────────────────────────────────
+  //
+  // THE ONE THE IDEMPOTENCY KEY COULD NOT COVER, and the reason the claim
+  // column exists. $300 and $328.43 sum to less than $628.43, so they produce
+  // two different keys and Stripe's over-refund refusal — the first draft's
+  // stated backstop — never fires. Both would have gone through.
+  {
+    const { id } = await seedPaid();
+    const { gateway, calls } = refundGateway();
+    const now = new Date();
+    await Promise.all([
+      refundPayment(sql, id, { amountCents: 30000, expectedAlreadyRefundedCents: 0, now }, { gateway }),
+      refundPayment(sql, id, { amountCents: 32843, expectedAlreadyRefundedCents: 0, now }, { gateway }),
+    ]);
+    check(
+      calls.length === 1,
+      `two DIFFERENT amounts racing produce ONE refund, got ${calls.length} — the claim is exclusive`,
+    );
+  }
+
+  // ── MORE THAN IS LEFT ─────────────────────────────────────────────────
+  {
+    const { id } = await seedPaid();
+    const { gateway, calls } = refundGateway();
+    const result = await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID + 1, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(result.outcome === 'too-much', `refunding more than was paid refuses, got '${result.outcome}'`);
+    check(calls.length === 0, 'and never reaches Stripe');
+    const after = await stateOfRow(id);
+    check(after.status === 'confirmed', 'the booking is untouched');
+    check(after.refund_claim_key === null, 'and the claim it took is released, so a retry can claim');
+  }
+
+  // ── A PARTIAL REFUND ──────────────────────────────────────────────────
+  {
+    const { id } = await seedPaid();
+    const { gateway } = refundGateway();
+    const result = await refundPayment(
+      sql,
+      id,
+      { amountCents: 30000, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(
+      result.outcome === 'partially-refunded',
+      `a partial refund reports 'partially-refunded', got '${result.outcome}'`,
+    );
+    const after = await stateOfRow(id);
+    check(
+      after.payment_status === 'partially_refunded',
+      `and payment_status says so, got '${after.payment_status}'`,
+    );
+    check(Number(after.refunded_amount_cents) === 30000, 'with only what went back recorded');
+    check(after.status === 'cancelled', 'the booking is still cancelled — that is what the action is');
+  }
+
+  // ── STRIPE REFUSES, DEFINITIVELY ──────────────────────────────────────
+  {
+    const { id } = await seedPaid();
+    const { gateway } = refundGateway({
+      throws: { type: 'StripeInvalidRequestError', message: 'charge_already_refunded' },
+    });
+    const result = await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(result.outcome === 'stripe-error', `a refusal reports 'stripe-error', got '${result.outcome}'`);
+    const after = await stateOfRow(id);
+    check(after.status === 'confirmed', 'nothing was cancelled');
+    check(after.payment_status === 'paid', 'and no money state was written');
+    check(after.refunded_amount_cents === null, 'no refund figure was invented');
+    // RELEASED, because Stripe gave a definite no: nothing moved, so the office
+    // may fix the amount and try again.
+    check(after.refund_claim_key === null, 'and the claim is released so the office can retry');
+  }
+
+  // ── STRIPE GIVES NO ANSWER ────────────────────────────────────────────
+  //
+  // The direction of this arm is the whole decision. Money MAY be in flight, so
+  // releasing the claim would let the office refund again on top of it.
+  {
+    const { id } = await seedPaid();
+    const { gateway } = refundGateway({ throws: new Error('socket hang up') });
+    const { result, sent } = await withMailbox((deps) =>
+      refundPayment(
+        sql,
+        id,
+        { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+        { gateway, ...deps },
+      ),
+    );
+    check(
+      result.outcome === 'stripe-unknown',
+      `no answer from Stripe reports 'stripe-unknown', got '${result.outcome}'`,
+    );
+    const after = await stateOfRow(id);
+    check(after.payment_status === 'paid', 'no money state is written on a maybe');
+    check(
+      after.refund_claim_key !== null,
+      'and the claim STAYS — a second refund on top of one that may have gone is the worst case',
+    );
+    check(
+      (after.needs_attention ?? '').includes('NO ANSWER'),
+      'the row is flagged for a human',
+    );
+    // AND THE CUSTOMER IS NOT TOLD. We do not know whether their money moved.
+    check(
+      sent.every((m) => !m.to.includes('bk33@example.com')),
+      'and the customer is told nothing, because we do not know what happened',
+    );
+
+    // A SECOND ATTEMPT IS REFUSED while the claim stands.
+    const { gateway: g2, calls: c2 } = refundGateway();
+    const again = await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway: g2 },
+    );
+    check(
+      again.outcome === 'already-refunding',
+      `and the booking refuses further refunds until a human clears it, got '${again.outcome}'`,
+    );
+    check(c2.length === 0, 'without reaching Stripe');
+  }
+
+  // ── NOT A CARD PAYMENT ────────────────────────────────────────────────
+  {
+    const { id } = await seedPaid();
+    await sql`UPDATE appointments SET payment_method = 'interac' WHERE id = ${id}`;
+    const { gateway, calls } = refundGateway();
+    const result = await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(result.outcome === 'not-card', `an e-Transfer row refuses, got '${result.outcome}'`);
+    check(calls.length === 0, 'and never reaches Stripe — that money goes back from the bank');
+  }
+  {
+    const { id } = await seedPaid({ intent: null });
+    const { gateway } = refundGateway();
+    const result = await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(result.outcome === 'no-charge', `a card row with no intent refuses, got '${result.outcome}'`);
+  }
+
+  // ── THE BALANCE MOVED UNDER THE CONFIRM SCREEN ────────────────────────
+  {
+    const { id } = await seedPaid({ alreadyRefunded: 30000 });
+    const { gateway, calls } = refundGateway();
+    const result = await refundPayment(
+      sql,
+      id,
+      // The office confirmed against a screen that said nothing had gone back.
+      { amountCents: 30000, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(
+      result.outcome === 'changed-underneath',
+      `a stale confirm screen refuses, got '${result.outcome}'`,
+    );
+    check(calls.length === 0, 'and moves nothing');
+  }
+
+  // ── THE CUSTOMER HEARS ABOUT IT, ON BOTH ARMS ─────────────────────────
+  {
+    const { id } = await seedPaid();
+    const { gateway } = refundGateway();
+    const { sent } = await withMailbox((deps) =>
+      refundPayment(
+        sql,
+        id,
+        { amountCents: 30000, expectedAlreadyRefundedCents: 0, now: new Date() },
+        { gateway, ...deps },
+      ),
+    );
+    const toCustomer = sent.find((m) => m.to === 'bk33@example.com');
+    check(!!toCustomer, 'a refund on a confirmed booking emails the customer');
+    check(
+      toCustomer?.text.includes('$300.00') === true,
+      'naming the amount that went back',
+    );
+    check(
+      toCustomer?.text.includes('$628.43') !== true,
+      'and NOT the amount they originally paid — two figures, and they cannot tell which arrived',
+    );
+    check(
+      /5 to 10 business days/.test(toCustomer?.text ?? ''),
+      'and saying when it lands, because Stripe shows it instantly and a bank does not',
+    );
+  }
+
+  // ── THE ARM THAT CROSSES NO CALENDAR BOUNDARY ─────────────────────────
+  //
+  // A row `markPaid` recorded as paid-after-release: already `cancelled`, real
+  // money on it. The boundary mailer returns early here, so hanging the money
+  // message off that test would have sent this customer NOTHING — on the exact
+  // path the refund copy was written for.
+  {
+    const { id } = await seedPaid({ status: 'cancelled' });
+    const { gateway } = refundGateway();
+    const { result, sent } = await withMailbox((deps) =>
+      refundPayment(
+        sql,
+        id,
+        { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+        { gateway, ...deps },
+      ),
+    );
+    check(result.outcome === 'refunded', `an already-cancelled row still refunds, got '${result.outcome}'`);
+    const after = await stateOfRow(id);
+    check(after.status === 'cancelled', 'and keeps the status it had');
+    const toCustomer = sent.find((m) => m.to === 'bk33@example.com');
+    check(
+      !!toCustomer,
+      'THE CUSTOMER IS STILL TOLD — the refund notice is not gated on the calendar boundary',
+    );
+    check(
+      toCustomer?.text.includes('$628.43') === true,
+      'and it names the amount',
+    );
+  }
+  {
+    // A declined row keeps ITS status too — rewriting it to cancelled would
+    // erase why the booking ended, and the slot is off the market either way.
+    const { id } = await seedPaid({ status: 'declined' });
+    const { gateway } = refundGateway();
+    await refundPayment(
+      sql,
+      id,
+      { amountCents: PAID, expectedAlreadyRefundedCents: 0, now: new Date() },
+      { gateway },
+    );
+    check(
+      (await stateOfRow(id)).status === 'declined',
+      'a declined row is not rewritten to cancelled by a refund',
+    );
+  }
+
+  // ── RECONCILING A REFUND TAKEN IN THE STRIPE DASHBOARD ────────────────
+  //
+  // The path the ticket exists for. Nothing in this system issued it.
+  {
+    const { id, intent } = await seedPaid();
+    const { result: outcome, sent } = await withMailbox((deps) =>
+      reconcileRefund(sql, intent, PAID, PAID, 're_dashboard', new Date(), deps),
+    );
+    check(outcome === 'reconciled', `a dashboard refund reaches the row, got '${outcome}'`);
+    const after = await stateOfRow(id);
+    check(after.payment_status === 'refunded', 'and payment_status stops saying paid');
+    check(Number(after.refunded_amount_cents) === PAID, "recording Stripe's own running total");
+    // NEVER CANCELS. A refund says something about money and nothing about
+    // whether the visit is happening.
+    check(after.status === 'confirmed', 'the booking is NOT cancelled — that is a human decision');
+    check(
+      (after.needs_attention ?? '').includes('STILL'),
+      'but the row is flagged, because it is still holding its slot',
+    );
+    check(
+      (after.needs_attention ?? '').includes('CUSTOMER HAS NOT BEEN TOLD'),
+      'and the flag says the customer has heard nothing from us',
+    );
+    // NEVER EMAILS THE CUSTOMER.
+    check(
+      sent.every((m) => !m.to.includes('bk33@example.com')),
+      'and no customer message goes out — we do not know why it was refunded',
+    );
+
+    // ── THE FIGURE IS OVERWRITTEN, NEVER ADDED TO ───────────────────────
+    //
+    // The arm above cannot tell the two apart: the row started at null, so
+    // `0 + 62843` and `62843` are the same answer. This one can — a partial
+    // refund already recorded, then a charge event carrying the LARGER running
+    // total. Summing would report $928.43 refunded against a $628.43 charge.
+    {
+      const partial = await seedPaid({ alreadyRefunded: 30000 });
+      await reconcileRefund(sql, partial.intent, PAID, PAID, 're_full', new Date());
+      check(
+        Number((await stateOfRow(partial.id)).refunded_amount_cents) === PAID,
+        "a later charge event OVERWRITES with Stripe's running total rather than adding to ours",
+      );
+    }
+
+    // AND IT MAY MOVE DOWN. Stripe lowers `amount_refunded` when a refund
+    // FAILS, and that corrected total on the charge is the only authoritative
+    // correction there is. A monotonic guard — refuse anything lower — was in
+    // the first implementation and would have left the row permanently claiming
+    // money went back that did not: this ticket's own defect, reachable through
+    // an ordinary failed refund.
+    {
+      const overstated = await seedPaid({ alreadyRefunded: PAID });
+      await sql`UPDATE appointments SET payment_status = 'refunded' WHERE id = ${overstated.id}`;
+      await reconcileRefund(sql, overstated.intent, 30000, PAID, 're_after_fail', new Date());
+      const after = await stateOfRow(overstated.id);
+      check(
+        Number(after.refunded_amount_cents) === 30000,
+        'and a LOWER total is accepted — that is how a failed refund corrects the record',
+      );
+      check(
+        after.payment_status === 'partially_refunded',
+        'with payment_status following it back down',
+      );
+    }
+
+    // A REDELIVERY CHANGES NOTHING AND FLAGS NOTHING TWICE.
+    const before = await stateOfRow(id);
+    const second = await reconcileRefund(sql, intent, PAID, PAID, 're_dashboard', new Date());
+    check(second === 'unchanged', `a redelivered charge.refunded is a no-op, got '${second}'`);
+    check(
+      (await stateOfRow(id)).needs_attention === before.needs_attention,
+      'and adds no second flag',
+    );
+  }
+
+  // ── AND A DASHBOARD REFUND ON A ROW OUR OWN PATH IS MID-REFUND ON ─────
+  //
+  // charge.refunded can arrive BEFORE the refund route's own write lands. An
+  // unconditional flag would put "still CONFIRMED and still holding its slot"
+  // on this feature's happy path, permanently — `needs_attention` is
+  // append-only and nothing clears it.
+  {
+    const { id, intent } = await seedPaid();
+    await sql`UPDATE appointments SET refund_claim_key = 'refund-x-0-62843' WHERE id = ${id}`;
+    await reconcileRefund(sql, intent, PAID, PAID, 're_race', new Date());
+    const after = await stateOfRow(id);
+    check(Number(after.refunded_amount_cents) === PAID, 'the figure still reconciles during our own refund');
+    check(
+      after.needs_attention === null,
+      'but nothing is flagged — our path is mid-flight and about to cancel it',
+    );
+  }
+
+  // ── A LATE PAYMENT ON A REFUNDED ROW STILL ALERTS THE OFFICE ──────────
+  //
+  // The naive fix to the late-payment guard — excluding refunded rows — makes
+  // markPaid return before its alert, so money lands on a refunded booking and
+  // nobody is told. That is the outcome the webhook's three-layer design exists
+  // to prevent, reopened one layer up.
+  {
+    const { id } = await seedPaid({ status: 'cancelled' });
+    await sql`
+      UPDATE appointments
+      SET payment_status = 'refunded', refunded_amount_cents = ${PAID}, refunded_at = now()
+      WHERE id = ${id}
+    `;
+    const { result: outcome, sent } = await withMailbox((deps) =>
+      markPaid(
+        sql,
+        id,
+        {
+          method: 'stripe',
+          amountCents: PAID,
+          reference: 'pi_second_charge',
+          paymentIntentId: 'pi_second_charge',
+          now: new Date(),
+        },
+        deps,
+      ),
+    );
+    check(
+      outcome === 'paid-after-refund',
+      `money on a refunded row reports 'paid-after-refund', got '${outcome}'`,
+    );
+    const after = await stateOfRow(id);
+    check(
+      after.payment_status === 'refunded',
+      `and the refund is NOT overwritten by a fresh 'paid', got '${after.payment_status}'`,
+    );
+    check(
+      Number(after.refunded_amount_cents) === PAID,
+      'the record of what went back survives',
+    );
+    check(
+      (after.needs_attention ?? '').includes('PAID AFTER THIS BOOKING WAS REFUNDED'),
+      'the row is flagged',
+    );
+    check(sent.length > 0, 'AND the office is alerted — the half the naive fix loses');
+
+    // A REPLAY FLAGS ONCE. The refunded arm writes no stamp for the outer guard
+    // to catch, so the note carries the payment's own identity as a marker.
+    const noteBefore = (await stateOfRow(id)).needs_attention;
+    await markPaid(
+      sql,
+      id,
+      {
+        method: 'stripe',
+        amountCents: PAID,
+        reference: 'pi_second_charge',
+        paymentIntentId: 'pi_second_charge',
+        now: new Date(),
+      },
+      {},
+    );
+    check(
+      (await stateOfRow(id)).needs_attention === noteBefore,
+      'and a redelivery of that event does not append the same paragraph again',
+    );
+  }
+
+  // ── THE PREVIOUS CYCLE'S MONEY IS CLEARED, AND A RULE DEPENDS ON IT ──────
+  //
+  // Implementation review found both halves of this unasserted, and the second
+  // half was a live hole rather than a gap in coverage.
+  //
+  // `markPaid`'s confirm UPDATE clears the five refund columns; `approve` and
+  // `rollBack` now clear the money columns too. Deleting any of those lines left
+  // all 23 scripts green, while `editorMaySetStatus` reads exactly those columns
+  // to decide whether a booking may cross back into the invite-holding set.
+  {
+    // (a) A REFUNDED ROW THAT IS RE-APPROVED AND RE-PAID becomes an ordinary
+    //     confirmed booking, carrying nothing from the cycle that was refunded.
+    const { id } = await seedPaid({ status: 'cancelled' });
+    await sql`
+      UPDATE appointments
+      SET payment_status = 'refunded', refunded_amount_cents = ${PAID}, refunded_at = now(),
+          stripe_refund_id = 're_old', status = 'approved_awaiting_payment'
+      WHERE id = ${id}
+    `;
+    await markPaid(
+      sql,
+      id,
+      { method: 'stripe', amountCents: PAID, reference: 'pi_new', paymentIntentId: 'pi_new', now: new Date() },
+      {},
+    );
+    const after = await stateOfRow(id);
+    check(after.payment_status === 'paid', 'a re-paid booking reports paid');
+    check(
+      after.refunded_amount_cents === null &&
+        after.refunded_at === null &&
+        after.stripe_refund_id === null,
+      'and carries NO refund from the cycle that was refunded — markPaid clears all five columns',
+    );
+    // THE RULE'S ANSWER, which is what the clearing is for: this row may now
+    // move within and across the invite-holding set like any other paid one.
+    check(
+      editorMaySetStatus(
+        {
+          status: 'cancelled',
+          paid_at: after.paid_at,
+          stripe_session_id: null,
+          payment_status: after.payment_status,
+        },
+        'confirmed',
+      ),
+      'so the dropdown may confirm it again — the case the rule would otherwise bar forever',
+    );
+  }
+  {
+    // (b) THE HOLE IMPLEMENTATION REVIEW FOUND. A refunded booking walked back
+    //     to `pending_review` and RE-APPROVED — but never re-paid — used to end
+    //     up with `payment_status = 'pending'` and a stale `paid_at`, which
+    //     took it OUT of the refunded set the crossing rule reads. From there
+    //     `declined -> confirmed` was allowed, and a crew would be dispatched
+    //     with a fresh REQUEST ics on money the customer already had back.
+    //
+    //     Neither version of the ticket's case table enumerated it. `approve`
+    //     now clears the money columns, so `paid_at` is NULL and the crossing
+    //     is refused on the first clause instead.
+    const { id } = await seedPaid({ status: 'cancelled' });
+    await sql`
+      UPDATE appointments
+      SET payment_status = 'refunded', refunded_amount_cents = ${PAID}, refunded_at = now(),
+          status = 'pending_review', assessment_tier = 'standard'
+      WHERE id = ${id}
+    `;
+    const approved = await call(reviewRoute, {
+      id: String(id),
+      action: 'approve',
+      assessment_amount: '399.00',
+      travel_fee: '0',
+    });
+    const after = await stateOfRow(id);
+    check(
+      approved.includes('review=approved') || after.payment_status === 'pending',
+      `the refunded booking re-approved, got "${approved}"`,
+    );
+    check(
+      after.paid_at === null,
+      'and re-approval CLEARED the previous cycle\'s paid_at — the stamp the crossing rule reads',
+    );
+    check(
+      after.refunded_amount_cents === null && after.refunded_at === null,
+      'and the previous refund with it',
+    );
+    check(
+      !editorMaySetStatus(
+        {
+          status: 'declined',
+          paid_at: after.paid_at,
+          stripe_session_id: null,
+          payment_status: after.payment_status,
+        },
+        'confirmed',
+      ),
+      'so an unpaid re-approval can NOT be confirmed by the dropdown — the hole is closed',
+    );
+  }
+
+  console.log('  refunds: claimed, sent once, recorded, reconciled, and told to the customer');
+}
+
     console.log('\nBK-44 — the editor cannot perform a review decision');
 
     /** Seed one row at an arbitrary lifecycle state. */
+    /**
+     * BK-33 ADDS A `refunded` DIMENSION, and it is a FIXTURE change rather than
+     * an assertion change — the distinction CLAUDE.md's third trap is about.
+     *
+     * A refunded row is one that WAS paid: `paid_at` stamped, method `stripe`,
+     * and `payment_status` moved on to `refunded`. Seeding it with `paid_at`
+     * NULL would make every arm below pass for the wrong reason — the row would
+     * be refused as *unpaid*, and the new clause could be deleted with the
+     * suite still green.
+     */
     async function seedAt(
       status: AppointmentStatus,
-      opts: { paid?: boolean; session?: string | null } = {},
+      opts: { paid?: boolean; session?: string | null; refunded?: boolean } = {},
     ): Promise<number> {
       const slot = await freeProbeSlot();
-      const paidAt = opts.paid ? new Date().toISOString() : null;
+      const paid = opts.paid || opts.refunded;
+      const paidAt = paid ? new Date().toISOString() : null;
+      const paymentStatus = opts.refunded ? 'refunded' : paid ? 'paid' : 'pending';
       const inserted = (await sql`
         INSERT INTO appointments (name, phone, email, service, address, payment_route,
                                   slot_start, status, pipeline_stage, admin_notes,
-                                  payment_status, paid_at, payment_method, stripe_session_id)
+                                  payment_status, paid_at, payment_method, stripe_session_id,
+                                  paid_amount_cents, refunded_amount_cents, refunded_at)
         VALUES ('BK44 Probe', '780-555-0199', 'bk44@example.com', 'water', '44 Guard Rd',
                 'private', ${slot.toISOString()}, ${status}, 'assessment', ${MARKER},
-                ${opts.paid ? 'paid' : 'pending'}, ${paidAt},
-                ${opts.paid ? 'stripe' : null}, ${opts.session ?? null})
+                ${paymentStatus}, ${paidAt},
+                ${paid ? 'stripe' : null}, ${opts.session ?? null},
+                ${paid ? 62843 : null},
+                ${opts.refunded ? 62843 : null},
+                ${opts.refunded ? paidAt : null})
         RETURNING id
       `) as { id: number }[];
       createdIds.push(inserted[0].id);
       return inserted[0].id;
     }
 
-    async function stateOf(id: number): Promise<{ status: AppointmentStatus; paid_at: Date | null }> {
+    async function stateOf(
+      id: number,
+    ): Promise<{ status: AppointmentStatus; paid_at: Date | null; payment_status: string }> {
       const r = (await sql`
-        SELECT status, paid_at FROM appointments WHERE id = ${id}
-      `) as { status: AppointmentStatus; paid_at: Date | null }[];
+        SELECT status, paid_at, payment_status FROM appointments WHERE id = ${id}
+      `) as { status: AppointmentStatus; paid_at: Date | null; payment_status: string }[];
       return r[0];
     }
 
@@ -3176,10 +3902,16 @@ try {
     let matrixChecked = 0;
     let invariantViolations = 0;
 
-    for (const paid of [false, true]) {
+    // THREE MONEY STATES, NOT TWO (BK-33): unpaid, paid, and paid-then-refunded.
+    // The third is the one whose absence let a refunded booking be un-cancelled
+    // back to `confirmed` — a crew dispatched on money the customer already has.
+    for (const money of ['unpaid', 'paid', 'refunded'] as const) {
+      const paid = money !== 'unpaid';
       for (const from of APPOINTMENT_STATUSES) {
-        const id = await seedAt(from, { paid });
-        const paidAtSeed = (await stateOf(id)).paid_at;
+        const id = await seedAt(from, { paid, refunded: money === 'refunded' });
+        const seeded = await stateOf(id);
+        const paidAtSeed = seeded.paid_at;
+        const paymentStatusSeed = seeded.payment_status;
 
         for (const to of APPOINTMENT_STATUSES) {
           // Reset. `cancelled_at` goes with it: entering and leaving
@@ -3193,7 +3925,12 @@ try {
           `;
 
           const expected = editorMaySetStatus(
-            { status: from, paid_at: paidAtSeed, stripe_session_id: null },
+            {
+              status: from,
+              paid_at: paidAtSeed,
+              stripe_session_id: null,
+              payment_status: paymentStatusSeed,
+            },
             to,
           );
 
@@ -3243,22 +3980,40 @@ try {
           // green. It catches SQL-versus-TypeScript drift and list-versus-
           // predicate drift, which is what red rows 4 and 5 demonstrate — not a
           // mis-defined boundary.
+          //
+          // BK-33 WIDENS THE PREDICATE FROM "unpaid" TO "no money behind it",
+          // and the widening is the point rather than a tidy-up. `paid_at` is
+          // never cleared, so a booking that was paid and then REFUNDED has a
+          // stamp and no money — it sailed through this invariant while the
+          // editor moved it back to `confirmed`, dispatching a crew on cash the
+          // customer already has. Asked of `payment_status`, which the payment
+          // path maintains, for the same reason the rule itself is.
+          const noMoneyBehindIt =
+            after.paid_at === null || REFUNDED_PAYMENT_STATUSES.includes(after.payment_status);
           if (
             couldHoldCalendarInvite(after.status) &&
-            after.paid_at === null &&
+            noMoneyBehindIt &&
             !couldHoldCalendarInvite(from)
           ) {
             invariantViolations++;
             check(
               false,
-              `INVARIANT: ${from} -> ${to} left an unpaid row at ${after.status}, inside the invite-holding set`,
+              `INVARIANT: ${from} -> ${to} left a row with no money behind it at ${after.status}, inside the invite-holding set (paid_at=${String(after.paid_at)}, money=${after.payment_status})`,
             );
           }
         }
       }
     }
-    check(matrixChecked === 128, `the matrix drove 128 transitions, drove ${matrixChecked}`);
-    check(invariantViolations === 0, 'no editor POST put an unpaid row inside the invite-holding set');
+    // 192, NOT 128 (BK-33): the money dimension went from two states to three
+    // when paid-then-refunded became reachable. A coverage guard, so that a
+    // loop which silently stopped iterating would be a failure rather than a
+    // quieter run — which is exactly why the number is stated rather than
+    // derived from the loop bounds.
+    check(matrixChecked === 192, `the matrix drove 192 transitions, drove ${matrixChecked}`);
+    check(
+      invariantViolations === 0,
+      'no editor POST put a row with no money behind it inside the invite-holding set',
+    );
     console.log(`  ${matrixChecked} transitions driven through update.ts; the invite boundary held`);
 
     // ── The three consequences the ticket names, asserted by name ──────────
@@ -3455,10 +4210,14 @@ try {
       for (const status of APPOINTMENT_STATUSES) {
         for (const paid_at of [null, new Date()]) {
           for (const stripe_session_id of [null, 'cs_test_x']) {
-            check(
-              editorStatusTargets({ status, paid_at, stripe_session_id }).includes(status),
-              `editorStatusTargets always offers the row's own status (${status}, paid=${!!paid_at}, session=${!!stripe_session_id})`,
-            );
+            for (const payment_status of ['pending', 'paid', 'refunded', 'partially_refunded']) {
+              check(
+                editorStatusTargets({ status, paid_at, stripe_session_id, payment_status }).includes(
+                  status,
+                ),
+                `editorStatusTargets always offers the row's own status (${status}, paid=${!!paid_at}, session=${!!stripe_session_id}, money=${payment_status})`,
+              );
+            }
           }
         }
       }
@@ -3478,19 +4237,52 @@ try {
       for (const status of APPOINTMENT_STATUSES) {
         for (const paid_at of [null, new Date()]) {
           for (const stripe_session_id of [null, 'cs_test_x']) {
-            const row = { status, paid_at, stripe_session_id };
-            const targets = editorStatusTargets(row);
-            const withheld = APPOINTMENT_STATUSES.filter(x => !targets.includes(x));
-            const unexplained = withheld.filter(
-              x =>
-                !DECISION_ENTRY_STATUSES.includes(x) &&
-                !INVITE_HOLDING_STATUSES.includes(x) &&
-                x !== 'pending_review',
-            );
-            check(
-              unexplained.length === 0,
-              `every withheld status has a sentence (${status}, paid=${!!paid_at}, session=${!!stripe_session_id}): ${unexplained.join(', ')} has none`,
-            );
+            for (const payment_status of ['pending', 'paid', 'refunded', 'partially_refunded']) {
+              const row = { status, paid_at, stripe_session_id, payment_status };
+              const targets = editorStatusTargets(row);
+              const withheld = APPOINTMENT_STATUSES.filter(x => !targets.includes(x));
+              const unexplained = withheld.filter(
+                x =>
+                  !DECISION_ENTRY_STATUSES.includes(x) &&
+                  !INVITE_HOLDING_STATUSES.includes(x) &&
+                  x !== 'pending_review',
+              );
+              check(
+                unexplained.length === 0,
+                `every withheld status has a sentence (${status}, paid=${!!paid_at}, session=${!!stripe_session_id}, money=${payment_status}): ${unexplained.join(', ')} has none`,
+              );
+
+              // ── BK-33: THE REFUND CLAUSE, AS A PROPERTY OF THE RULE ───────
+              //
+              // A row whose money went back may not cross INTO the
+              // invite-holding set. Asserted over the whole state space rather
+              // than on one example, because the clause it guards was added to
+              // a rule the last rewrite of which dropped a case nobody noticed.
+              if (
+                REFUNDED_PAYMENT_STATUSES.includes(payment_status) &&
+                paid_at !== null &&
+                !INVITE_HOLDING_STATUSES.includes(status)
+              ) {
+                const crossings = targets.filter(x => INVITE_HOLDING_STATUSES.includes(x));
+                check(
+                  crossings.length === 0,
+                  `a refunded ${status} row may not be moved to ${crossings.join(', ') || '—'} (money=${payment_status})`,
+                );
+              }
+
+              // AND THE MIRROR, which is the half that gets forgotten: movement
+              // WITHIN the set stays free on a refunded row, so a refunded visit
+              // that went ahead anyway is still recordable as completed.
+              if (
+                REFUNDED_PAYMENT_STATUSES.includes(payment_status) &&
+                INVITE_HOLDING_STATUSES.includes(status)
+              ) {
+                check(
+                  INVITE_HOLDING_STATUSES.every(x => targets.includes(x)),
+                  `a refunded ${status} row can still move within the invite-holding set (money=${payment_status})`,
+                );
+              }
+            }
           }
         }
       }

@@ -198,6 +198,68 @@ export type Appointment = {
   stripe_payment_intent_id: string | null;
   paid_at: Date | null;
 
+  // ── The refund block (BK-33, migration 011) ─────────────────────────────
+
+  /**
+   * The LAST refund's id, for a human opening the Stripe dashboard.
+   *
+   * **Deliberately not a record of every refund, and never a key for control
+   * flow over money.** A charge can carry several refunds and this column holds
+   * one id, so "is this event about the refund on this row?" is a question it
+   * cannot answer. BK-33's plan review found a `refund.failed` handler that
+   * asked it exactly that: refund A of $300 succeeds, refund B replaces the id,
+   * B fails, the guard matches, and the arm erases a refund that genuinely went
+   * back — restoring "Payment received" over returned money, which is the
+   * defect BK-33 exists to fix.
+   */
+  stripe_refund_id: string | null;
+  /**
+   * THE TOTAL THAT HAS GONE BACK on this charge.
+   *
+   * ── WHERE THE FIGURE COMES FROM, PRECISELY ─────────────────────────────
+   *
+   * On the WEBHOOK path it is `charge.amount_refunded` — Stripe's own running
+   * total — written as an overwrite, so a dashboard refund, a screen refund and
+   * a redelivery of any of them converge on one number instead of summing into
+   * a figure belonging to nobody. It may move DOWN: Stripe lowers that total
+   * when a refund fails, and accepting the lower value is how the record
+   * corrects itself.
+   *
+   * On the SCREEN path it is `refundPayment`'s own addition — what was already
+   * refunded plus what Stripe just returned. **That is arithmetic, and it is
+   * safe only because the claim's WHERE pins the first operand**: the claim is
+   * exclusive and names `refunded_amount_cents`, so nothing can move the
+   * balance between the read and the write.
+   *
+   * This paragraph used to say "never our own arithmetic, on every path", which
+   * was false of the screen path and would have justified removing exactly the
+   * guard that makes it true. Three prior instances of a stale comment becoming
+   * a later reader's justification are recorded in the ROADMAP.
+   *
+   * Compared against `paid_amount_cents` — what arrived — to decide `refunded`
+   * from `partially_refunded`, never against `total_amount_cents`, which is the
+   * quote (see its own note above).
+   */
+  refunded_amount_cents: number | null;
+  refunded_at: Date | null;
+  /**
+   * The in-flight refund attempt. **Holds no money state, and that is the
+   * point.**
+   *
+   * A Stripe idempotency key is not a dedupe: Stripe's documentation says keys
+   * may be pruned once 24 hours old and a reused key then generates a NEW
+   * request, and a request conflicting with another executing concurrently is
+   * not saved as an idempotent result at all. So the exclusivity lives here.
+   * `refund_claim_key IS NULL` in the claiming UPDATE is what makes a second
+   * click, a second tab and a second office member match zero rows.
+   *
+   * Cleared on settle so a later deliberate partial refund can claim. Left
+   * standing in exactly one case — a Stripe call whose answer never arrived —
+   * where refusing further refunds until a human looks is the safe direction.
+   */
+  refund_claim_key: string | null;
+  refund_started_at: Date | null;
+
   created_at: Date;
   updated_at: Date;
 };

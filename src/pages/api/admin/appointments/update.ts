@@ -7,24 +7,15 @@ import {
   adminAppointmentPath,
 } from '../../../../lib/booking-admin';
 import { parseAppointmentUpdate } from '../../../../lib/booking-admin-entry';
-import {
-  inviteEventFromAppointment,
-  planCalendarInvite,
-  planCancellationEmail,
-  planRestoreEmail,
-  planFirstConfirmationEmail,
-} from '../../../../lib/booking-admin-notify';
-import { POST_COMMIT_BUDGET_MS } from '../../../../lib/booking-config';
-import type { IcsKind } from '../../../../lib/booking-ics';
-import { sendCalendarInvite, withDeadline } from '../../../../lib/booking-notify';
+import { sendBoundaryMail } from '../../../../lib/booking-admin-notify';
 import {
   AWAITING_PAYMENT_STATUSES,
   AWAITING_REVIEW_STATUSES,
-  couldHoldCalendarInvite,
   DECISION_ENTRY_STATUSES,
   INVITE_HOLDING_STATUSES,
+  REFUNDED_PAYMENT_STATUSES,
 } from '../../../../lib/booking-status';
-import { getDb, SERVICE_LABELS, type AppointmentStatus } from '../../../../lib/db';
+import { getDb, SERVICE_LABELS } from '../../../../lib/db';
 
 /** Postgres unique_violation. The partial index on `slot_start` is what raises it. */
 const UNIQUE_VIOLATION = '23505';
@@ -131,6 +122,9 @@ export const POST: APIRoute = async ({ request }) => {
   const inviteHolding = [...INVITE_HOLDING_STATUSES];
   const awaitingPayment = [...AWAITING_PAYMENT_STATUSES];
   const awaitingReview = [...AWAITING_REVIEW_STATUSES];
+  // BK-33. Derived, like the four above, so the rule and the transcription
+  // cannot disagree about which values mean "the money went back".
+  const refundedStatuses = [...REFUNDED_PAYMENT_STATUSES];
 
   try {
     // ONE STATEMENT, WITH A SELF-JOIN AGAINST A PRE-UPDATE SNAPSHOT, and the
@@ -190,7 +184,22 @@ export const POST: APIRoute = async ({ request }) => {
                 AND (
                       ${nextStatus}::text <> ALL(${inviteHolding}::text[])
                    OR appointments.status = ANY(${inviteHolding}::text[])
-                   OR appointments.paid_at IS NOT NULL
+                   OR (
+                        appointments.paid_at IS NOT NULL
+                        -- BK-33. AND THE MONEY MUST STILL BE OURS. paid_at is
+                        -- never cleared, so on its own it said yes to a booking
+                        -- that was paid, refunded and cancelled — which this
+                        -- dropdown would then have un-cancelled straight back
+                        -- to confirmed, dispatching a crew and mailing a fresh
+                        -- REQUEST ics on returned money.
+                        --
+                        -- Keyed on payment_status, NOT on refunded_at: nothing
+                        -- clears the latter, so a booking refunded, re-approved
+                        -- and genuinely re-paid would be barred here forever.
+                        -- payment_status is the column the payment path
+                        -- maintains.
+                        AND appointments.payment_status <> ALL(${refundedStatuses}::text[])
+                      )
                 )
                 -- An approved row is markPaid's to confirm. paid_at survives
                 -- from a previous cycle, so it cannot tell this approval's
@@ -245,7 +254,14 @@ export const POST: APIRoute = async ({ request }) => {
     // not a UI state worth inventing. The customer half added in BK-16 is held
     // to the same posture: a cancellation email that did not go out is a phone
     // call the office was going to make anyway.
-    await sendBoundaryMail(rows[0], new Date());
+    // The label, not the key — `sendBoundaryMail` takes an injected label so
+    // that `booking-admin-notify.ts` stays free of `db.ts`'s runtime imports
+    // and therefore reachable from a `tsx` verify script. Same lookup this
+    // route did before the function moved.
+    await sendBoundaryMail(
+      { ...rows[0], service_label: SERVICE_LABELS[rows[0].service] ?? rows[0].service },
+      new Date(),
+    );
 
     return redirect(`${detail}?saved=1`);
   } catch (err) {
@@ -282,135 +298,6 @@ type UpdatedRow = {
   /** `timestamptz` — the driver returns a `Date`. */
   slot_start: Date;
 };
-
-/**
- * The mail a status edit owes: the office's calendar artifact, and — since
- * BK-16 — the customer's written notice carrying their own copy of it.
- *
- * THE RULE IS THE INVITE BOUNDARY, not the status names — and BK-23 is what
- * made that distinction load-bearing rather than pedantic.
- *
- * It used to be the CANCELLED boundary, keyed on the literal `'cancelled'`,
- * because that was the only status a booking could leave the calendar through.
- * P9 added two more: a `confirmed` row can now be edited to `payment_expired`
- * or `declined`, and under the old rule each of those would have left a live
- * invite on two calendars with nothing to clear it.
- *
- * So the question is asked of the STATUSES rather than of one name: did the old
- * status hold an invite, and does the new one? Crossing that boundary outward
- * sends a CANCEL; crossing it inward sends a fresh REQUEST — same UID, and a
- * SEQUENCE strictly greater because it comes from a later clock. Everything
- * else sends nothing: a re-submit that keeps the status, and the ordinary
- * `confirmed → completed` / `confirmed → no_show` edits, which do not change
- * whether a crew is expected somewhere.
- *
- * `couldHoldCalendarInvite` is deliberately not "is it live" — invites issue at
- * payment-confirmed, so `pending_review` and `approved_awaiting_payment` never
- * had one, and moving between those and `declined` correctly sends nothing.
- *
- * A 23505 never reaches here — the statement threw, and the row is untouched.
- *
- * **ONE DEADLINE OVER BOTH SENDS, RUN CONCURRENTLY.** Two serial
- * `POST_COMMIT_BUDGET_MS` windows would stack on a request that has already run
- * an UPDATE, and the platform's function limit is what a stacked pair blows
- * through — the same reasoning the admin entry route states for its own
- * `Promise.all`. The two cannot collapse into one another at Resend either:
- * they share a per-transition idempotency prefix but go to different addresses,
- * and the sender appends `:<to>`.
- *
- * **Cannot fail its caller.** The status edit has already committed; neither a
- * calendar artifact nor a courtesy email may turn it into a `?saved=error` for
- * a change that saved.
- */
-async function sendBoundaryMail(row: UpdatedRow, now: Date): Promise<void> {
-  // Cast rather than validate: these came out of a CHECK-constrained column,
-  // and `parseAppointmentUpdate` already refused anything outside the set on
-  // the way in.
-  const hadInvite = couldHoldCalendarInvite(row.prev_status as AppointmentStatus);
-  const hasInvite = couldHoldCalendarInvite(row.next_status as AppointmentStatus);
-  if (hadInvite === hasInvite) return;
-
-  const kind: IcsKind = hadInvite ? 'cancel' : 'request';
-
-  try {
-    const event = inviteEventFromAppointment(
-      row,
-      SERVICE_LABELS[row.service] ?? row.service,
-    );
-
-    // The resend route's guard, and for the same reason: a column that is
-    // present but blank is not an address, and handing `''` to Resend is a
-    // failed send rather than a skip.
-    const email = typeof row.email === 'string' && row.email.trim() !== '' ? row.email : null;
-
-    const sends: Promise<[string, 'sent' | 'skipped' | 'failed']>[] = [
-      sendCalendarInvite(planCalendarInvite(event, kind, now), {
-        id: row.id,
-        kind,
-        now,
-        audience: 'office',
-      }).then((outcome) => ['office', outcome] as [string, 'sent' | 'skipped' | 'failed']),
-    ];
-
-    if (email) {
-      // THREE messages across this boundary, not two.
-      //
-      // Before BK-23 the only inward crossing was `cancelled -> booked`, so
-      // "restored" described every one of them. P9 made more crossings
-      // reachable, and this block used to justify itself by saying the status
-      // dropdown was "currently the ONLY route to `confirmed`" because
-      // `createCheckoutUrl` returned null until BK-32. That was true when
-      // written and false the day BK-32 shipped — and it is what left the hole
-      // BK-44 closed looking like a considered decision.
-      //
-      // WHAT IS TRUE NOW, stated carefully, because the sentence this replaces
-      // was true when written and false when read. `markPaid` is the only route
-      // that confirms an UNPAID booking — card, Interac and free-approval
-      // alike — and the dropdown cannot create `confirmed` for a row that has
-      // never been paid. It CAN still produce it for one that has: a paid row
-      // restored from `cancelled`, or from `declined` / `payment_expired` where
-      // the money arrived late and stamped `paid_at` without moving the status.
-      // Those are the inward crossings that still reach this code. Movement
-      // between `confirmed`, `completed` and `no_show` crosses nothing.
-      //
-      // So the restore copy is still the wrong thing to send to most of them:
-      // it tells a customer their assessment "was cancelled and has now been
-      // reinstated", which is a claim only a row that was actually cancelled
-      // has earned.
-      //
-      // The question is asked of where the row CAME FROM, because that is what
-      // the word "reinstated" is a claim about. Only `cancelled` earns it.
-      const message =
-        kind === 'cancel'
-          ? planCancellationEmail(event, email, now)
-          : row.prev_status === 'cancelled'
-            ? planRestoreEmail(event, email, now)
-            : planFirstConfirmationEmail(event, email, now);
-      sends.push(
-        sendCalendarInvite(message, { id: row.id, kind, now, audience: 'customer' }).then(
-          (outcome) => ['customer', outcome] as [string, 'sent' | 'skipped' | 'failed'],
-        ),
-      );
-    }
-
-    const outcomes = await withDeadline(
-      Promise.all(sends),
-      POST_COMMIT_BUDGET_MS,
-      // The deadline's answer, one entry per send that was attempted. Wrong in
-      // the safe direction: the log says nothing went out rather than claiming
-      // something did.
-      sends.map((_, i) => [i === 0 ? 'office' : 'customer', 'failed'] as [string, 'failed']),
-    );
-
-    for (const [audience, outcome] of outcomes) {
-      if (outcome === 'failed') {
-        console.error(`Admin update ${row.id}: the ${audience} calendar ${kind} did not send.`);
-      }
-    }
-  } catch (err) {
-    console.error(`Admin update ${row.id} calendar ${kind} failed:`, err);
-  }
-}
 
 /**
  * `NeonDbError` carries the SQLSTATE. Read off the installed driver rather than

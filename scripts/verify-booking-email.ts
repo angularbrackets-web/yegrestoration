@@ -1553,6 +1553,7 @@ console.log('\nBK-43 — the idempotency prefix carries the message type');
     'confirmed',
     'declined',
     'expired',
+    'refunded',
   ];
 
   // AC1 — every transition gets its own prefix.

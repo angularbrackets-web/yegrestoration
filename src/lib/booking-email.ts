@@ -136,7 +136,14 @@ export type BookingMessageType =
   | 'payment-reminder'
   | 'confirmed'
   | 'declined'
-  | 'expired';
+  | 'expired'
+  /**
+   * BK-33. The refund notice sent on its own, with no calendar artifact —
+   * money going back on a booking that was already off. When the refund rides
+   * along on a cancellation the message is that cancellation, and its type is
+   * the calendar prefix, not this one.
+   */
+  | 'refunded';
 
 export type NotificationPlan = {
   /** The appointment id, carried so the sender can key idempotency on it. */

@@ -1225,6 +1225,140 @@ console.log('\nBK-46 — what the row still owes, and how it was paid');
     'a re-approved row does NOT report the previous cycle\'s payment',
   );
   check(receipt({ payment_method: null }) === null, 'and an unpaid row reports nothing');
+
+  // ── BK-33: THE REFUNDED ARMS ──────────────────────────────────────────────
+  //
+  // Two claims, and the second is the one a negative pin cannot make.
+  //
+  // 1. A refunded row must STOP saying the money is ours. Gating on
+  //    `payment_status === 'paid'` alone already did that — by returning null.
+  // 2. And it must not go SILENT, which is what null does. A screen that says
+  //    nothing about money on a booking that took $628.43 reads as NEVER PAID.
+  //    That is a different false statement, and a pin written against the words
+  //    "Paid by card" would never have caught it.
+  check(
+    receipt({ payment_status: 'refunded', refunded_amount_cents: 62843, paid_amount_cents: 62843 })
+      ?.line === 'Refunded in full — $628.43 sent back',
+    'a fully refunded row says so, with the figure',
+  );
+  check(
+    receipt({ payment_status: 'refunded', refunded_amount_cents: 62843, paid_amount_cents: 62843 })
+      ?.refunded === true,
+    'and flags itself as a refund, so the panel heading can stop saying "Payment received"',
+  );
+  check(
+    receipt({
+      payment_status: 'partially_refunded',
+      refunded_amount_cents: 30000,
+      paid_amount_cents: 62843,
+    })?.line === 'Partially refunded — $300.00 of $628.43 sent back',
+    'a partial refund names BOTH figures — what went back and what had arrived',
+  );
+  // AGAINST `paid_amount_cents`, NOT `total_amount_cents`. The total is the
+  // QUOTE; a customer who paid a corrected amount and got all of it back must
+  // not read as partially refunded because the quote said something else.
+  check(
+    receipt({
+      payment_status: 'refunded',
+      refunded_amount_cents: 41895,
+      paid_amount_cents: 41895,
+      total_amount_cents: 62843,
+    })?.line === 'Refunded in full — $418.95 sent back',
+    'and "in full" is judged against what ARRIVED, never against the quote',
+  );
+  // A refunded row whose figure never landed — the `refunded-not-cancelled`
+  // outcome, or a reconcile that could not write. It must still not claim the
+  // money is ours.
+  check(
+    receipt({ payment_status: 'refunded', refunded_amount_cents: null })?.line?.includes(
+      'not recorded here',
+    ) === true,
+    'a refund with no recorded figure says the figure is missing rather than inventing one',
+  );
+  for (const money of ['refunded', 'partially_refunded'] as const) {
+    const line = receipt({ payment_status: money, refunded_amount_cents: 62843 })?.line ?? '';
+    check(
+      !/Paid by card|Marked paid|Paid on site|Approved at no charge/.test(line),
+      `a ${money} row makes no present-tense claim that the payment stands`,
+    );
+  }
+  // THE MIRROR, which is the half that gets forgotten: a pin that only fires
+  // one way is how "Refunded in full" ships unconditional.
+  check(
+    receipt()?.refunded === false && !/[Rr]efund/.test(receipt()?.line ?? ''),
+    'and a paid, NON-refunded row claims no refund',
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log('\nBK-33 — a refunded row stops claiming the money is ours');
+// ---------------------------------------------------------------------------
+//
+// PINNED ON THE CLAIM, NOT ON THE CONSTANT — the shape `verify-cutover.ts`'s
+// `BOOKED_CLAIM_SHAPES` established and `CLAUDE.md` records as the answer to
+// the copy-inventory trap. A booking refunded in full must not carry a
+// present-tense sentence saying we hold the money, whichever constant, heading
+// or interpolation happens to produce it.
+//
+// AND THE MIRROR IS PINNED TOO. A guard that only fires one way is how
+// "Refunded in full" ends up rendering unconditionally on every paid booking —
+// the second instance of the trap, which BK-48 hit three hours after writing
+// the first one down.
+{
+  const page = readFileSync(resolve(root, 'src/pages/admin/appointments/[id].astro'), 'utf8');
+  const stripped = page
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+
+  // THE CLAIMS THE PAGE ITSELF WRITES that assert the money is STILL OURS.
+  //
+  // Narrower than it looks, and deliberately so: most of the wording comes from
+  // `paymentReceipt`, which is asserted directly further up — a rendered-source
+  // pin cannot see inside a function. What this file owns is the HEADING and
+  // the mismatch line, both of which are page literals, and both of which were
+  // unconditional before BK-33.
+  const HELD_CLAIM_SHAPES: [string, RegExp][] = [
+    ['the "Payment received" heading', /Payment received/],
+    ['the "arrived against ... settled" line', /arrived against/],
+  ];
+
+  // EVERY ONE MUST BE CONDITIONAL, and specifically on something that knows
+  // about the refund. An occurrence with no `receipt.refunded` nearby is the
+  // defect itself: the screen stating it on a row whose money went back.
+  for (const [what, shape] of HELD_CLAIM_SHAPES) {
+    const matches = [...stripped.matchAll(new RegExp(shape.source, 'g'))];
+    check(matches.length > 0, `${what} is still on the page (this pin is about WHEN, not whether)`);
+    for (const match of matches) {
+      const before = stripped.slice(Math.max(0, match.index - 900), match.index);
+      check(
+        /receipt\.refunded/.test(before),
+        `${what} renders only after the page has asked whether this row was refunded`,
+      );
+    }
+  }
+
+  // The refunded heading exists at all, so the panel does not simply vanish —
+  // silence reads as NEVER PAID, which is a different false statement.
+  check(
+    /receipt\.refunded \? 'Refunded' : 'Payment received'/.test(stripped),
+    'and the heading itself is derived, so a refunded row is headed "Refunded" rather than nothing',
+  );
+
+  // ── THE WITHHELD-STATUS SENTENCES ARE PARTITIONED, NOT STACKED ──────────
+  //
+  // "Not listed until this booking is paid" is FALSE of a row that WAS paid and
+  // refunded, and it points the office at a payment control for a booking whose
+  // money has gone back. A fourth sentence beside the third would have both
+  // firing over the same statuses — one omission, two different reasons.
+  check(
+    /const untilPaidWithheld = isRefundedRow \? \[\] : invitesWithheld;/.test(stripped),
+    'the payment sentence is withheld on a refunded row',
+  );
+  check(
+    /const refundedWithheld = isRefundedRow \? invitesWithheld : \[\];/.test(stripped),
+    'and the refund sentence fires only there — the two are a partition, not a pair',
+  );
 }
 
 // ---------------------------------------------------------------------------

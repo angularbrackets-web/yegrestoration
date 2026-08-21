@@ -300,7 +300,25 @@ export const AWAITING_PAYMENT_STATUSES: readonly AppointmentStatus[] =
   APPOINTMENT_STATUSES.filter(isAwaitingPayment);
 
 /**
- * What the guard needs to know about a row. Deliberately the three columns and
+ * The `payment_status` values that mean the money has gone back (BK-33).
+ *
+ * **Read by the invite-crossing rule below, and `refunded_at` deliberately is
+ * NOT**, which is the whole of BK-33's plan-review finding B4. Nothing clears
+ * `refunded_at` — not `approve`, not `rollBack` — so a rule keyed on it would
+ * bar a booking that was refunded, re-approved and GENUINELY RE-PAID from ever
+ * crossing back into the invite-holding set, permanently, while every screen
+ * showed it as paid. Two records diverged with no route back.
+ *
+ * `payment_status` is the column the payment path actually maintains: `approve`
+ * overwrites it to `pending` and `markPaid` writes `paid`. BK-46 reached the
+ * identical conclusion for `paymentReceipt` and wrote its reasoning out at
+ * length; this is that reasoning applied to a RULE rather than to a display,
+ * where the cost of getting it wrong is higher.
+ */
+export const REFUNDED_PAYMENT_STATUSES: readonly string[] = ['refunded', 'partially_refunded'];
+
+/**
+ * What the guard needs to know about a row. Deliberately these columns and
  * nothing else, so a caller cannot accidentally satisfy it with a stale record
  * carrying more than it read.
  */
@@ -308,6 +326,8 @@ export type EditorGuardRow = {
   status: AppointmentStatus;
   paid_at: Date | null;
   stripe_session_id: string | null;
+  /** BK-33. Whether the money is still ours — see `REFUNDED_PAYMENT_STATUSES`. */
+  payment_status: string;
 };
 
 /**
@@ -332,6 +352,19 @@ export function editorMaySetStatus(row: EditorGuardRow, next: AppointmentStatus)
   // outside it, so movement within is free and legacy rows are unaffected.
   if (couldHoldCalendarInvite(next) && !couldHoldCalendarInvite(row.status)) {
     if (row.paid_at === null) return false;
+    // AND THE MONEY MUST STILL BE OURS (BK-33).
+    //
+    // `paid_at` alone said yes to a booking that was paid, REFUNDED and
+    // cancelled — because nothing clears `paid_at`. So the dropdown would have
+    // un-cancelled it straight back to `confirmed`, dispatching a crew and
+    // mailing the customer a fresh REQUEST ics, on money we had already sent
+    // back. That is the same shape as the hole BK-44 closed, one column over,
+    // and this ticket would have OPENED it rather than inherited it.
+    //
+    // A partial refund refuses too, deliberately: the row no longer holds the
+    // amount it was confirmed against, and re-confirming it is a decision with
+    // a number attached, which a status dropdown cannot carry.
+    if (REFUNDED_PAYMENT_STATUSES.includes(row.payment_status)) return false;
   }
 
   // AN APPROVED ROW IS `markPaid`'s TO CONFIRM, and `paid_at` alone cannot say

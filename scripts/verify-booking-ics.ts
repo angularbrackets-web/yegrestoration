@@ -26,13 +26,17 @@ import {
   inviteEventFromPayload,
   planCalendarInvite,
   planCancellationEmail,
+  planRefundNotice,
   planRestoreEmail,
   planFirstConfirmationEmail,
+  sendBoundaryMail,
 } from '../src/lib/booking-admin-notify';
 import { GST_REGISTRATION_NUMBER } from '../src/lib/booking-config';
 import {
   CANCEL_LINE,
+  CANCELLED_LEAD,
   CANCELLED_REBOOK_LINE,
+  CANCELLED_REFUNDED_LEAD,
   CONFIRMED_HEADING,
   FEE_TERMS_CREDIT,
   FEE_TERMS_HEADING,
@@ -698,9 +702,19 @@ console.log('\nA first confirmation must not claim a reinstatement (BK-23)');
     'the two inward crossings do not render the same body',
   );
 
-  // The branch itself, in the route that picks between them. The planners can
+  // The branch itself, in the code that picks between them. The planners can
   // both be perfect and the wrong one still be called.
-  const updateSrc = readFileSync('src/pages/api/admin/appointments/update.ts', 'utf8');
+  //
+  // BK-33 REPOINTED THIS, and did not weaken it. The branch moved out of
+  // `update.ts` into `sendBoundaryMail` in `booking-admin-notify.ts` so that the
+  // refund route could cross the same boundary without a second copy of the
+  // cancellation existing. The property is unchanged and the file is not.
+  // Repointed rather than deleted even though the behavioural block further
+  // down now drives both arms through the real function with an injected
+  // sender: that block is the load-bearing check, and this one costs nothing
+  // and would catch a branch rewritten to key on the direction of the crossing
+  // in a way that happened to produce the same two messages for these fixtures.
+  const updateSrc = readFileSync('src/lib/booking-admin-notify.ts', 'utf8');
   check(
     /prev_status === 'cancelled'[\s\S]{0,200}planRestoreEmail/.test(updateSrc),
     "update.ts picks the restore copy on prev_status === 'cancelled', not on the direction of the crossing",
@@ -746,11 +760,27 @@ console.log('\nBK-45 — the boundary builder carries no money and no terms');
     ['the GST registrant', GST_REGISTRATION_NUMBER],
   ];
 
+  // ── BK-33 ADDS TWO ARMS, AND THAT IS THE WHOLE POINT OF ADDING THEM ──────
+  //
+  // These guards ran over `planCancellationEmail(EVENT, CUSTOMER, NOW)` — the
+  // three-argument, NO-REFUND call. The refund argument is optional, so every
+  // assertion in this loop would have stayed green while covering nothing at
+  // all on the new arm: no PII pin, no URL pin, no amount pin, on the one
+  // message this ticket rewrites. That is `CLAUDE.md`'s "a negative assertion
+  // is shaped for the claim it was written against" from the other side — the
+  // pin is not wrong, it simply is not AIMED at the new claim — and plan review
+  // caught it before it shipped.
+  const REFUND = { amountCents: 30000 } as const;
+
   for (const [label, message] of [
     ['cancellation', planCancellationEmail(EVENT, CUSTOMER, NOW)],
+    ['refunded cancellation', planCancellationEmail(EVENT, CUSTOMER, NOW, REFUND)],
+    ['standalone refund notice', planRefundNotice(EVENT, CUSTOMER, NOW, REFUND)],
     ['restore', planRestoreEmail(EVENT, CUSTOMER, LATER)],
     ['first confirmation', planFirstConfirmationEmail(EVENT, CUSTOMER, LATER)],
   ] as const) {
+    const namesMoney = label.includes('refund');
+
     for (const part of ['html', 'text', 'subject'] as const) {
       for (const [what, line] of BANNED) {
         check(
@@ -758,15 +788,82 @@ console.log('\nBK-45 — the boundary builder carries no money and no terms');
           `the ${label} ${part} carries no ${what}`,
         );
       }
-      // NO AMOUNT EITHER. A cancellation naming a figure reads as a bill, and
-      // the restore reads as a second charge. Anchored on the dollar sign
-      // rather than on a constant, because the defect would arrive as an
-      // interpolated number and no constant would name it.
+      // NO AMOUNT EITHER — ON THE ARMS THAT ARE NOT ABOUT MONEY. A cancellation
+      // naming a figure reads as a bill, and the restore reads as a second
+      // charge. Anchored on the dollar sign rather than on a constant, because
+      // the defect would arrive as an interpolated number and no constant would
+      // name it.
+      //
+      // RE-SCOPED RATHER THAN DELETED (BK-33): the refund arms MUST name a
+      // figure, so blanket-banning `$` over all five would be a pin that had to
+      // be weakened to ship, which is how a guard quietly stops guarding. The
+      // refund arms get their own positive and negative pins below instead.
+      if (!namesMoney) {
+        check(
+          !/\$\d/.test(message[part]),
+          `nor any dollar amount in the ${label} ${part}`,
+        );
+      }
+    }
+  }
+
+  // ── WHAT THE REFUND ARMS MUST AND MUST NOT SAY ──────────────────────────
+  for (const [label, message] of [
+    ['refunded cancellation', planCancellationEmail(EVENT, CUSTOMER, NOW, REFUND)],
+    ['standalone refund notice', planRefundNotice(EVENT, CUSTOMER, NOW, REFUND)],
+  ] as const) {
+    for (const part of ['html', 'text'] as const) {
+      // POSITIVE: the amount that went back is named. A partial refund
+      // announced without a figure is actively misleading to a customer who got
+      // back $300 of $628.43, and partial refunds are issued from the admin
+      // screen.
       check(
-        !/\$\d/.test(message[part]),
-        `nor any dollar amount in the ${label} ${part}`,
+        message[part].includes('$300.00'),
+        `the ${label} ${part} names the amount refunded`,
+      );
+      // POSITIVE: the timing. Stripe shows a refund instantly and a bank does
+      // not; a customer told only that we refunded them checks tonight, finds
+      // nothing, and phones.
+      check(
+        /5 to 10 business days/.test(message[part]),
+        `and says the ${label} ${part} takes 5 to 10 business days to land`,
+      );
+      // NEGATIVE, AND THIS IS THE ONE A "$"-SHAPED BAN COULD NOT EXPRESS: the
+      // BOOKING'S OWN TOTAL must not appear beside the refunded figure. A
+      // reader given two numbers cannot tell which one arrived.
+      check(
+        !message[part].includes('$628.43'),
+        `and the ${label} ${part} does NOT also print the amount originally paid`,
       );
     }
+  }
+
+  // ── AND THE NO-REFUND ARM IS UNCHANGED, BYTE FOR BYTE ───────────────────
+  //
+  // The refund argument is optional and defaults to absent, so the message a
+  // cancelled-but-not-refunded customer receives must be exactly what shipped
+  // before BK-33. Asserted against the lead constant rather than against a
+  // snapshot: `CANCELLED_LEAD` is the sentence that changes on the other arm,
+  // so it is the one that can drift.
+  {
+    const plain = planCancellationEmail(EVENT, CUSTOMER, NOW);
+    const refunded = planCancellationEmail(EVENT, CUSTOMER, NOW, REFUND);
+    check(
+      plain.text.includes(CANCELLED_LEAD),
+      'a cancellation with no refund still opens with CANCELLED_LEAD, unchanged',
+    );
+    // `CANCELLED_LEAD` opens "as requested", which is a claim about who asked.
+    // On a company-side cancellation — the path this whole feature exists for —
+    // it is false, and it would sit in the same message as the customer's
+    // money.
+    check(
+      !refunded.text.includes(CANCELLED_LEAD),
+      'and the refund arm does NOT reuse it — "as requested" is false when we cancelled',
+    );
+    check(
+      refunded.text.includes(CANCELLED_REFUNDED_LEAD),
+      'it uses the lead that claims nothing about who asked',
+    );
   }
 }
 
@@ -1146,67 +1243,182 @@ console.log('\nSource pins (weak by construction — see the header)');
     // one rule is the drift this repo has paid for more than once.
   }
 
-  for (const [label, file, helper, needles] of [
-    [
-      'the status-edit route',
-      'src/pages/api/admin/appointments/update.ts',
-      'sendBoundaryMail(',
-      [
-        'planCalendarInvite(',
-        'sendCalendarInvite(',
-        'inviteEventFromAppointment(',
-        'prev_status',
-        // BK-16's customer half. Without these three needles the whole
-        // customer-facing feature is pinned by nothing at all: the lib-level
-        // sections above build the two messages and prove their contents, and
-        // a route that never calls them would leave every one of those green.
-        'planCancellationEmail(',
-        'planRestoreEmail(',
-        // The snapshot column they are built from. `email` outside the SET
-        // whitelist is what makes reading it from the pre-UPDATE snapshot
-        // correct rather than a second query.
-        'old.email',
-      ],
-    ],
-  ] as const) {
-    const source = strip(file);
-    for (const needle of needles) {
-      check(source.includes(needle), `${label} calls ${needle}`);
+  // ── BK-33 REPLACED TEN SOURCE PINS HERE WITH BEHAVIOURAL ONES ───────────
+  //
+  // What stood here read `update.ts` for `planCalendarInvite(`,
+  // `sendCalendarInvite(` twice, `planCancellationEmail(`, `planRestoreEmail(`,
+  // `audience: 'customer'` and a helper defined-and-called count. All ten went
+  // RED when `sendBoundaryMail` moved into `booking-admin-notify.ts` so a
+  // second route could cross the same boundary — and not one of them was a
+  // regression. They were pinning WHERE the code lived, which was the best
+  // available answer while the function closed over its route's locals and
+  // called `sendCalendarInvite` with no deps: "which message a cancelled
+  // customer receives" was checkable by reading source and by nothing else.
+  //
+  // BK-33 gave the function a `NotifyDeps` parameter in the same move that
+  // relocated it, precisely so that stops being true. So these are the same
+  // claims, driven through the real function and an injected sender — which
+  // catches everything the source pins caught and also catches a call site that
+  // is present, correct-looking, and building the wrong message.
+  //
+  // Following `CLAUDE.md`: a fix that reddens existing assertions is a question
+  // about the assertions. The answer here was that they were placeholders for a
+  // test that could not be written yet, and now can be.
+  {
+    const CUSTOMER = 'dana@example.com';
+    const boundaryRow = (prev: string, next: string, email: string | null) => ({
+      next_status: next,
+      prev_status: prev,
+      id: 481,
+      name: 'Dana Probe',
+      phone: '780-555-0100',
+      email,
+      address: '9 Probe Lane',
+      city: 'Edmonton',
+      postal_code: 'T5J 0N3',
+      service_label: 'Water damage',
+      slot_start: EVENT.slotStart,
+    });
+
+    /** Captures every Message the boundary mailer hands its sender. */
+    const capture = () => {
+      const sent: Message[] = [];
+      const deps = {
+        send: async (message: Message): Promise<SendResult> => {
+          sent.push(message);
+          return { ok: true };
+        },
+      };
+      return { sent, deps };
+    };
+
+    // OUTWARD: confirmed -> cancelled. Two sends, and the customer's is the
+    // cancellation carrying a CANCEL ics.
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('confirmed', 'cancelled', CUSTOMER), NOW, deps);
+      check(sent.length === 2, `an outward crossing sends twice, got ${sent.length}`);
+      const toCustomer = sent.find((m) => m.to === CUSTOMER);
+      const toOffice = sent.find((m) => m.to !== CUSTOMER);
+      check(!!toCustomer, 'and one of them is addressed to the customer');
+      check(!!toOffice, 'while the office keeps its own');
+      check(
+        toCustomer?.text.includes(CANCELLED_LEAD) === true,
+        'the customer gets the cancellation copy',
+      );
+      check(
+        toCustomer?.attachments?.[0]?.content.includes('METHOD:CANCEL') === true,
+        'with a METHOD:CANCEL ics attached, which is what clears their calendar',
+      );
     }
-    check(
-      count(source, helper) >= 2,
-      `${label}'s ${helper.slice(0, -1)} is both defined and called, got ${count(source, helper)}`,
-    );
+
+    // OUTWARD, WITH A REFUND (BK-33). Same crossing, and the money is named in
+    // the SAME message rather than in a second one — a customer must not get a
+    // cancellation and a refund notice about one event.
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(
+        boundaryRow('confirmed', 'cancelled', CUSTOMER),
+        NOW,
+        deps,
+        { amountCents: 30000 },
+      );
+      check(sent.length === 2, `a refunded cancellation still sends exactly twice, got ${sent.length}`);
+      const toCustomer = sent.find((m) => m.to === CUSTOMER);
+      check(
+        toCustomer?.text.includes('$300.00') === true,
+        'and the customer copy names the refunded amount',
+      );
+      check(
+        toCustomer?.text.includes(CANCELLED_REFUNDED_LEAD) === true,
+        'under the lead that does not claim they asked for it',
+      );
+      const toOffice = sent.find((m) => m.to !== CUSTOMER);
+      check(
+        toOffice?.text.includes('$300.00') !== true,
+        "and the office's calendar artifact is not turned into a money message",
+      );
+    }
+
+    // NO CROSSING, NO SEND. This is the guard BK-33 had to route AROUND for the
+    // refund notice: a refund on an already-released row crosses nothing, so
+    // hanging a money message off this test would have sent that customer
+    // nothing at all.
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('pending_review', 'cancelled', CUSTOMER), NOW, deps);
+      check(sent.length === 0, `no invite boundary means no send, got ${sent.length}`);
+    }
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('confirmed', 'completed', CUSTOMER), NOW, deps);
+      check(sent.length === 0, 'and movement WITHIN the invite-holding set sends nothing');
+    }
+
+    // INWARD, AND THE TWO ARMS ARE DIFFERENT MESSAGES. "Reinstated" is a claim
+    // only a row that was actually cancelled has earned.
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('cancelled', 'confirmed', CUSTOMER), LATER, deps);
+      const toCustomer = sent.find((m) => m.to === CUSTOMER);
+      check(
+        toCustomer?.text.includes('reinstated') === true,
+        'a row coming back from cancelled is told it was reinstated',
+      );
+    }
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('declined', 'confirmed', CUSTOMER), LATER, deps);
+      const toCustomer = sent.find((m) => m.to === CUSTOMER);
+      check(
+        toCustomer?.text.includes('reinstated') !== true,
+        'but one arriving from anywhere else is NOT — it never was cancelled',
+      );
+      check(
+        toCustomer?.text.includes(CONFIRMED_HEADING) === true,
+        'it gets the first-confirmation copy instead',
+      );
+    }
+
+    // NO ADDRESS: the office artifact still goes, and nothing is handed to
+    // Resend as an empty recipient.
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('confirmed', 'cancelled', null), NOW, deps);
+      check(sent.length === 1, `a row with no email sends only the office copy, got ${sent.length}`);
+    }
+    {
+      const { sent, deps } = capture();
+      await sendBoundaryMail(boundaryRow('confirmed', 'cancelled', '   '), NOW, deps);
+      check(
+        sent.length === 1,
+        `a blank-but-present email is not an address either, got ${sent.length}`,
+      );
+    }
   }
 
-  // The customer sends must be REAL sends, not planned-and-dropped. Two
-  // occurrences of `sendCalendarInvite(` in the status-edit route is the
-  // difference between "the office invite goes out and the customer's message
-  // is built into a variable nobody reads" and the feature. Counted rather
-  // than merely present, for the same reason the helper is.
+  // WHAT STILL HAS TO BE A SOURCE READ, and only what does.
   {
     const updateSource = strip('src/pages/api/admin/appointments/update.ts');
+    // The route must USE the shared mailer rather than grow its own again. The
+    // behavioural block above proves the function is right; it cannot prove the
+    // route calls it, because it calls the function directly.
     check(
-      count(updateSource, 'sendCalendarInvite(') >= 2,
-      `the status-edit route sends twice on a boundary, got ${count(updateSource, 'sendCalendarInvite(')} call site(s)`,
+      updateSource.includes('sendBoundaryMail('),
+      'the status-edit route still calls the shared boundary mailer',
     );
     check(
-      /audience: 'customer'/.test(updateSource),
-      'and one of them is addressed to the customer audience',
+      !updateSource.includes('planCancellationEmail('),
+      'and does not build a second cancellation of its own — one message, one builder',
     );
-    check(
-      /audience: 'office'/.test(updateSource),
-      'while the office invite keeps its own',
-    );
-    // ONE DEADLINE OVER BOTH, not one each. Two serial
+    // ONE DEADLINE OVER BOTH SENDS, not one each. Two serial
     // POST_COMMIT_BUDGET_MS windows stacked on a request that has already run
-    // an UPDATE is how a platform 504 replaces a saved edit's redirect — the
-    // same reasoning the admin entry route states for its own `Promise.all`.
-    // Source-pinned because the alternative is a 10-second timing assertion
-    // against injected sleeps, which measures the test harness more than the
-    // route.
+    // an UPDATE is how a platform 504 replaces a saved edit's redirect. Source-
+    // pinned because the alternative is a 10-second timing assertion against
+    // injected sleeps, which measures the harness more than the code.
+    const notifySource = strip('src/lib/booking-admin-notify.ts');
     check(
-      /withDeadline\(\s*Promise\.all\(/.test(updateSource),
+      /withDeadline\(\s*Promise\.all\(/.test(notifySource),
       'and the two sends share ONE deadline window rather than stacking two',
     );
   }

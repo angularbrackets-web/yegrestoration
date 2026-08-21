@@ -97,6 +97,62 @@ export const CANCELLED_REBOOK_LINE = `To book a new time, or if this cancellatio
 export const CANCELLED_CALENDAR_LINE =
   'The attached update removes the appointment from your calendar.';
 
+/**
+ * ── THE REFUND ARM (BK-33) ─────────────────────────────────────────────────
+ *
+ * Until BK-33 a customer who paid $628.43 and was cancelled on heard about
+ * their money only from Stripe, in a message we do not control and cannot see —
+ * while OUR message said *"nothing further is needed from you"* and mentioned
+ * money not at all. These are the sentences that close that.
+ *
+ * **`CANCELLED_LEAD` IS NOT REUSED HERE, AND THE REASON IS ITS FIRST CLAUSE.**
+ * That lead says *"as requested"*, which its own note defends as a claim about
+ * the world: cancellation is phone-in, so by the time it sends, somebody almost
+ * always asked. **On the refund arm that defence collapses.** The path this
+ * ticket was written for is the office cancelling a booking for the company's
+ * own reasons — the Scope calls a customer chasing that refund "the worst
+ * outcome this feature has" — and telling them they asked for it, in the same
+ * message as their money, is the wrong sentence at the worst moment. The refund
+ * arm therefore claims nothing about who asked.
+ *
+ * The no-refund arm keeps `CANCELLED_LEAD` byte-for-byte, and a pin holds it
+ * there.
+ */
+export const CANCELLED_REFUNDED_LEAD =
+  "We've cancelled the assessment below and sent your payment back. Nothing further is needed from you.";
+
+/** The standalone arm: money going back on a booking that was already off. */
+export const REFUNDED_HEADING = 'Your refund is on its way';
+
+export const REFUNDED_LEAD =
+  "We've sent back your payment for the assessment below. Nothing further is needed from you.";
+
+/**
+ * The refund itself, as one sentence.
+ *
+ * **The amount is named, and that is forced rather than chosen.** Partial
+ * refunds are issued from the admin screen, so "a refund has been issued" with
+ * no figure is actively misleading to a customer who got back $300 of $628.43.
+ * The figure named is what WENT BACK; the booking's total appears nowhere in
+ * this message, because a customer reading two numbers cannot tell which one
+ * arrived.
+ */
+export function refundedAmountLine(amount: string): string {
+  return `We've refunded ${amount} to the card you paid with.`;
+}
+
+/**
+ * WHEN IT ACTUALLY ARRIVES, and this line exists because Stripe shows a refund
+ * instantly and a bank does not.
+ *
+ * Observed on the live cycle of 2026-08-20: the dashboard reported the refund
+ * the moment it was issued. A customer told only that we have refunded them
+ * checks their statement the same evening, finds nothing, and phones — which is
+ * the call this ticket is trying to prevent, arriving for a different reason.
+ */
+export const REFUND_TIMING_LINE =
+  'Refunds usually take 5 to 10 business days to appear on your statement. Your bank sets that timing, not us.';
+
 export const RESTORED_HEADING = 'Your assessment is back on';
 
 export const RESTORED_LEAD =
