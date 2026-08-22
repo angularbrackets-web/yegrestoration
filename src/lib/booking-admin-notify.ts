@@ -62,6 +62,7 @@ import {
   REFUNDED_HEADING,
   REFUNDED_LEAD,
   REFUND_TIMING_LINE,
+  REFUND_CHASE_LINE,
   refundedAmountLine,
   RESTORED_CALENDAR_LINE,
   CONFIRMED_HEADING,
@@ -474,9 +475,21 @@ function planBoundaryEmail(
  */
 export type RefundNotice = { amountCents: number };
 
-/** The two sentences a refund owes a customer, in the order they read. */
+/**
+ * The three sentences a refund owes a customer, in the order they read: what
+ * went back, when to expect it, and what to do if it does not come.
+ *
+ * **The third was added on 2026-08-22 and the first two moved to make room for
+ * it** — both refund leads used to close with *"Nothing further is needed from
+ * you"*, which is the opposite of true in a message whose next two sentences
+ * ask the reader to watch their statement. See `REFUND_CHASE_LINE`.
+ */
 function refundLinesFor(refund: RefundNotice): readonly string[] {
-  return [refundedAmountLine(formatCents(refund.amountCents)), REFUND_TIMING_LINE];
+  return [
+    refundedAmountLine(formatCents(refund.amountCents)),
+    REFUND_TIMING_LINE,
+    REFUND_CHASE_LINE,
+  ];
 }
 
 /**

@@ -46,6 +46,8 @@ import {
   FEE_TERMS_REFUND,
   HAVE_READY_HEADING,
   HAVE_READY_ITEMS,
+  REFUND_CHASE_LINE,
+  REFUNDED_LEAD,
 } from '../src/lib/booking-copy';
 import {
   BOOKING_EMAIL_FROM,
@@ -771,6 +773,8 @@ console.log('\nBK-45 — the boundary builder carries no money and no terms');
   // pin is not wrong, it simply is not AIMED at the new claim — and plan review
   // caught it before it shipped.
   const REFUND = { amountCents: 30000 } as const;
+  // The CLAIM, not the constant that carries it — see the negative pin below.
+  const NOTHING_FURTHER_CLAIM = 'Nothing further is needed from you.';
 
   for (const [label, message] of [
     ['cancellation', planCancellationEmail(EVENT, CUSTOMER, NOW)],
@@ -835,7 +839,56 @@ console.log('\nBK-45 — the boundary builder carries no money and no terms');
         !message[part].includes('$628.43'),
         `and the ${label} ${part} does NOT also print the amount originally paid`,
       );
+      // POSITIVE: WHAT TO DO WHEN THE DEADLINE PASSES (user, 2026-08-22).
+      //
+      // `REFUND_TIMING_LINE` above names a deadline and says nothing about the
+      // deadline passing, and the only other phone line in the message offers
+      // itself under "if this cancellation is a surprise" — which the customer
+      // whose money has not arrived on day twelve will not read as addressed to
+      // them. Pinned on the constant AND on the "by then" that binds it to the
+      // timing line, because a future edit that moves this sentence above the
+      // timing line breaks the anaphora silently.
+      const chase = part === 'html' ? escapeHtml(REFUND_CHASE_LINE) : REFUND_CHASE_LINE;
+      check(
+        message[part].includes(chase),
+        `and the ${label} ${part} says what to do if it never lands`,
+      );
+      check(
+        message[part].indexOf('5 to 10 business days') < message[part].indexOf(chase),
+        `and the ${label} ${part} says it AFTER the timing line that "by then" refers to`,
+      );
+      // NEGATIVE, AND IT IS THE CLAIM RATHER THAN THE CONSTANT. Both refund
+      // leads used to close with this sentence, inherited from CANCELLED_LEAD's
+      // shape. It is the opposite of true here: the two sentences above ask the
+      // reader to watch their statement for ten business days and call if it
+      // does not come. `!includes(CANCELLED_LEAD)` one block down does NOT
+      // cover this — that pin matches the WHOLE lead, so re-adding just the
+      // second sentence to CANCELLED_REFUNDED_LEAD walks straight through it.
+      // CLAUDE.md's fifth trap, from the forbidding side.
+      check(
+        !message[part].includes(NOTHING_FURTHER_CLAIM) &&
+          !message[part].includes(escapeHtml(NOTHING_FURTHER_CLAIM)),
+        `and the ${label} ${part} does NOT tell them nothing further is needed`,
+      );
     }
+  }
+
+  // ── AND THAT CLAIM IS STILL LIVE WHERE IT IS TRUE ───────────────────────
+  //
+  // Without this, deleting the sentence from `CANCELLED_LEAD` too would leave
+  // the negative pin above passing over a message that no longer says it
+  // anywhere — a guard that cannot fail is not a guard.
+  {
+    const plain = planCancellationEmail(EVENT, CUSTOMER, NOW);
+    check(
+      plain.text.includes(NOTHING_FURTHER_CLAIM),
+      'the NO-REFUND cancellation still says nothing further is needed, which is true of it',
+    );
+    check(
+      CANCELLED_REFUNDED_LEAD.includes(NOTHING_FURTHER_CLAIM) === false &&
+        REFUNDED_LEAD.includes(NOTHING_FURTHER_CLAIM) === false,
+      'and neither refund lead carries it as a constant either',
+    );
   }
 
   // ── AND THE NO-REFUND ARM IS UNCHANGED, BYTE FOR BYTE ───────────────────

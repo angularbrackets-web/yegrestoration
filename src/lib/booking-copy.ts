@@ -117,15 +117,28 @@ export const CANCELLED_CALENDAR_LINE =
  *
  * The no-refund arm keeps `CANCELLED_LEAD` byte-for-byte, and a pin holds it
  * there.
+ *
+ * ── AND IT DOES NOT SAY "NOTHING FURTHER IS NEEDED FROM YOU" (user, 2026-08-22)
+ *
+ * `CANCELLED_LEAD`'s second sentence is true of a cancellation: the booking is
+ * off, and the reader has nothing left to do. **It is false the moment money is
+ * going back**, because the two sentences that follow ask the reader to do
+ * exactly one thing — watch their statement for five to ten business days. A
+ * lead that opens by telling them to do nothing, two lines above an instruction
+ * to watch for something, is a message arguing with itself.
+ *
+ * So both refund leads state what happened and stop. What is left to do is said
+ * once, where it is actionable: `REFUND_CHASE_LINE`, attached to the deadline
+ * that makes it actionable.
  */
 export const CANCELLED_REFUNDED_LEAD =
-  "We've cancelled the assessment below and sent your payment back. Nothing further is needed from you.";
+  "We've cancelled the assessment below and sent your payment back.";
 
 /** The standalone arm: money going back on a booking that was already off. */
 export const REFUNDED_HEADING = 'Your refund is on its way';
 
 export const REFUNDED_LEAD =
-  "We've sent back your payment for the assessment below. Nothing further is needed from you.";
+  "We've sent back your payment for the assessment below.";
 
 /**
  * The refund itself, as one sentence.
@@ -152,6 +165,32 @@ export function refundedAmountLine(amount: string): string {
  */
 export const REFUND_TIMING_LINE =
   'Refunds usually take 5 to 10 business days to appear on your statement. Your bank sets that timing, not us.';
+
+/**
+ * WHAT TO DO IF IT DOES NOT ARRIVE, and it is a separate sentence from the
+ * timing on purpose (user, 2026-08-22).
+ *
+ * `REFUND_TIMING_LINE` above tells the customer where to look and for how long.
+ * On its own that is half an instruction: it names a deadline and says nothing
+ * about the deadline passing. The customer whose refund has not landed on day
+ * twelve is the one this whole message exists to keep off the phone in a state
+ * of not knowing — and the only phone line in the message is
+ * `CANCELLED_REBOOK_LINE`, offered under the reason *"if this cancellation is a
+ * surprise"*, which is not a sentence that reader will recognise as addressed
+ * to them.
+ *
+ * **"By then" binds this to the line above it**, which is why it lives here
+ * rather than in the lead: an unanchored *"call us if it doesn't arrive"* two
+ * sentences before we say how long arriving takes invites the call on the same
+ * evening, which is the exact call `REFUND_TIMING_LINE` was added to prevent.
+ *
+ * The number is `SUPPORT_PHONE` and appears twice in the message as a result,
+ * once per reason. That is deliberate: the two reasons are different, and a
+ * reader scanning for their money should not have to map it onto a sentence
+ * about rebooking.
+ */
+export const REFUND_CHASE_LINE =
+  `If it hasn't reached you by then, call or text ${SUPPORT_PHONE} and we'll look it up.`;
 
 export const RESTORED_HEADING = 'Your assessment is back on';
 
