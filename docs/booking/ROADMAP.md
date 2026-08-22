@@ -281,6 +281,39 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   "we tested it live" is the kind of sentence that stops further testing.
   **Owner: nobody — it is a test plan, not a ticket.**
 
+- **AN ASSERTION THAT COUNTS A GLOBAL SWEEP GOES RED ON A DAY NOBODY CHANGED
+  ANYTHING.** Found 2026-08-22 while gating BK-33's copy revision.
+  `verify-booking-admin-db.ts` seeds two overdue rows, runs the payment-expiry
+  cron and asserts *"both overdue payments expired"* on the returned COUNT. The
+  sweep is global — it expires every overdue `approved_awaiting_payment` row in
+  the database — so the assertion is really *"the database contains exactly the
+  two overdue rows this fixture made"*, which is a claim about ambient state
+  rather than about the sweep.
+
+  It failed with `got 4`. The extra two were `#12925` and `#13385`, seeded
+  2026-08-20 22:26 by some earlier run, with `payment_due_at` of **2026-08-21
+  10:26 and 10:38** — in the FUTURE when the suite last ran green (2026-08-21
+  08:33) and in the past by the next morning. **Nothing changed but the clock.**
+  They survive `cleanup()` because its predicate is
+  `admin_notes LIKE 'BK-08 verification%'` and their `admin_notes` is empty, so
+  the marker-based cleanup cannot see them at all.
+
+  **The second half is worse than the first, and it is why this is written
+  down.** Re-running the suite passes — because the first run EXPIRED both
+  strays, and a `payment_expired` row cannot be swept twice. So the failure
+  cures itself on the next run and presents as a flake. Anyone who re-runs and
+  sees green has learned nothing, and the natural conclusion — *"transient,
+  ignore it"* — is available every time and wrong every time. Sibling of the
+  crashed-script trap below: both are measurements that resolve in the
+  reassuring direction.
+
+  **Therefore:** the assertion should count the rows it seeded, by id, not the
+  sweep's return value; and `cleanup()` cannot rely on a marker that the seeding
+  path does not always write. Severity: low for production, high for the gate —
+  it will fire again, and the next person to see it will be mid-deploy.
+  **Owner: unassigned, needs a ticket** — the same one that would make the probe
+  ids unique per run, below.
+
 - **A VERIFY SCRIPT THAT CRASHES PRINTS NO `✗`, SO A RED-FIRST CHECK COUNTING
   FAILURES READS IT AS A PASS.** Found 2026-08-20 while red-firsting BK-33.
   `verify-booking-admin-db.ts` died part-way through on a `23505` from probe
@@ -345,6 +378,23 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   and a failure mode to the webhook, which deserves its own consideration rather
   than a late edit to a money path. Severity: low, and lower still until a
   booking is partially refunded twice. **Owner: unassigned, needs a ticket.**
+
+- **The standalone refund notice ends by offering to rebook a cancellation it
+  never announced.** BK-33's `planRefundNotice` — the arm that exists because
+  money can go back on a row already `cancelled`, `declined` or
+  `payment_expired`, where no calendar boundary is crossed and the boundary
+  mailer would otherwise send nothing — closes with `CANCELLED_REBOOK_LINE`:
+  *"To book a new time, or if this cancellation is a surprise, call or text
+  …"*. That sentence was written for `planCancellationEmail`, where the message
+  itself is the cancellation. Here the heading is **"Your refund is on its way"**
+  and the booking was released days earlier under a different message, so
+  *"this cancellation"* has no referent in the email the customer is holding.
+
+  Found 2026-08-22 while making the 2026-08-22 copy revision below, and left
+  alone rather than folded into it, per the out-of-scope rule. The line is not
+  wrong about the phone number and not a money claim; it is an anaphor pointing
+  at nothing. Severity: low, customer-facing. **Owner: unassigned, needs a
+  ticket** — or one line of the next ticket that touches this file.
 
 - **A REFUND OF AN e-TRANSFER OR AN ON-SITE PAYMENT IS RECORDED NOWHERE, and
   that is BK-33's headline defect surviving one payment method over.** BK-33
@@ -2187,6 +2237,16 @@ together or the site tells a lie between deploys.
 | 1 | `migrate --target prod --only 011-refunds` | Five columns and one partial index. Additive only — no rename, no narrowed CHECK, no rebuilt index that live code names — so it may go **before** the deploy under the rule 008's outage produced. Already applied to the dev branch |
 | 2 | Deploy the code | No new env var. The new admin endpoint is pinned against the generated route table rather than against `astro dev` |
 | 3 | **Add four event types to the LIVE Stripe webhook endpoint** — `charge.refunded`, `refund.updated`, `refund.failed`, `charge.refund.updated` — and to the test-mode endpoint | The live endpoint carries **four Checkout events** and nothing else. Without this the entire reconciliation half is **inert in production with every gate green**, which is exactly the shape BK-48 was filed for three days earlier |
+
+**ROLLOUT PROGRESS — step 1 DONE, 2026-08-22.** `migrate --target prod --only
+011-refunds` applied; `--status` now reports 011 applied and nothing pending.
+Verified against the production schema immediately after: all five columns
+present and nullable, `appointments_refund_claim_idx` created as the partial
+index on `refund_started_at WHERE refund_claim_key IS NOT NULL`, and — the
+property the 2026-08-18 outage was about — **the slot unique index untouched**,
+still `UNIQUE (slot_start) WHERE status <> ALL (ARRAY['cancelled','declined',
+'payment_expired'])`, so the code currently deployed keeps resolving its
+`ON CONFLICT` arbiter. 13 rows, none carrying a refund figure.
 
 **AND THE TICKET DOES NOT CLOSE ON STEP 3.** Adding the event types is a
 configuration change, and *"a configuration change is not evidence of its own
