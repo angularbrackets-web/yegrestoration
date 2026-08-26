@@ -14,111 +14,138 @@ Process rules are in `/CLAUDE.md`. Ticket files are in `tickets/`.
 
 ---
 
-## START HERE — session handoff, 2026-08-21
+## START HERE — session handoff, 2026-08-22
 
-**Written at the end of the session that built BK-33, so the next one does not
-have to reconstruct it or guess.** Everything below is either an answer somebody
-gave, a decision somebody made, or a question nobody has answered yet. Where a
-thing is undecided it says so; do not resolve those in planning.
+**Written at the end of the session that DEPLOYED BK-33. It supersedes the
+2026-08-21 handoff entirely.** Everything below is either something that was
+done, something the user decided, or something nobody has answered yet.
 
-### Where the code stands
+### THE ONE-LINE STATE
 
-**BK-33 (refund mechanics) is COMMITTED, REVIEWED, and NOT DEPLOYED.** Plan
-review 9 blockers / 10 should-fix / 5 nits; implementation review 2 blockers /
-10 should-fix / 7 nits; **all 41 findings accepted, none refused**. Typecheck 0,
-build clean, all 23 verify scripts green, **28 red-observed rows**. Migration 011
-is applied to the **Neon dev branch only**.
+**BK-33 is fully rolled out — all three steps done — and it is NOT CLOSED,
+because nothing has yet proved it works on a real row.** Production carries
+zero rows with any refund state. The ticket is *pending an artifact*.
 
-`main` is otherwise as it was: Deploy 2 live with real Stripe keys, BK-44/45/46/48
-deployed. **BK-47 is the only other P9 draft and was deliberately not built.**
+### What was done on 2026-08-22, in order
 
-### THE THREE STEPS THAT SHIP IT, AND THE ONE THAT IS EASY TO SKIP
+| Step | State |
+| --- | --- |
+| 1 · `migrate --target prod --only 011-refunds` | ✅ **done and verified.** Five columns present and nullable, `appointments_refund_claim_idx` created, and — the property the 2026-08-18 outage was about — the slot unique index **untouched**, still `UNIQUE (slot_start) WHERE status <> ALL (ARRAY['cancelled','declined','payment_expired'])` |
+| 2 · deploy the code | ✅ **done.** `e665e01..4a9b548` pushed; deployment `dpl_2m3CAbGGBJJvBpYx7y6HQ9AzM9qb` Ready and aliased to `www.yegrestoration.ca`. Verified after: `/book/` 200, availability 200 with real slots, webhook `400 {"error":"No signature"}` **with** the JSON content type |
+| 3 · the four refund events on the LIVE endpoint | ✅ **done by the user.** Destination `booking-payments` (`we_1U6VHpFjUzm6BVXW99gMFRFk`), URL `https://www.yegrestoration.ca/api/stripe/webhook/`, now **Listening to 8 events**: the four Checkout ones plus `charge.refunded`, `refund.updated`, `refund.failed`, `charge.refund.updated`. `refund.created` correctly absent |
+| 4 · the closing artifact | ❌ **NOT DONE. This is the whole of what is left.** |
 
-See "BK-33's ROLLOUT" in §P9 for the table. The step that matters most:
-**the four refund event types are NOT on the live Stripe webhook endpoint**,
-which carries only the four Checkout events. Until they are added — in the
-Dashboard, live mode AND test mode — `reconcileRefund` never fires and the entire
-dashboard-refund half of the ticket is **inert in production with every gate
-green**. And per BK-48's lesson, adding them does not close the ticket: only a
-real refund taken in the live dashboard, observed reconciling on a real row,
-does.
+### DEPLOY IS `git push origin main`, AND THAT IS NOW VERIFIED RATHER THAN ASSUMED
 
-### The four product answers this session got, and what they overturned
+The previous handoff left this as a thing to check. It was checked two ways.
+`e665e01` was committed at 20:23:23 and its production deployment created at
+20:23:27 — four seconds later, which is a push hook and not a person typing
+`vercel --prod`. Then this session's own push produced a `● Building`
+deployment 4 seconds after it landed. **Vercel Git integration on `main`. There
+is no GitHub Actions workflow and no `.vercel/project.json`; the link lives in
+`.vercel/repo.json`.**
 
-The user was asked before planning, and answered:
+### THE TEST-MODE STEP WAS DROPPED, DELIBERATELY, AND THE ORIGINAL INSTRUCTION WAS WRONG
 
-1. **ONE action, not two controls.** A dedicated **"Cancel and refund"** panel
-   that refunds and cancels together. **This killed the Scope's *"Refund in full*
-   *checkbox, defaulted ON"*** — there is no company-side reason field to default
-   it off, and the only cancel control is the status dropdown inside "Update the
-   record", the panel that says of itself that it is record-keeping and not a
-   decision. The bullet's INTENT survives and drove the design: the refund must
-   be impossible to forget.
-2. **The cancellation email names the refund — only when the customer paid and
-   only when we are refunding.** A no-refund cancellation is byte-identical to
-   what shipped before, and that is pinned.
-3. **The office sees the REAL processing fee**, read from Stripe at the confirm
-   step, not an estimate.
-4. **The refund amount is an editable field**, so partial refunds are issued from
-   the screen.
+The rollout said to add the four events to the test endpoint as well. **Do not.**
+`webhook.ts:56` reads exactly one secret, `STRIPE_WEBHOOK_SECRET`, and Vercel
+holds the **live** endpoint's `whsec_`. A test-mode delivery is signed with a
+different secret, so `constructEventAsync` rejects it — every test-mode refund
+event would arrive, fail verification, and be logged as a failed delivery while
+reaching no row. Add them only if the site is ever switched back to test keys.
 
-**Answer 4 forced answer 2's content:** with partials reachable, "a refund has
-been issued" with no figure misleads a customer refunded $300 of $628.43. The
-email names the amount, and a pin keeps the booking's full total OUT of it.
+### THE COPY QUESTION THE LAST SESSION LEFT OPEN IS ANSWERED
 
-### Decisions taken WITHOUT the user, all overturnable
+Open question 1 — the refund email's opening line — was put to the user and
+**answered on 2026-08-22.** Dropping `CANCELLED_LEAD`'s *"as requested"* was
+kept; the reasoning holds. One change was required and is shipped in `8f40851`:
+both refund leads no longer close with *"Nothing further is needed from you."*,
+and a new `REFUND_CHASE_LINE` — *"If it hasn't reached you by then, call or text
+(780) 479-3285 and we'll look it up."* — is the third refund line. Four
+red-observed rows (R30-R33). See BK-33's "The 2026-08-22 copy revision".
 
-Recorded in BK-33's Assumptions log as A02-A08. The ones most worth a second
-opinion: the fee is fetched at the confirm step rather than on every page render
-(A02); `refund.created` is ignored in favour of `charge.refunded`, which carries
-the running total (A03); a partial refund still cancels, because that is what the
-action is (A04); no `booking-config.ts` refund constants were added, because
-nothing branches on them (A05); and `refund.updated` with `succeeded` is ignored
-rather than reconciled, which deviates from the ticket's own Task 5 table (A07).
+**The remaining open questions are 2 to 6 of the previous list, unchanged and
+unanswered.** Do not resolve them in planning:
 
-### QUESTIONS THE USER HAS NOT ANSWERED — do not resolve these in planning
+1. **Should a partial refund ever NOT cancel the booking?** Today it always
+   cancels (A04).
+2. **Interac / on-site refunds are recorded nowhere.** Build a "record a refund
+   taken outside Stripe" write, or accept it and use the notes field?
+3. **What is next** — BK-47 (cosmetic), or Deploy 3's BK-25 / BK-24?
+4. **`PAYMENT_WINDOW_HOURS`** — booking #36's real deadline landed at 3:58 a.m.
+   Raise the window, or round to a civil hour?
+5. **Open client question #6** — the insurance-credit wording.
 
-1. **The refund email's opening line.** It drops `CANCELLED_LEAD`'s *"as
-   requested"* and reads *"We've cancelled the assessment below and sent your
-   payment back. Nothing further is needed from you."* Reasoning: on a
-   company-side cancellation "as requested" is false, and it would sit in the
-   same message as the customer's money. **Customer-facing copy — the user was
-   asked to check it and has not.**
-2. **Should a partial refund ever NOT cancel the booking?** Today it always
-   cancels (A04). A goodwill adjustment on a job still going ahead would need a
-   different control.
-3. **Interac / on-site refunds are recorded nowhere.** Build a "record a refund
-   taken outside Stripe" write, or accept it and use the notes field? See Known
-   traps.
-4. **What is next** — BK-47 (cosmetic), or Deploy 3's BK-25 / BK-24?
-5. **The payment deadline landing at 3:58 a.m.** (booking #36's real deadline).
-   Raise `PAYMENT_WINDOW_HOURS`, or round to a civil hour. One constant either
-   way. Nobody has been asked.
-6. **Open client question #6** — whether "credited against your final invoice"
-   matches how an insurance job actually settles.
+### HOW TO CLOSE BK-33, AND THERE IS A CHEAP WAY FIRST
 
-### Operational items only the user can do
+**Two live rows are relevant, both checked on 2026-08-26:**
 
-Briefing the office (a live risk since the P9 flip, and now including "refunds
-happen in the admin panel, not in Stripe"); confirming `775654577RT0001` actually
-appears on a real receipt (**BK-48 is still pending that artifact**); and the
-Stripe Business/Public details step that fixes the receipt's unwatched Gmail
-address and wrong phone number.
+- **#36** — `cancelled`, `payment_status = 'paid'`, `paid_amount_cents = 62843`,
+  `stripe_payment_intent_id = pi_3U6e4YFjUzm6BVXW14cbHFwu`, session `cs_live_…`.
+  It was refunded in the live dashboard on 2026-08-20, **before the event types
+  were subscribed**, so nothing reconciled. **This row is on production right
+  now stating that money is ours which went back six days ago** — BK-33's
+  headline defect, live, on a real booking.
+- **#37** — created 2026-08-23 and **`declined`**. New since the last session and
+  nobody has confirmed whether that was the office declining a real request. If
+  it was, the **decline path is no longer untested in production**; ask before
+  crossing it off.
 
-### Two things a new session will otherwise get wrong
+**Step A, costs nothing: resend #36's `charge.refunded` event.** Stripe →
+Developers → Events → the `charge.refunded` for `pi_3U6e4YFjUzm6BVXW14cbHFwu`
+(2026-08-20) → Resend to `booking-payments`. That fires `reconcileRefund` on a
+real row with real money and **repairs a record that is currently lying**, with
+no new charge.
 
-- **The rollout list below still says "a real live booking has never been
-  made".** It is stale: booking #36 was charged $628.43 on a real card on
-  2026-08-20, refunded and cancelled. Left in place rather than edited because
-  the paragraph around it carries other history; read it with this correction.
-- **A crashed verify script prints no `✗`.** The suite is not idempotent against
-  its own wreckage — a run killed mid-flight leaves probe rows that make the next
-  run die on a unique index, and that crash reads as a pass to any harness
-  counting failure markers. It cost one falsely-green red-first row this session.
-  See `CLAUDE.md`'s seventh process trap. **Clear the probe rows after any
-  interrupted run before believing a result.**
+**What to expect, and one nuance that must not be misread as a failure:**
+`payment_status` moves `paid → refunded`, `refunded_amount_cents` becomes
+`62843`, `refunded_at` stamps. **No `needs_attention` flag fires, and that is
+correct** — `reconcileRefund` flags only when `row.status` is `confirmed`,
+`completed` or `no_show`, and #36 is already `cancelled`. The rollout note's
+*"and the row flagged"* was written for a booking still holding its slot.
+`reconcileRefund` also sends the customer nothing; the only mail it can send is
+the office alert, which is inside the flag branch.
 
----
+**Step B, the full artifact: one real booking with a NON-ZERO TRAVEL FEE.**
+Step A cannot prove the flag, and it cannot prove two other things that have
+never been seen working in production either. One booking settles three:
+
+- **BK-33** — refund it in the Stripe dashboard **while it is still
+  `confirmed`**, so the flag branch runs.
+- **BK-46** — the appointment header omitting the travel fee was its headline
+  fix and **has never been observed working**; #36 had `travel_fee_cents = 0`.
+  Check the header total against the "Amount settled at approval" panel.
+- **BK-48** — **still pending its own artifact.** Nobody has confirmed
+  `775654577RT0001` appears on a real receipt. This booking produces one.
+
+**There is no rehearsal available** — test mode cannot reach the database (see
+above), so the only test is a live one.
+
+### Operational items only the user can do — NONE of them done
+
+- **Brief the office.** A live risk since the P9 flip, and now including
+  *"refunds happen in the admin panel, not in Stripe"*, which as of 2026-08-22
+  describes live code rather than an intention. #37 shows the office is using
+  the panel.
+- **Stripe → Settings → Business details / Public details.** Receipts still give
+  customers `yegrestoration@gmail.com` and `+1 780-720-8856` — a mailbox nothing
+  watches and a number that is not `SUPPORT_PHONE`.
+- **Confirm the GST number on a real receipt** (folds into step B).
+
+### Three things a new session will otherwise get wrong
+
+- **"All three rollout steps are done" is NOT "BK-33 is done."** A configuration
+  change is not evidence of its own effect. Production carries zero refund rows.
+- **A crashed or skipped verify script prints no `✗`.** Assert the exit code and
+  the script's own summary line. This session hit the same family twice: the DB
+  suite went red on ambient data and then went green on a re-run that proved
+  nothing, and the gate harness silently dropped its last script because the
+  list had no trailing newline, so `verify:reveal` never ran while the table
+  looked complete. Both are recorded in Known traps.
+- **The suite is not idempotent against its own wreckage.** Clear the probe rows
+  after any interrupted run before believing a result. There were none this
+  session — the previous cleanup had completed.
+
 
 ## Locked — do not relitigate
 
@@ -378,6 +405,26 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   and a failure mode to the webhook, which deserves its own consideration rather
   than a late edit to a money path. Severity: low, and lower still until a
   booking is partially refunded twice. **Owner: unassigned, needs a ticket.**
+
+- **BOOKING #36 IS ON PRODUCTION RIGHT NOW SAYING MONEY IS OURS THAT WENT BACK
+  ON 2026-08-20.** Checked 2026-08-26: `cancelled`, `payment_status = 'paid'`,
+  `paid_amount_cents = 62843`, every refund column NULL. It was refunded in the
+  live Stripe dashboard on 2026-08-20 — **two days before the refund event types
+  were subscribed** — so `reconcileRefund` never ran and never will on its own.
+  This is BK-33's headline defect, alive, on a real customer-shaped row, and it
+  is the only row on production carrying that state.
+
+  **It is also the cheapest possible closing artifact for BK-33.** Stripe →
+  Developers → Events → the `charge.refunded` for
+  `pi_3U6e4YFjUzm6BVXW14cbHFwu` → **Resend** to `booking-payments`. Same handler,
+  same signature path, real money, no new charge. Expect `payment_status` to move
+  to `refunded`, `refunded_amount_cents` to become `62843`, `refunded_at` to
+  stamp — and **no `needs_attention` flag, correctly**, because the flag branch
+  requires `status` in `confirmed`/`completed`/`no_show` and this row is
+  `cancelled`. `reconcileRefund` mails the customer nothing on any path.
+
+  Severity: moderate — it is a record-truth failure on a live row, and it is the
+  one an audit would find first. **Owner: BK-33, as its closing artifact.**
 
 - **The standalone refund notice ends by offering to rebook a cancellation it
   never announced.** BK-33's `planRefundNotice` — the arm that exists because
@@ -2247,6 +2294,19 @@ property the 2026-08-18 outage was about — **the slot unique index untouched**
 still `UNIQUE (slot_start) WHERE status <> ALL (ARRAY['cancelled','declined',
 'payment_expired'])`, so the code currently deployed keeps resolving its
 `ON CONFLICT` arbiter. 13 rows, none carrying a refund figure.
+
+**ROLLOUT PROGRESS — ALL THREE STEPS DONE, 2026-08-22.** Step 2 pushed
+`e665e01..4a9b548`; `dpl_2m3CAbGGBJJvBpYx7y6HQ9AzM9qb` is Ready and aliased to
+`www.yegrestoration.ca`. Step 3 done by the user: destination `booking-payments`
+(`we_1U6VHpFjUzm6BVXW99gMFRFk`) now lists **8 events**.
+
+**STEP 3'S TEST-MODE HALF WAS DROPPED ON PURPOSE, AND THE INSTRUCTION ABOVE IS
+WRONG.** `webhook.ts:56` reads one secret, `STRIPE_WEBHOOK_SECRET`, and Vercel
+holds the LIVE `whsec_`. A test-mode delivery is signed with a different secret,
+so it fails `constructEventAsync` and reaches no row — subscribing the test
+endpoint would produce a list of failed deliveries and nothing else. Do it only
+if the site is switched back to test keys. **The practical consequence is that
+there is no rehearsal for the closing test; the only test is a live one.**
 
 **AND THE TICKET DOES NOT CLOSE ON STEP 3.** Adding the event types is a
 configuration change, and *"a configuration change is not evidence of its own
