@@ -17,16 +17,46 @@
 > wreckage with `npm run verify:booking:admin:db -- --reset` (which exits **3**,
 > having run nothing).
 >
-> **NEXT: W16 and W17.** W16 is bigger than §7 says. **The BK-44 "not yet
-> deployed" claim is STALE IN FOUR PLACES, not one** — `:285`, `:290`, `:2041`,
-> and `:2135` (which carries it for BK-45 "alongside BK-44"). It shipped in
-> **`7114aa5`** (+ addendum `77ad0f6`); `6ff41e2` is the *rollout documentation*
-> commit, not the code, and this block said otherwise until 2026-09-01. This
-> document already records the deploy correctly at `:2238`, so its two halves
-> contradict each other. **Grep the claim, not the entry** — CLAUDE.md's
-> copy-inventory trap, and this is an instance of it.
-> `#37`'s provenance is also still wrong at `:123-126`: the job was **completed**
-> and paid **Aug 25 and Aug 30**, against a row that reads `declined`.
+> **W16 AND W17 ARE DONE — 2026-09-01. Do not re-do them.**
+>
+> **W16 · every "fixed in code, NOT deployed" claim in this file was false and
+> is now corrected.** The claim spanned **two tickets across a dozen sites**, not
+> the four this block used to enumerate. **BK-44, BK-45 and BK-46 deployed
+> 2026-08-20**; code in `7114aa5` + `77ad0f6` (BK-44), `e5c2d9d` (BK-45),
+> `e04ba21` (BK-46), fast-forward to `8854dd7`. **`6ff41e2` is the rollout
+> DOCUMENTATION commit** — it touches only this file. **BK-33 deployed
+> 2026-08-22 (`4a9b548`) and is STILL OPEN, pending an artifact** — deployed and
+> closed are different things here and every corrected site says both.
+> Two further contradictions were found and fixed in the same pass: **"What is
+> still TEST MODE"** (live keys went in before `#36`'s real `cs_live_` charge)
+> and **"a real live booking has never been made"** (`#36` did exactly that, the
+> same day) — each contradicted by text a few lines below it.
+> **`#37`'s provenance is CONFIRMED** — real customer, lead Aug 20, booked
+> Aug 23, **job completed**, paid Aug 25 and Aug 30, against a row that reads
+> `declined`. **The decline path is therefore still untested in production.**
+>
+> **W17 · there is ONE dated confound, not two.** The **August 2026 spam
+> update** (start **18 Aug 2026**, 2d 16h) is real and covers **three of the
+> four days** of the Aug 17–20 clean window; it is now in that window's standing
+> caveats, which is what W18/W20/W21 read. The **"August 2026 core update from
+> Aug 26" DOES NOT EXIST** and has been struck — Google's Search Status
+> Dashboard lists no such update. Do not reinstate it.
+>
+> **The method lesson, which cost this block twice.** Every line number it cited
+> — `:285`, `:290`, `:2041`, `:2135`, `:2238`, `:123-126` — had drifted and none
+> resolved; and it named the wrong commit until 2026-09-01. **Grep the claim,
+> cite sections rather than line numbers, and verify external dates against the
+> source.** CLAUDE.md's copy-inventory trap, twice in one document.
+>
+> **NEXT: W15 (needs the user — `#38` holds a real Sep 6 slot), then the
+> read-only health checks W2/W3.** W5/W6 are blocked on W9 (GA4 re-auth, user
+> only). **W20/W21 ordering is an open question for the user.**
+>
+> ⚠ **THIS FILE IS AHEAD OF PRODUCTION.** Local `main` carries unpushed commits,
+> and on this project **`git push origin main` IS the deploy**. "Committed" in
+> this file does not mean live — check `git log origin/main..main` before
+> reading any recent entry as deployed. That is how the claim W16 just fixed
+> became false in the first place.
 
 Self-service appointment booking. It replaces the contact form **as the quote
 path** — the form itself survives, demoted to a general "send us a message"
@@ -133,10 +163,20 @@ unanswered.** Do not resolve them in planning:
   were subscribed**, so nothing reconciled. **This row is on production right
   now stating that money is ours which went back six days ago** — BK-33's
   headline defect, live, on a real booking.
-- **#37** — created 2026-08-23 and **`declined`**. New since the last session and
-  nobody has confirmed whether that was the office declining a real request. If
-  it was, the **decline path is no longer untested in production**; ask before
-  crossing it off.
+- **#37** — created 2026-08-23, row reads **`declined`**, and **its provenance is
+  CONFIRMED** (resolved 2026-08-31 in `CONVERSION-2026-08-31.md` §3D, and §10
+  there directs this file to be updated to match). It was a **real customer**:
+  lead **Aug 20**, booked **Aug 23**, the **job was COMPLETED**, and they paid
+  **Aug 25 and Aug 30**. **The `declined` status is wrong** — the row does not
+  describe what happened.
+  Two consequences. **The decline path is still untested in production**: this
+  row reaching `declined` does not evidence the decline flow working as
+  intended, because the outcome it records did not occur — do not cross it off.
+  And `#37` is the standing proof that **the panel under-records reality**,
+  which is why "36 of 39 leads unworked" was withdrawn as an inference. The
+  software gap it exposes — no one-click reschedule, no way to mark an Interac
+  payment with a compliant receipt, no way to mark a job completed — is owned by
+  **W23, W24 and W25** in that document, not by this table.
 
 **Step A, costs nothing: resend #36's `charge.refunded` event.** Stripe →
 Developers → Events → the `charge.refunded` for `pi_3U6e4YFjUzm6BVXW14cbHFwu`
@@ -295,12 +335,18 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   office uses for ordinary edits.** Requires a deliberate wrong selection by an
   authenticated user, which is the only reason it is not a release blocker.
 
-  **Owner: BK-44 — FIXED IN CODE 2026-08-20, NOT YET DEPLOYED.** The rule is
-  `editorMaySetStatus` in `booking-status.ts`: the dropdown may not create
-  `approved_awaiting_payment`, and may move a row **into** the invite-holding
-  set only if that row has been paid. `update.ts` enforces it in the WHERE
-  clause of its own UPDATE; the dropdown renders from the same function.
-  **Until the branch is deployed the operational rule below still stands.**
+  **Owner: BK-44 — FIXED IN CODE 2026-08-20 (`7114aa5`, addendum `77ad0f6`) and
+  DEPLOYED 2026-08-20**, fast-forward to `8854dd7`; see item 4 of the P9 rollout
+  below. The rule is `editorMaySetStatus` in `booking-status.ts:343`: the
+  dropdown may not create `approved_awaiting_payment`, and may move a row
+  **into** the invite-holding set only if that row has been paid.
+  `update.ts:168` enforces it in the WHERE clause of its own UPDATE; the
+  dropdown renders from the same function.
+  **The operational rule below is RETIRED as a rule.** "Use *Review the
+  amount →* and *Mark as paid — Interac* only, never the STATUS dropdown" was
+  office discipline for the window between the fix and its deploy. That window
+  closed on 2026-08-20 and the code now enforces it, so it is kept below as a
+  description of what the guard does, not as an instruction anyone must follow.
 
   Two things this cost that are worth carrying forward. **Guarding `confirmed`
   alone would not have fixed it** — `couldHoldCalendarInvite` covers `completed`
@@ -309,6 +355,36 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   is confirmed" and ICS for an unpaid job. And **`paid_at` is never cleared**,
   so a row re-approved after a previous payment carries a stale stamp; an
   approved row's crossing is refused outright for that reason.
+
+- **`editorMaySetStatus` and its SQL transcription disagree on a NULL
+  `payment_status`, and only a NOT NULL constraint hides it.** Found
+  2026-09-01 during W16's verification — **out of scope for W16, recorded here
+  rather than fixed inline.** The TS rule asks
+  `REFUNDED_PAYMENT_STATUSES.includes(row.payment_status)`, which returns
+  **false** for `null` and therefore **permits** the invite crossing. The WHERE
+  clause asks `appointments.payment_status <> ALL(...)`, which evaluates to
+  **NULL** for a null column and therefore **refuses** it. Same rule, opposite
+  answers, on the one input neither was written for.
+  **It is unreachable today**: migration 008 declares `payment_status TEXT NOT
+  NULL DEFAULT 'not_required'`, so no row can carry NULL, and the divergence
+  fails **closed** in any case — the dropdown would offer an option the UPDATE
+  then refuses, landing on `?saved=blocked`. **Severity: low, and latent rather
+  than live.** What makes it worth recording is the coupling: BK-44's guarantee
+  rests on a **hand transcription** of a TypeScript function into SQL, and
+  nothing pins the two against each other — the only thing that would catch a
+  drift is `verify-booking-admin-db.ts`, the script BK-49 caught silently *not
+  executing*. **Owner: nobody yet.** A ticket that drops the NOT NULL, or adds a
+  status whose null-handling differs, inherits this. Do not fix it as a
+  side-effect of another ticket; it is a write path and a Reviewed-tier change.
+
+- **A comment in `verify-booking-ics.ts` is stale in two directions at once.**
+  Found 2026-09-01 during W16. It reads *"until BK-32 lands the status dropdown
+  is the ONLY route to `confirmed`"* — but **BK-32 landed 2026-08-19**, and
+  **BK-44 then removed the dropdown as a route to `confirmed` altogether**, so
+  the sentence describes a world that ended twice. It is a narrative comment
+  explaining why the restore copy was wrong; it drives no assertion and misleads
+  only a reader. **Severity: cosmetic. Owner: nobody** — fold into the next
+  ticket that touches that file, never a commit of its own.
 
 - **The recorded webhook health check gives a FALSE ALARM unless it sends
   `Content-Type: application/json`.** This file records the live probe as
@@ -544,14 +620,27 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   **Owner: nobody — configuration, recorded so it is not rediscovered by a
   customer.**
 
-- **RESOLVED IN CODE 2026-08-20 by BK-33 — NOT DEPLOYED, and the reconciliation
-  half is ALSO pending a Stripe Dashboard step (see the rollout note).** The
-  webhook now handles `charge.refunded`, `refund.updated`, `refund.failed` and
-  `charge.refund.updated`, and `reconcileRefund` writes Stripe's own running
-  total onto the row. **It is inert in production until those four event types
-  are added to the live endpoint**, which today carries only the four Checkout
-  events — a configuration change whose effect lands on an artifact nobody has
-  looked at, which is the shape this document has now been bitten by twice.
+- **RESOLVED IN CODE by BK-33 (committed 2026-08-21, `4128f67`) and DEPLOYED
+  2026-08-22 (`4a9b548`, `dpl_2m3CAbGGBJJvBpYx7y6HQ9AzM9qb`) — but BK-33 is NOT
+  CLOSED: it is pending an artifact.** The webhook now handles `charge.refunded`,
+  `refund.updated`, `refund.failed` and `charge.refund.updated`, and
+  `reconcileRefund` writes Stripe's own running total onto the row. All three
+  rollout steps are done — migration 011 on production, code live, and the four
+  refund event types added to the live destination `booking-payments`, which has
+  carried **8 events since 2026-08-22** (see the START HERE handoff above).
+  **The reconciliation path has never run on a real row**: production carries
+  zero rows with any refund state (checked 2026-08-26). It is therefore
+  *subscribed and unexercised*, which is neither "inert" nor "working" — and
+  that gap is exactly the shape this document has been bitten by twice, so it
+  closes when the artifact arrives and not before.
+
+  **Corrected 2026-09-01 (W16).** This entry read "NOT DEPLOYED … inert in
+  production until those four event types are added to the live endpoint, which
+  today carries only the four Checkout events" — both halves made false on
+  2026-08-22 by the handoff at the top of this same file, and left standing for
+  ten days. **The two findings enumerated under this entry are unchanged and
+  both still live:** the `#36` row above, and "an Interac or on-site refund is
+  recorded nowhere" below. Neither verdict moves because the deploy landed.
   Original entry follows.
 
   **A refund issued in Stripe does not reach this system, and BK-46 just made
@@ -566,13 +655,24 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   Giving them their first reader also gave the stale state its first voice.
   Observed while planning the refund of live test booking #36.
 
-  **Operationally**, until BK-33 lands: a refunded booking must be cancelled
-  through the admin panel as well, and the office should treat "Payment
-  received" on a `cancelled` row as meaning *money was taken at some point*,
-  not *money is still ours*. **Refund in Stripe FIRST, then cancel** — the
-  cancellation email says "nothing further is needed from you" and mentions no
-  money, so cancelling first tells a customer their booking is off while the
-  refund is still unstarted.
+  **Operationally — this precondition was DISCHARGED on 2026-08-22, when BK-33
+  deployed.** The text below was the workaround for the window before that, and
+  is kept for the record rather than as current instruction: *"until BK-33
+  lands: a refunded booking must be cancelled through the admin panel as well,
+  and the office should treat 'Payment received' on a `cancelled` row as meaning
+  money was taken at some point, not money is still ours. **Refund in Stripe
+  FIRST, then cancel** — the cancellation email says 'nothing further is needed
+  from you' and mentions no money, so cancelling first tells a customer their
+  booking is off while the refund is still unstarted."*
+
+  **What survives it is one row, not a standing rule.** `#36` predates the
+  subscription and still reads "Payment received" on a refunded booking, so that
+  caution remains true *of `#36`* — for a different reason, and until its
+  closing artifact is taken. What the office is told to do now is a separate
+  question: **"Operational items only the user can do"** (in the START HERE
+  handoff above) already records that refunds happen in the admin panel rather
+  than in Stripe, and changing office procedure beyond that is a client-facing
+  call for the user, not something this documentation pass may decide.
 
   Severity: moderate, and it is a record-truth failure rather than a money one —
   the money is correct in Stripe, which is the system of record for it.
@@ -2051,12 +2151,12 @@ minimum-notice change is a prerequisite for its own payment deadline.
 | BK-31 | Assessment tier selection at booking — radio group in the terms box, `assessment_tier` column (**migration 007**), **`(tier, service)` price table with the mould override**, **1.5x weekend multiplier shown live on the form**, `entry`-seam validation, both emails, admin display + edit | Reviewed | ✅ **implemented 2026-08-18** — gates green, 12 red rows; awaiting review |
 | BK-23 | Review lifecycle + payment handoff — statuses + rename + index (**migrations 008 expand / 009 contract**), **next-day-earliest notice**, request-received page/email, admin Approve/Decline, decline email, **approval screen with pre-filled adjustable amount + confirm step**, approve → payment link, **stale-request expiry sweep (Task 4)**, service-area badge, ICS boundary rewrite | Reviewed | ⚠️ **reviewed 2026-08-18, blockers fixed** — Tasks 1/2/3/7 built, reviewed and gated. Review: 3 blockers / 6 should-fix / 5 nits, **all resolved** (2 moved to BK-32). **Task 4 respec'd into Deploy 2 and BUILT 2026-08-19** — it ships inside BK-32's cron handler, gated and red-observed, awaiting implementation review with BK-32. Tasks 5, 6 remain Deploy 3+. Not deployable alone |
 | BK-32 | Stripe — Checkout Session at approval, webhook-driven `confirmed`, three-layer idempotency, payment columns + `stripe_events` (**migration 010**), GST line item, **expiry cron carrying TWO sweeps — payment expiry (its own) and BK-23 Task 4's stale-request expiry**, **`markPaid()` seam + Interac "mark as paid" second entry point** | Reviewed | ✅ **implemented 2026-08-19** — plan-reviewed first (4 blockers / 10 should-fix / 8 nits, all accepted). 23 gates green, 49 red rows, migration 010 on dev only. **Reviewed 2026-08-19** (2 blockers / 7 should-fix / 7 nits, all resolved) — the review covered BK-23 Task 4's cron in the same pass. Inherited S2 (the prefix now carries an attempt) and N5 (the conversion is the payment, keyed on the Stripe session id) both closed. Awaiting implementation review |
-| BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Client answer 2026-08-20: no hand-confirm. | Reviewed | ✅ **committed 2026-08-20** on `deploy-2-prepay` — plan review (2 blockers) and implementation review (2 blockers) both passed after fixes; 12 red-first rows; all 23 verify scripts green. **Not deployed.** |
-| BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | ✅ **implemented 2026-08-20** — plan review (5 blockers / 8 should-fix / 3 nits) and implementation review (3 blockers / 3 should-fix / 6 nits) both passed after fixes; merged on the payment path per the user's six decisions; 13 red-first rows; typecheck 0, build clean, all 23 verify scripts green. **Not deployed.** |
-| BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | ✅ **implemented 2026-08-20** — plan review returned 6 blockers, all fixed; `appointmentMoney` replaces the header's own derivation; the due line asks whether the row owes; a Payment received panel gives `paid_at`/`payment_method` their first reader; the mail label tells the truth. 10 red-first rows. **Not deployed.** |
+| BK-44 | **The admin status dropdown can perform an approval** — `[id].astro` renders all eight statuses on every row and `update.ts` has no transition guard, so `-> approved_awaiting_payment` approves with no amount/deadline/email and `-> confirmed` mails a confirmation and an ICS **with no payment taken**, against P9's locked "payment always precedes dispatch". Found by the user 2026-08-19 in first real use. Client answer 2026-08-20: no hand-confirm. | Reviewed | ✅ **committed 2026-08-20** on `deploy-2-prepay` — plan review (2 blockers) and implementation review (2 blockers) both passed after fixes; 12 red-first rows; all 23 verify scripts green. **Deployed 2026-08-20** (`7114aa5` + `77ad0f6`; fast-forward to `8854dd7`). |
+| BK-45 | **The post-payment email carries none of the terms the customer accepted** — `markPaid` sends the calendar-boundary builder, not `customerConfirmation`, so no fee terms, no have-ready list, no chosen tier. Two different messages are both called "the confirmation" and Resend sends the other one. Found by the first real payment 2026-08-19 | Reviewed | ✅ **implemented 2026-08-20** — plan review (5 blockers / 8 should-fix / 3 nits) and implementation review (3 blockers / 3 should-fix / 6 nits) both passed after fixes; merged on the payment path per the user's six decisions; 13 red-first rows; typecheck 0, build clean, all 23 verify scripts green. **Deployed 2026-08-20** (`e5c2d9d`; fast-forward to `8854dd7`). |
+| BK-46 | **The appointment screen does not tell the truth about money or mail** — the header total omits the travel fee structurally (`assessmentQuote` called without `travelFeeCents`) and recomputes from today's prices instead of the BK-32 snapshot, so two dollar figures on one screen disagree on any booking with travel; `paid_at` and `payment_method` are written by `markPaid` and rendered nowhere; "Payment due by …" survives the payment; and the Notifications panel labels the request acknowledgement "Customer confirmation". Found 2026-08-20 reviewing the screen against booking #35 | Reviewed | ✅ **implemented 2026-08-20** — plan review returned 6 blockers, all fixed; `appointmentMoney` replaces the header's own derivation; the due line asks whether the row owes; a Payment received panel gives `paid_at`/`payment_method` their first reader; the mail label tells the truth. 10 red-first rows. **Deployed 2026-08-20** (`e04ba21`; fast-forward to `8854dd7`). |
 | BK-48 | **The GST registration number is on no receipt we issue** — the Dashboard tax ID governs invoices, a Checkout Session issues a receipt, and our GST is a hand-built line item, so Stripe rendered no registrant. Found by the receipt from the first real charge, 2026-08-20 | Reviewed | ✅ **DEPLOYED 2026-08-20** (`85b2515`) — plan review 3 blockers, implementation review 2 blockers, all fixed; the number is a constant carried by the Stripe line item name and both money emails; 7 red-first rows |
 | BK-47 | **The appointment screen buries the decision and still speaks pre-P9** — "Review this request" renders after five reference panels on the screen the office opens to decide; the confirm step leaves a second live amount form beneath it; the header labels an unpaid request "BOOKED"; "Reminder — Not sent" advertises a deploy-4 feature. Copy, order and layout only. Build after BK-46 — both edit the header block | Light | draft — see `tickets/BK-47.md` |
-| BK-33 | **Refund mechanics** — `refundPayment()` with a DATABASE claim as the dedupe (a Stripe idempotency key is not one: keys are pruned at 24h and concurrent same-key requests are not saved), a one-action **"Cancel and refund"** panel with an editable amount and a confirm step showing the real fee read from Stripe, the reconciliation webhook for dashboard refunds, refunded arms on `paymentReceipt`, and the invite-crossing rule extended so a refunded booking cannot be un-cancelled back to `confirmed`. **Migration 011** (additive, five columns) | Reviewed | ✅ **implemented 2026-08-20** — plan review returned **9 blockers / 10 should-fix / 5 nits, all 25 accepted, none refused**; four of the blockers would each have moved or misreported money on an ordinary path. Acceptance criteria written at plan review. **NOT DEPLOYED**, and closure additionally depends on an artifact — see the rollout note |
+| BK-33 | **Refund mechanics** — `refundPayment()` with a DATABASE claim as the dedupe (a Stripe idempotency key is not one: keys are pruned at 24h and concurrent same-key requests are not saved), a one-action **"Cancel and refund"** panel with an editable amount and a confirm step showing the real fee read from Stripe, the reconciliation webhook for dashboard refunds, refunded arms on `paymentReceipt`, and the invite-crossing rule extended so a refunded booking cannot be un-cancelled back to `confirmed`. **Migration 011** (additive, five columns) | Reviewed | ✅ **implemented 2026-08-20** — plan review returned **9 blockers / 10 should-fix / 5 nits, all 25 accepted, none refused**; four of the blockers would each have moved or misreported money on an ordinary path. Acceptance criteria written at plan review. **Deployed 2026-08-22** (`4a9b548`) · **NOT CLOSED — pending an artifact**; production carries zero rows with any refund state (checked 2026-08-26) — see the rollout note |
 | BK-34a | Photos for phone bookings — appointment-scoped upload token, public `/upload/<token>/` page, admin fallback file input, per-appointment rate limit | Reviewed | ✅ **DEPLOYED 2026-08-16** (`f6e40b5`) — reviewed, all findings resolved; verified live end to end including a real upload landing in admin. Amended by BK-37 and BK-40 |
 | BK-34b | SMS the upload link from the admin create form | Reviewed | blocked — Twilio number |
 | BK-35 | Admin entry hardening — email strongly-encouraged warning, send-confirmation audit line | Reviewed | ✅ **DEPLOYED 2026-08-16** (`5a2fe4a`) — reviewed, all findings resolved. Left `verify:booking:admin:db` red (see Known traps); repaired 2026-08-16 |
@@ -2145,7 +2245,8 @@ together or the site tells a lie between deploys.
    terms went out in the request email and `/book/confirmed/` shows the
    have-ready list. See `tickets/BK-45.md`.
 
-   **BK-45 IS NOW FIXED IN CODE AND NOT DEPLOYED (2026-08-20), alongside BK-44.**
+   **BK-45 WAS FIXED IN CODE AND DEPLOYED ON 2026-08-20 (`e5c2d9d`), alongside
+   BK-44.**
    `markPaid` sends `customerConfirmation` — the same builder the Resend button
    uses, so the two are one message by construction — carrying the have-ready
    list, the assessment terms and **what the row says was charged**, itemised
@@ -2200,21 +2301,31 @@ together or the site tells a lie between deploys.
    predicate the pre-P9 arbiter cannot resolve against, so a Vercel instant
    rollback would raise 42P10 on every booking. Forward-fix only.
 
-   **What is still TEST MODE:** `STRIPE_SECRET_KEY` is `sk_test_`, and the
-   webhook `booking-payments-test` is registered in test mode at
-   **`https://www.yegrestoration.ca/api/stripe/webhook/`**. Real card payment is
-   NOT live. The live-key swap needs its own webhook registration and its own
-   `whsec_`, and both env vars are scoped **Production only** — deliberately, so
-   the value swap cannot put live credentials on a preview.
+   **What was still TEST MODE when this was written, and no longer is
+   (corrected 2026-09-01, W16):** `STRIPE_SECRET_KEY` was `sk_test_`, and the
+   webhook `booking-payments-test` was registered in test mode at
+   **`https://www.yegrestoration.ca/api/stripe/webhook/`**. Real card payment
+   was not live. The live-key swap needed its own webhook registration and its
+   own `whsec_`, and both env vars are scoped **Production only** —
+   deliberately, so the value swap cannot put live credentials on a preview.
+
+   **The swap has since happened.** The live destination is `booking-payments`,
+   and booking `#36` ran a real `cs_live_` charge and refund on 2026-08-20. The
+   next paragraph — "The live keys are wired but unproven" — was already the
+   truer statement, and this paragraph contradicted it six lines earlier for
+   twelve days.
 
    **STILL OUTSTANDING as of 2026-08-20 — the rollout is complete, these are not:**
 
-   1. **A real live booking has never been made.** The live keys are wired but
-      unproven. The check is a real card on the cheapest weekday tier ($399 +
-      GST = $418.95, no weekend multiplier), watching for **`cs_live_`** rather
-      than `cs_test_` in the Stripe URL, then refunding in the dashboard and
-      cancelling the row. Until that runs, "live" is a configuration claim, not
-      an observed fact.
+   1. **DONE 2026-08-20 by booking `#36` — corrected 2026-09-01 (W16).** This
+      read "A real live booking has never been made. The live keys are wired but
+      unproven", and `#36` ran the described check the same day: a real card,
+      `cs_live_`, then refunded in the dashboard and the row cancelled. See the
+      Known trap "The live cycle proved the happy path and FIVE paths remain
+      unexercised in production" for what it did **not** touch — a travel fee,
+      Interac, `approveFree`, decline, both expiry sweeps, and Resend
+      confirmation. "Live" is an observed fact for the card path only; for those
+      five it is still a configuration claim.
    2. **NOT DONE — RE-OPENED 2026-08-20 by the first live receipt. The number is
       on the account and NOT on the receipt.** See the Known trap: the Dashboard
       field governs invoices, and a Checkout Session issues a receipt. Marked
@@ -2265,21 +2376,23 @@ together or the site tells a lie between deploys.
       **What was true until it shipped**, kept for the record: BK-44 was fixed
       in code but not deployed, so the rule for the admin panel was use
       "Review the amount →" and "Mark as paid — Interac" only, never the STATUS
-      dropdown. That hole
-      cost nothing in test mode and costs a free crew dispatch now. The fix is
-      committed on `deploy-2-prepay`; deploying it is a rollout step and has
-      not been taken.
+      dropdown. That hole cost nothing in test mode and would have cost a free
+      crew dispatch. **That window closed on 2026-08-20** — the fix was
+      committed on `deploy-2-prepay` and the rollout step below was taken the
+      same day.
 
-      **BK-45 is in the same state** — fixed in code on `deploy-2-prepay`,
-      not deployed. Until it ships, every customer who pays receives the thin
-      calendar-boundary confirmation with no terms, no have-ready list and no
-      record of what they were charged, and clicking **Resend confirmation**
-      sends them a materially different, fuller message under a different
-      heading. That is a customer-facing inconsistency rather than a money
-      defect, and it is live on production now.
+      **BK-45 was in the same state and left it the same way** — fixed in code
+      on `deploy-2-prepay`, deployed 2026-08-20. In the window before it
+      shipped, every customer who paid received the thin calendar-boundary
+      confirmation with no terms, no have-ready list and no record of what they
+      were charged, and clicking **Resend confirmation** sent them a materially
+      different, fuller message under a different heading. That was a
+      customer-facing inconsistency rather than a money defect, **and it is
+      fixed on production now.**
 
       The same pass produced **BK-46** and **BK-47** from a deliberate read of
-      the appointment screen — see Known traps. Neither is deployed either.
+      the appointment screen — see Known traps. **BK-46 shipped with the other
+      two; BK-47 has not, and is still a draft.**
 
       **BK-44, BK-45 and BK-46 shipped together on 2026-08-20. BK-47 is still a
       draft and is the only P9 ticket not on production.** It is layout and copy

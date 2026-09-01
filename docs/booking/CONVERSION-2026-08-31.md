@@ -80,8 +80,17 @@ overloaded**, so a red-first must read the summary line to tell a genuine red
 from an abort. Clear stranded rows with
 `npm run verify:booking:admin:db -- --reset`.
 
-Next: the read-only health checks (W2 GBP, W3 Ads Policy Manager), then
-instrumentation (W5–W7), then compliance, then the surface defects.
+**W16 and W17 are also DONE — 2026-09-01.** W16 corrected every stale
+"not deployed" claim across `ROADMAP.md` and three ticket `Status:` lines
+(BK-44/45/46 shipped 2026-08-20; BK-33 shipped 2026-08-22 and is **still open,
+pending an artifact**). W17 verified the confounds against Google's Search
+Status Dashboard and **struck one that does not exist** — there is no August
+2026 core update; only the **August 2026 spam update (18 Aug, 2d 16h)**, now
+recorded in the clean window's standing caveats.
+
+Next: **W15** (needs the user — `#38` holds a real Sep 6 slot), then the
+read-only health checks (W2 GBP, W3 Ads Policy Manager), then instrumentation
+(W5–W7), then compliance, then the surface defects.
 
 ## Blocked, and on what
 
@@ -109,8 +118,16 @@ instrumentation (W5–W7), then compliance, then the surface defects.
   ledger, the admin screenshots, or §3C's pixel measurements — no scripts, no
   paths, no raw data were preserved. The Ads daily rows **were** preserved (§3A).
   If you need the others, re-derive them and **say that you did.**
-- **Also read `docs/booking/ROADMAP.md`** (CLAUDE.md requires it). Its BK-44 entry
-  is **stale** — it says "not yet deployed"; it shipped in `6ff41e2`.
+- **Also read `docs/booking/ROADMAP.md`** (CLAUDE.md requires it). ~~Its BK-44
+  entry is stale — it says "not yet deployed"; it shipped in `6ff41e2`.~~
+  **CORRECTED 2026-09-01 (W16), and it was wrong twice.** The stale
+  "not deployed" claim spanned **two tickets across a dozen sites**, not one
+  entry — BK-44/45/46 *and* BK-33 — plus three ticket-file `Status:` lines. And
+  **`6ff41e2` is the rollout DOCUMENTATION commit** (it touches one file,
+  `ROADMAP.md`); the code shipped in **`7114aa5` + `77ad0f6`** (BK-44),
+  `e5c2d9d` (BK-45) and `e04ba21` (BK-46), deployed 2026-08-20 by fast-forward
+  to `8854dd7`. BK-33 deployed 2026-08-22 (`4a9b548`) and is **still open,
+  pending an artifact**. All sites are now corrected.
 
 **Client-facing artifact — STALE**, carries the withdrawn "calls held flat"
 reading. **Do not send until republished (W1):**
@@ -620,6 +637,21 @@ and sits in the *baseline*, while Aug 20 sat in the *treatment* window.
 
 ### Standing caveats on the clean window
 
+- **A Google spam update runs through three of the window's four days.** The
+  **August 2026 spam update** began **18 Aug 2026** and ran 2 days 16 hours,
+  completing ~21 Aug — so it covers **Aug 18, 19 and 20 of the Aug 17–20 clean
+  window**, leaving only Aug 17 clean of it. Verified 2026-09-01 against Google's
+  Search Status Dashboard
+  (<https://status.search.google.com/products/rGHU1u87FJnkP6W2GwMi/history>);
+  see "ONE Google update landed inside the measurement window". **Direction and
+  size unknown** — no organic-traffic series has been pulled for these dates, so
+  this is an unsized confound, not a correction to apply. It sits on top of every
+  caveat below, and it means the clean window is **not clean of algorithmic
+  change**; it is only clean of *our own* deploys. **Added 2026-09-01 (W17):
+  this section named neither confound until then, which is why W18/W20/W21 could
+  read these caveats and not know.**
+  *(The "August 2026 core update from Aug 26" that this document previously
+  carried does not exist and has been struck — do not reinstate it.)*
 - **Post-hoc.** The window and its baseline were chosen after seeing the data.
   Eight of 31 days carry zero conversions and the window contains two.
 - **Truncation bias, direction known.** `Assessment booked` has a **90-day**
@@ -1054,15 +1086,42 @@ versus the Aug 20/25/29/30 leads — a real discriminator nobody has requested �
 establish trade seasonality, since `/book/` launched Aug 10 2026 and no prior-year
 demand series exists anywhere.
 
-### Two Google updates landed inside the measurement window
+### ONE Google update landed inside the measurement window — not two
 
-- **August 2026 spam update: Aug 18–21** — **this runs INSIDE the Aug 17–20
-  "clean window"** on which §3C's clean-window comparison rests.
-- **August 2026 core update: began Aug 26** — **this will contaminate any
-  September before/after test** of the Phase 3 and Phase 4 fixes.
+**Verified 2026-09-01 (W17) against Google's Search Status Dashboard**, which is
+the authoritative log. Both dates were previously stated here with **no cited
+source**, and CLAUDE.md forbids taking external behaviour from recall. Checking
+them changed the answer.
 
-Neither begins on Aug 16, so neither is the cause. **Both must be recorded as
-dated confounds and neither was named anywhere in this document.**
+- ✅ **August 2026 spam update — CONFIRMED. Start 18 Aug 2026, duration 2 days
+  16 hours**, so it completes ~21 Aug. **It runs INSIDE the Aug 17–20 "clean
+  window"** on which §3C's clean-window comparison rests — covering **three of
+  its four days** (Aug 18, 19, 20). It does not begin on Aug 16, so it is not
+  the cause of the collapse; it is a **confound on the clean window**, and the
+  clean window is what §3C's comparison rests on.
+  Source: <https://status.search.google.com/products/rGHU1u87FJnkP6W2GwMi/history>
+
+- ❌ ~~**August 2026 core update: began Aug 26**~~ — **STRUCK. THERE IS NO SUCH
+  UPDATE.** Google's dashboard lists the complete 2026 sequence as: February
+  Discover update, March spam update, March core update, May core update, June
+  spam update, August spam update. **No August 2026 core update, on either the
+  summary page or the full history**, and an in-progress rollout would still be
+  listed. Checked 2026-09-01.
+  **The likely contamination:** the entry immediately below August 2026's on the
+  same dashboard is the **August 2025 spam update, start 26 Aug 2025**. An
+  August update beginning on the 26th exists — it is a *spam* update, in *2025*.
+
+**Consequence, and it matters more than the correction.** This section was about
+to hand W18/W20/W21 a confound that does not exist. A September before/after
+test discounted against a phantom core update would have explained away real
+movement. **There is no September core-update contamination on the record as of
+2026-09-01** — if one is announced later, it is a new confound with a new date,
+not this one.
+
+This is the failure mode this document already lists against itself at settled
+item 11 ("the statistics in §5's Evidence hygiene list are FABRICATED"), and it
+survived here because a date with no source reads exactly like a date with one.
+**Cite the dashboard, or do not record the confound.**
 
 ### Insurance vs self-pay — the split that decides whether $399 is a product
 
@@ -1452,12 +1511,47 @@ explanation is true is in §7B, not here.
       developer test holds one of only 30 weekly slots. **Never by row delete** —
       a hard delete strands the ICS invite. **Artifact:** the slot free in
       availability **and** the `CANCEL` ICS in the recipient's calendar.
-- [ ] **W16 · Correct the ROADMAP's stale BK-44 entry** — it says "fixed in code,
-      not yet deployed"; **it shipped in `6ff41e2`.** A future session will
-      otherwise believe an unguarded status dropdown is live.
-- [ ] **W17 · Record the two dated confounds** — Google spam update **Aug 18–21**
-      (inside the "clean window") and the core update from **Aug 26** (will
-      contaminate any September before/after of W18/W20/W21).
+- [x] **W16 · Correct the stale "not deployed" claims — DONE 2026-09-01.**
+      As written this item described **one** entry and named the **wrong**
+      commit. Both were undercounts, and the item is recorded here in corrected
+      form so the next session does not re-derive the original scope.
+      **The claim spanned two tickets across a dozen sites**, all now fixed:
+      `ROADMAP.md`'s BK-44 Known-trap entry and its retired operational
+      workaround; the BK-44/45/46/BK-33 rows of the P9 ticket table; the "BK-45
+      … alongside BK-44" line; three paragraphs of the P9 rollout prose
+      ("BK-45 is in the same state", "Neither is deployed either"); the "What is
+      still TEST MODE" paragraph and the "a real live booking has never been
+      made" item, both of which contradicted text a few lines below them; the
+      BK-33 Known-trap entry and its "inert in production" half; and the
+      `Status:` lines of `tickets/BK-44.md`, `BK-45.md` and `BK-46.md`, which
+      CLAUDE.md makes the canonical record.
+      **Commits:** code shipped in `7114aa5` + `77ad0f6` (BK-44), `e5c2d9d`
+      (BK-45), `e04ba21` (BK-46), deployed 2026-08-20 by fast-forward to
+      `8854dd7`. **`6ff41e2` is the rollout DOCUMENTATION commit** — it touches
+      only `ROADMAP.md` — and both places in this file cited it as the code.
+      BK-33 deployed 2026-08-22 (`4a9b548`) and remains **open, pending an
+      artifact**; its entry now says deployed and not-closed in one sentence.
+      **Method note for the next session:** the four line numbers this file and
+      the READ FIRST block enumerated had all drifted ~13 lines and none
+      resolved. **Grep the claim, not the entry, and cite sections not line
+      numbers.**
+- [x] **W17 · Record the dated confounds — DONE 2026-09-01, and there is ONE,
+      not two.** Verified against Google's Search Status Dashboard, because
+      **neither date had a cited source** and CLAUDE.md forbids taking external
+      behaviour from recall.
+      **Confirmed:** the **August 2026 spam update**, start **18 Aug 2026**,
+      2 days 16 hours, completing ~21 Aug — covering **three of the Aug 17–20
+      clean window's four days**. Now recorded in "Standing caveats on the clean
+      window", which is what W18/W20/W21 actually read; recording it only in its
+      own section was the propagation half this item would otherwise have missed.
+      **STRUCK:** the "August 2026 core update from **Aug 26**" **does not
+      exist** — no such update on the dashboard summary or its full history,
+      which lists 2026 as Feb Discover, Mar spam, Mar core, May core, Jun spam,
+      Aug spam. The nearest real thing is the **August 2025 spam update, start
+      26 Aug 2025**. **There is therefore no known September contamination for
+      W18/W20/W21 to discount against** — do not reinstate it, and if a core
+      update is announced later it is a new confound with a new date.
+      Source: <https://status.search.google.com/products/rGHU1u87FJnkP6W2GwMi/history>
 
 ### Tier 4 — defects on the surfaces
 
@@ -1611,7 +1705,10 @@ Named honestly so nobody treats them as done:
   since §3A so does the clean-window comparison. ~~**#37's provenance is
   unknown**~~ — **RESOLVED 2026-08-31 (§3D): a real enquirer (lead Aug 20), a real
   booking (Aug 23), a COMPLETED job, paid Aug 25 and Aug 30. The `declined` status
-  is wrong.** The ROADMAP still flags it as unconfirmed; update it there too.
+  is wrong.** ~~The ROADMAP still flags it as unconfirmed; update it there
+  too.~~ **DONE 2026-09-01 (W16)** — `ROADMAP.md`'s `#37` entry now records the
+  confirmed provenance, and notes that the decline path remains untested in
+  production because the outcome the row states did not occur.
 - **Whether `Assessment booked` ever fired for a known booking.** Nine database
   bookings against seven Ads conversions in Aug 10–16 (§3A) is unexplained.
 - **Whether Ads conversions are click-dated or conversion-dated** in each surface.
