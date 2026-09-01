@@ -88,7 +88,9 @@ Status Dashboard and **struck one that does not exist** — there is no August
 2026 core update; only the **August 2026 spam update (18 Aug, 2d 16h)**, now
 recorded in the clean window's standing caveats.
 
-Next: **W15** (needs the user — `#38` holds a real Sep 6 slot), then the
+Next: **W15** (needs the user — `#38` held a real Sun **2026-09-06** 3:30 p.m.
+slot; if that date has passed, the slot is moot but the row and its ICS are
+not), then the
 read-only health checks (W2 GBP, W3 Ads Policy Manager), then instrumentation
 (W5–W7), then compliance, then the surface defects.
 
@@ -1094,7 +1096,9 @@ source**, and CLAUDE.md forbids taking external behaviour from recall. Checking
 them changed the answer.
 
 - ✅ **August 2026 spam update — CONFIRMED. Start 18 Aug 2026, duration 2 days
-  16 hours**, so it completes ~21 Aug. **It runs INSIDE the Aug 17–20 "clean
+  16 hours**, so it ends on **21 Aug** if it began in the morning and on the
+  **20th** if late in the day; either way it runs through the whole of Aug 18,
+  19 and 20. **It runs INSIDE the Aug 17–20 "clean
   window"** on which §3C's clean-window comparison rests — covering **three of
   its four days** (Aug 18, 19, 20). It does not begin on Aug 16, so it is not
   the cause of the collapse; it is a **confound on the clean window**, and the
@@ -1110,6 +1114,12 @@ them changed the answer.
   **The likely contamination:** the entry immediately below August 2026's on the
   same dashboard is the **August 2025 spam update, start 26 Aug 2025**. An
   August update beginning on the 26th exists — it is a *spam* update, in *2025*.
+  **How to re-check this negative claim** (it is the strongest external claim in
+  this document and rests on one read, made **2026-09-01**): open the history
+  URL above and read the 2026 entries. The claim fails if an "August 2026 core
+  update" appears. Google backfills the dashboard when it confirms an update
+  late, so a *later* appearance would not mean this read was wrong — it would
+  mean the confound is new. Re-check before any September before/after test.
 
 **Consequence, and it matters more than the correction.** This section was about
 to hand W18/W20/W21 a confound that does not exist. A September before/after
