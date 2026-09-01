@@ -1,5 +1,20 @@
 # Booking system — roadmap
 
+> ## ⛔ READ FIRST — 2026-08-31
+> **Web bookings collapsed on 2026-08-16 and the cause is NOT RECOVERABLE.**
+> Before touching the booking funnel, terms copy, pricing, or the Google Ads
+> account, read the **START HERE** block at the top of
+> **`docs/booking/CONVERSION-2026-08-31.md`**.
+> Six conclusions were asserted and withdrawn in one day; that file names them so
+> you do not pick one up again. The work to do now is its **W0–W27
+> cause-independent list**, in order — **W0 first**, because
+> `verify-booking-admin-db.ts` is not idempotent and every red-first gate before
+> it produces worthless evidence.
+> **This ROADMAP's BK-44 Known-traps entry is STALE** — it says "fixed in code,
+> not yet deployed"; it shipped in `6ff41e2`. And `#37`'s provenance is no longer
+> unknown: the job was completed and paid twice, against a row that reads
+> `declined`.
+
 Self-service appointment booking. It replaces the contact form **as the quote
 path** — the form itself survives, demoted to a general "send us a message"
 channel on `/contact/` (client decision, 2026-08-11, recorded in BK-10). One
@@ -11,6 +26,25 @@ single-password admin, and covers none of the custom needs (insurance toggle,
 policy/claim fields, media upload, SMS).
 
 Process rules are in `/CLAUDE.md`. Ticket files are in `tickets/`.
+
+---
+
+## STOP — READ THIS FIRST, 2026-08-31
+
+**Bookings collapsed on 2026-08-16 and the cause is not established.** A client
+meeting asked for a review of the booking process and the terms, and proposed
+dropping payment as a requirement. The evidence, the corrections and the open
+client decisions are in **`docs/booking/CONVERSION-2026-08-31.md`** — read it
+before touching the booking funnel, the terms copy, the pricing, or Google Ads.
+
+Three things a session will otherwise get wrong: **photos are already mandatory**
+(BK-22, since 08-13), **the hold state already exists** (`pending_review`), and
+**2026-08-16 shipped two mechanisms, not one** — the price on the form, and the
+sitewide removal of "free" from every title, meta description and the nav label.
+Only the second explains the message form falling too.
+
+**No policy or code has been changed. The next step is measurement, not building.
+Do not build BK-47.**
 
 ---
 
@@ -338,8 +372,10 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   sweep's return value; and `cleanup()` cannot rely on a marker that the seeding
   path does not always write. Severity: low for production, high for the gate —
   it will fire again, and the next person to see it will be mid-deploy.
-  **Owner: unassigned, needs a ticket** — the same one that would make the probe
-  ids unique per run, below.
+  **Owner: BK-49** (2026-08-31) — the same ticket that makes the probe ids unique
+  per run, below. It scopes this count to the rows the fixture made, measured
+  against a baseline taken immediately before the sweep, rather than loosening it
+  to a floor.
 
 - **A VERIFY SCRIPT THAT CRASHES PRINTS NO `✗`, SO A RED-FIRST CHECK COUNTING
   FAILURES READS IT AS A PASS.** Found 2026-08-20 while red-firsting BK-33.
@@ -365,9 +401,26 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   make the NEXT run crash on a unique index, and the crash surfaces as a stack
   trace among expected error logs rather than as a failure. Severity: low for
   production, high for the method — it is a gate that lies in the reassuring
-  direction. **Owner: nobody — the harness is not code in the repo, but the
-  non-idempotent fixture is, and a ticket that made the probe ids unique per run
-  would close it.**
+  direction. **Owner: BK-49** (2026-08-31), which makes the probe ids unique per
+  run and — the half this entry did not ask for — makes a crash *announce itself*
+  rather than merely become impossible. **The count of fixed colliding literals
+  was nine, not one.** `cs_test_cronprobe0001` is the one this entry names;
+  `cs_test_webhook0000{1,2,3}`, `cs_test_stale000000001`, `cs_test_happy0001`,
+  `cs_test_twice0001`, `cs_test_clash0001` and `cs_test_late00001` are the rest,
+  all on rows seeded through paths writing no `admin_notes` and therefore in
+  `cleanup()`'s blind spot.
+
+  **Two findings BK-49 added that this entry did not contain, and both are worse
+  than the collision.** First, the **pre-run** sweep (`:435`) exists specifically
+  to clear an interrupted run's leftovers — its comment says so — and
+  structurally cannot: `createdIds` is empty on that pass, so only the
+  `admin_notes` arm is live and the stranded rows carry no marker. Second, the
+  `finally` block's leftover check (`:4381-4396`) asks whether anything survived
+  **using the same predicate it just deleted by**, so a row `cleanup()` cannot see
+  is a row that check cannot count — it reports `0 survived` over a dirty table.
+  That is the **eighth** member of the "assertion that cannot fail" family, and
+  it is the sixth instance's own rule firing again: the check and the delete
+  share the predicate, so both sides move together.
 
 - **The payment deadline can land in the middle of the night, and nobody has
   decided whether that is wanted.** `PAYMENT_WINDOW_HOURS = 12`, so booking #36
@@ -2397,6 +2450,43 @@ back by hand, and the reason it was safe to re-number afterwards is that the
 **Deployed as "Deploy 1.5"** — after Deploy 1, before the Deploy 2 flip, with
 no coupling to either. BK-40's migration applies to production first, matching
 BK-27's and Deploy 2's rollout shape.
+
+### P11 — method integrity and the cause-independent list (2026-08-31)
+
+Opened by `docs/booking/CONVERSION-2026-08-31.md`, whose **§7 W0–W27** is the
+work list. **Read that file's START HERE block before taking anything from
+here** — the cause of the 2026-08-16 booking collapse is **not recoverable**, and
+six conclusions were asserted and withdrawn in one day.
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-49 | **W0** — `verify-booking-admin-db.ts` is not idempotent against its own wreckage, and a crash in it exits 1 printing no summary, so a red-first check reads the crash as a pass. Nine fixed session literals collide on `appointments_stripe_session_idx`; `cleanup()`'s pre-run arm cannot see the rows it exists to clear; the leftover check shares the delete's predicate and cannot fail; the `paymentsExpired` count is global and reddens on the clock | Light (harness) **+ one fresh-agent implementation review anyway** — see the ticket's "Why Light is uncomfortable here" | ✅ **reviewed 2026-08-31** (0 blockers / 5 should-fix / 6 nits, all resolved); 8 red rows; typecheck 0, build clean, 23/23 verify scripts green. **Not committed** |
+
+**BK-49 gates the rest of the W-list.** §7's hard constraint 1: *"Every
+'red-observed' logged before W0 is worthless evidence."* W5, W6, W7, W18, W20 and
+W23–W26 all red-first against this script.
+
+**Any harness reading this script must now read `(exit code, summary line)`.**
+Four terminal states, each with its own code and its own summary: **0** passed,
+**1** checks failed, **2** crashed, **3** `--reset` removed wreckage and ran
+nothing (130 for an interrupt, which now also prints a line). A count of `✗`
+markers is not a valid measurement of this script and never was — a crash prints
+none. The summary carries a **check count**, so a truncated run is visible even
+when it exits 0.
+
+**W7 is not what §7 says it is, and the entry there is being corrected.** Scoped
+2026-08-31: the only "Assessment booked" firing is client-side
+(`booking-handoff.ts:118-137` → `BookingConfirmation.svelte:100`), reached only
+after `?session_id=cs_…` is parsed off the URL, and `booking-confirmation.ts:212-214`
+prohibits inventing a server-side path. **No click identifier is captured
+anywhere** — `gclid|gbraid|wbraid` has zero capture sites, `booking-commit.ts:88-101`
+writes 19 columns and none is attribution, and migrations 002–011 add none. So
+offline conversion import is impossible until capture is built, and **recovers
+none of the ~20 historical Interac payments ever.** Floor is three Reviewed
+tickets (capture → guarded emit → upload/credential), not the wiring fix §7
+describes. **Consequence for sequencing that is the user's to take, not
+planning's:** §7's constraint 6 defers W20/W21 behind W7 settling — if W7 is a
+three-ticket arc, that constraint unblocks W20/W21 *sooner*, not later.
 
 ## Open questions for the client
 

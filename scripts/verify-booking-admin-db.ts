@@ -156,6 +156,54 @@ const NOW = new Date('2026-08-20T15:00:00.000Z');
 const LATER = new Date('2026-08-21T15:00:00.000Z');
 const POLICY = 'POLICYSENTINEL-77Q';
 const CLAIM = 'CLAIMSENTINEL-42Z';
+
+/**
+ * PER-RUN PROBE IDENTITY (BK-49).
+ *
+ * Every `stripe_session_id` this file plants used to be a FIXED literal, and
+ * `appointments_stripe_session_idx` is `UNIQUE (stripe_session_id) WHERE
+ * stripe_session_id IS NOT NULL` (migration 010). So a run killed before its
+ * `finally` stranded a row whose id the NEXT run would try to plant again —
+ * error 23505, thrown mid-flight, killing that run too. It surfaced as a stack
+ * trace among the expected error logs rather than as a failed check, and
+ * because a crashed script prints no `✗`, a red-first harness counting failure
+ * markers read it as a PASS. That is how one of BK-33's red rows was logged
+ * green while BK-44's 192-transition matrix never executed at all.
+ *
+ * Deriving them per run removes the collision at the source: two runs cannot
+ * plant the same id even if the first one's rows are still lying there. The
+ * suffix is greppable on purpose — `cs_test_webhook_<run>_1` still says what it
+ * is — and wall-clock is sufficient because the shared slot pool already
+ * forbids two concurrent runs against one branch.
+ */
+const RUN = Date.now().toString(36);
+const sessionId = (name: string) => `cs_test_${name}_${RUN}`;
+
+/**
+ * THE NAMES OF EVERY ROW THIS FILE SEEDS THROUGH A PATH THAT WRITES NO
+ * `admin_notes` (BK-49).
+ *
+ * `cleanup()` matches on `admin_notes LIKE MARKER%` OR `id = ANY(createdIds)`.
+ * On the PRE-RUN sweep `createdIds` is empty by construction, so only the notes
+ * arm is live — and these rows carry no notes, so that sweep could not see the
+ * very leftovers its own comment says it exists to clear. 22 of them were found
+ * sitting on the dev branch on 2026-08-31, from at least two interrupted runs,
+ * and a full suite still reported `0 seeded row(s) survived cleanup`.
+ *
+ * Two things changed. The seeds below now write MARKER, so NEW rows are always
+ * reachable. And this list lets `--reset` clear the LEGACY wreckage, which
+ * carries neither a marker nor an id any live process remembers.
+ */
+const PROBE_NAMES = [
+  'MarkPaid Probe',
+  'Elapsed Probe',
+  'Order Probe',
+  'Reapprove Probe',
+  'Goodwill Probe',
+  'BK33 Probe',
+  'BK44 Probe',
+] as const;
+
 /** Every appointment this run creates, so cleanup does not depend on the notes surviving. */
 const createdIds: number[] = [];
 /** Every blackout day this run touches. */
@@ -187,7 +235,23 @@ const createdLeadIds: number[] = [];
 const SEND_NOW = new Date('2026-08-19T12:00:00.000Z');
 
 let failures = 0;
+/**
+ * HOW MANY CHECKS ACTUALLY RAN (BK-49).
+ *
+ * A crash used to be indistinguishable from a failure: both exited 1, and a
+ * crash printed NEITHER summary line, so `grep -c "✗"` returned 0 and a
+ * red-first harness read it as "the assertion did not go red". That is how a
+ * BK-33 red row was logged green while BK-44's 192-transition matrix never
+ * executed at all — the measurement failed in the direction that hides a
+ * missing pin.
+ *
+ * Counting the checks is what makes a truncated run visible even when it
+ * exits cleanly: a crash at 5% and a crash at 95% are otherwise identical to
+ * anything a harness can read, and so is a pass.
+ */
+let checksRun = 0;
 function check(condition: boolean, message: string) {
+  checksRun++;
   if (!condition) {
     console.error(`  ✗ ${message}`);
     failures++;
@@ -259,7 +323,10 @@ async function statusOf(id: number): Promise<string | undefined> {
 
 async function seedAwaitingPayment(
   totalCents: number,
-  sessionId: string | null = null,
+  // Renamed off `sessionId` in BK-49: that is now a module-level helper, and a
+  // parameter shadowing it inside the one function that plants session ids is
+  // exactly the confusion the helper exists to remove.
+  session: string | null = null,
 ): Promise<number> {
   const slot = await freeProbeSlot();
   const inserted = (await sql`
@@ -267,11 +334,11 @@ async function seedAwaitingPayment(
                               slot_start, status, assessment_tier, payment_status,
                               approved_at, assessment_amount_cents, travel_fee_cents,
                               gst_cents, total_amount_cents, payment_due_at,
-                              stripe_session_id)
+                              stripe_session_id, admin_notes)
     VALUES ('MarkPaid Probe', '780-555-0142', 'markpaid@example.com', 'water', '9 Paid Ave',
             'private', ${slot.toISOString()}, 'approved_awaiting_payment', 'standard',
             'pending', ${new Date().toISOString()}, 39900, 0, 1995, ${totalCents},
-            ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${sessionId})
+            ${new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()}, ${session}, ${MARKER})
     RETURNING id
   `) as { id: number }[];
   createdIds.push(inserted[0].id);
@@ -426,14 +493,120 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       console.error(`\n${signal} received — cleaning up seeded rows first.`);
       await cleanup().catch(() => {});
     }
+    // A FOURTH TERMINAL STATE, AND IT GETS A SUMMARY LINE TOO (BK-49 review).
+    // The rule this ticket adds is that every exit says how far it got; an
+    // interrupt that printed nothing would leave the one case that STRANDS
+    // rows as the only silent one.
+    console.error(`\n✗ INTERRUPTED (${signal}) after ${checksRun} check(s) — ${failures} had failed\n`);
     process.exit(130);
   });
 }
 
 // Leftovers from an interrupted earlier run would make the first insert report
 // a taken slot, which reads as a failure of this run rather than of that one.
-await cleanup().catch(() => ({ appointments: 0, blackouts: 0, files: 0, leads: 0 }));
+//
+// BK-49 review S5: a THREE-ATTEMPT failure in here used to be swallowed into
+// zeros with no marker, and the run carried on. The flag is read by the abort
+// below, so a delete that failed cannot present as a table that was clean.
+let preSweepFailed = false;
+await cleanup().catch((err) => {
+  preSweepFailed = true;
+  console.error('  pre-run cleanup FAILED — treating the branch as dirty:', err);
+  return { appointments: 0, blackouts: 0, files: 0, leads: 0 };
+});
+
+/**
+ * THE SWEEP ABOVE CANNOT SEE WHAT AN INTERRUPTED RUN LEFT, AND SAID IT COULD
+ * (BK-49).
+ *
+ * `cleanup()` matches `id = ANY(createdIds)` OR `admin_notes LIKE MARKER%`. On
+ * THIS pass `createdIds` is empty by construction — nothing has been created
+ * yet — so only the notes arm is live. Every probe row seeded through a path
+ * that wrote no notes was therefore invisible to the one sweep whose entire
+ * purpose is clearing the previous run's wreckage.
+ *
+ * The seeds now all write MARKER, so rows made from here on are reachable. This
+ * block is about the rows made BEFORE that fix, and about proving the property
+ * rather than assuming it: it counts what is actually there and REFUSES TO RUN
+ * if anything is, instead of running on top of it and reporting green.
+ *
+ * That direction matters. On 2026-08-31 this branch held 34 stranded rows from
+ * two interrupted runs; a full suite ran, passed, printed
+ * `0 seeded row(s) survived cleanup`, and left all 34 in place. The leftover
+ * check at the end reads the same predicate `cleanup()` deletes by, so a row
+ * the sweep cannot see is a row that check cannot count — both sides move
+ * together, which is this repo's "assertion that cannot fail" family, eighth
+ * instance. Counting by NAME here is what makes this one able to fail.
+ *
+ * The `admin_notes` arm is here too (BK-49 review S5) and is NOT a co-moving
+ * predicate: it runs AFTER the delete, so it detects a delete that FAILED
+ * rather than sharing the delete's blind spot. Post-fix wreckage always carries
+ * MARKER and may carry no probe name, so without this arm a failed pre-sweep
+ * would leave rows that neither the delete nor the abort could see.
+ */
+const strays = (await sql`
+  SELECT id, name, status FROM appointments
+  WHERE name = ANY(${[...PROBE_NAMES]}::text[])
+     OR name LIKE ${`${MARKER}%`}
+     OR admin_notes LIKE ${`${MARKER}%`}
+     OR stripe_session_id LIKE 'cs_test_%'
+  ORDER BY id
+`) as { id: number; name: string; status: string }[];
+
+if (preSweepFailed && strays.length === 0) {
+  console.error('\n✗ pre-run cleanup failed and the branch cannot be shown clean. Refusing.\n');
+  process.exit(1);
+}
+
+if (strays.length > 0) {
+  if (process.argv.includes('--reset')) {
+    const gone = (await sql`
+      DELETE FROM appointments
+      WHERE name = ANY(${[...PROBE_NAMES]}::text[])
+         OR name LIKE ${`${MARKER}%`}
+         OR admin_notes LIKE ${`${MARKER}%`}
+         OR stripe_session_id LIKE 'cs_test_%'
+      RETURNING id, name, status
+    `) as { id: number; name: string; status: string }[];
+    // Every deleted row is named, not counted (BK-49 review S4). This is the
+    // DESTRUCTIVE path; it must be at least as legible as the abort below,
+    // which lists every row it refuses over. `cs_test_%` also matches a real
+    // dev-branch booking taken through Stripe TEST-MODE Checkout — the
+    // dev-branch guard at the top of this file is what bounds the blast radius
+    // to dev, and printing each row is what makes an unwanted match visible.
+    console.log(`\n--reset: removed ${gone.length} stranded probe row(s):\n`);
+    for (const r of gone) console.log(`      #${r.id}  ${r.name}  (${r.status})`);
+    // EXIT 3, NOT 0. A reset runs ZERO checks, and 0 is the code for "a full
+    // run passed" — a harness reading the exit code alone would otherwise read
+    // a destructive no-op as a green suite, which is this ticket's own defect
+    // wearing a different hat.
+    console.log('\n  Re-run without --reset.\n');
+    process.exit(3);
+  }
+  console.error(`\n✗ ${strays.length} stranded probe row(s) from an earlier interrupted run:\n`);
+  for (const r of strays) console.error(`      #${r.id}  ${r.name}  (${r.status})`);
+  console.error(
+    `\n  These are invisible to cleanup() and they poison this run: rows in a
+  slot-holding status consume the shared slot pool, and an overdue
+  approved_awaiting_payment row inflates the global expiry sweep's count.
+  Refusing to run rather than reporting a result computed on top of them.
+
+      npm run verify:booking:admin:db -- --reset\n`,
+  );
+  process.exit(1);
+}
+
 seeded = true;
+
+/**
+ * Set by the catch below; read by the terminal block at the end of the file.
+ *
+ * TWO VARIABLES ON PURPOSE. `crashed` carries the thrown value for printing;
+ * `didCrash` is what every branch tests, because a thrown `null`/`undefined` is
+ * still a crash and testing the value would read it as a clean run.
+ */
+let crashed: unknown = null;
+let didCrash = false;
 
 try {
   // -------------------------------------------------------------------------
@@ -1550,6 +1723,8 @@ try {
   const openDay = await findOpenDay();
   if (!openDay) {
     console.error('  ✗ no open day in the current 14-day window — cannot run the blackout check.');
+    // Counted, so `N failed of M run` never reports a failure outside the M.
+    checksRun++;
     failures++;
   } else {
     touchedDays.push(openDay);
@@ -1834,9 +2009,9 @@ try {
       const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
       const inserted = (await sql`
         INSERT INTO appointments (name, phone, email, service, address, payment_route,
-                                  slot_start, status, assessment_tier)
+                                  slot_start, status, assessment_tier, admin_notes)
         VALUES ('Elapsed Probe', '780-555-0199', 'elapsed@example.com', 'water', '1 Past St',
-                'private', ${past.toISOString()}, 'pending_review', 'standard')
+                'private', ${past.toISOString()}, 'pending_review', 'standard', ${MARKER})
         RETURNING id
       `) as { id: number }[];
       const elapsedId = inserted[0]?.id;
@@ -2015,6 +2190,12 @@ try {
     // A pending_review request is expired only once its slot is inside
     // slot - PAYMENT_DEADLINE_LEAD_HOURS. Both sides of that boundary, because
     // an off-by-one here either strands requests forever or kills live ones.
+    // BK-49: `admin_notes` carries MARKER, because that is the column
+    // `cleanup()` matches on. It used to live only in `name`, so every row this
+    // seed made was invisible to the pre-run sweep and stranded permanently by
+    // any interrupted run. The office's own note, where there is one, follows
+    // the marker — the arm that reads this column asserts with `.includes`, so
+    // a prefix does not disturb it.
     const seed = async (
       status: string,
       slotAt: Date,
@@ -2028,7 +2209,7 @@ try {
           ${`${MARKER} expiry`}, '780-555-0111', 'expiry@example.com', 'water', '1 Expiry St',
           'private', ${slotAt.toISOString()}, ${status}, 'standard',
           ${extra.paymentDueAt ? extra.paymentDueAt.toISOString() : null},
-          ${extra.notes ?? null}
+          ${extra.notes ? `${MARKER}\n${extra.notes}` : MARKER}
         )
         RETURNING id
       `) as { id: number }[];
@@ -2066,7 +2247,7 @@ try {
     // handler counts it under `sessionsUncancelled`. A non-zero count proves the
     // sweep REACHED Stripe for that row; deleting the loop takes it to zero.
     await sql`
-      UPDATE appointments SET stripe_session_id = ${'cs_test_cronprobe0001'}
+      UPDATE appointments SET stripe_session_id = ${sessionId('cronprobe')}
       WHERE id = ${awaitingOverdue}
     `;
     // A SECOND overdue row with NO session — an approval that fell back to the
@@ -2077,6 +2258,58 @@ try {
     const overdueNoSession = await seed('approved_awaiting_payment', hours(2), {
       paymentDueAt: hours(-1),
     });
+
+    /**
+     * WHAT THE SWEEP WILL FIND THAT IS NOT OURS (BK-49).
+     *
+     * `paymentsExpired` is the cron's BRANCH-WIDE tally, so asserting it equals
+     * 2 is really asserting "this database contains exactly the two overdue
+     * rows this fixture made" — a claim about ambient state, not about the
+     * sweep. It went red with `got 4` on 2026-08-22 because two rows seeded two
+     * days earlier had `payment_due_at` in the FUTURE when the suite last ran
+     * and in the past by the next morning. Nothing changed but the clock.
+     *
+     * And it cured itself: the run that reported it also expired the strays,
+     * and a `payment_expired` row cannot be swept twice — so a re-run went
+     * green and taught nobody anything. "Transient, ignore it" was available
+     * every time and wrong every time.
+     *
+     * Measured immediately before the cron runs, so the equality below is
+     * exact rather than a floor. A floor would have accepted the over-sweep
+     * this arm exists to catch; the per-row pins above and below carry the
+     * "did not touch what it should not" half, and neither is weakened.
+     */
+    const foreignOverdue = (
+      (await sql`
+        SELECT COUNT(*)::int AS n FROM appointments
+        WHERE status = 'approved_awaiting_payment'
+          AND payment_due_at IS NOT NULL
+          AND payment_due_at < now()
+          AND NOT (id = ANY(${createdIds}::int[]))
+      `) as { n: number }[]
+    )[0].n;
+
+    /**
+     * THE SWEEP TAKES `BATCH_SIZE` ROWS AND THIS COUNT DOES NOT (BK-49 review).
+     *
+     * `expire-payments.ts` runs `LIMIT 25`. Past ~23 foreign overdue rows the
+     * equality below becomes unsatisfiable and would redden for the batch cap
+     * rather than for anything about the sweep — a test that breaks for being
+     * right, which is the shape the `requestsExpired` floor two arms up already
+     * avoids.
+     *
+     * Reported as INERT rather than failed, following the pattern
+     * `verify-availability-db.ts` uses for its query-bounds arm. Inert is a
+     * state the reader has to be TOLD about: silently skipping is how an
+     * assertion stops existing.
+     */
+    const batchHeadroom = 25 - 2;
+    const countIsMeaningful = foreignOverdue < batchHeadroom;
+    if (!countIsMeaningful) {
+      console.error(
+        `  ! paymentsExpired count INERT this run — ${foreignOverdue} foreign overdue rows against a batch of 25. The per-row pins below still hold.`,
+      );
+    }
 
     const res = await expiryCron({
       request: new Request('https://example.com/api/cron/expire-payments/', {
@@ -2109,7 +2342,12 @@ try {
       counts.requestsExpired >= 2,
       `at least the two seeded stale requests expired, got ${counts.requestsExpired}`,
     );
-    check(counts.paymentsExpired === 2, `both overdue payments expired, got ${counts.paymentsExpired}`);
+    if (countIsMeaningful) {
+      check(
+        counts.paymentsExpired === 2 + foreignOverdue,
+        `both overdue payments expired, got ${counts.paymentsExpired} against ${2 + foreignOverdue} expected (2 seeded + ${foreignOverdue} pre-existing)`,
+      );
+    }
     check(
       await statusOf(overdueNoSession) === 'payment_expired',
       'including the one that never had a card link',
@@ -2466,7 +2704,7 @@ try {
         amountCents: 41895,
         reference: 'pi_test_happy',
         paymentIntentId: 'pi_test_happy',
-        sessionId: 'cs_test_happy0001',
+        sessionId: sessionId('happy'),
         now: NOW,
       });
       check(outcome === 'confirmed', `a paid session confirms, got "${outcome}"`);
@@ -2541,7 +2779,7 @@ try {
         amountCents: 41895,
         reference: 'pi_test_twice',
         paymentIntentId: 'pi_test_twice',
-        sessionId: 'cs_test_twice0001',
+        sessionId: sessionId('twice'),
         now: NOW,
       });
       const again = await markPaid(sql, id, {
@@ -2549,7 +2787,7 @@ try {
         amountCents: 41895,
         reference: 'pi_test_twice',
         paymentIntentId: 'pi_test_twice',
-        sessionId: 'cs_test_twice0001',
+        sessionId: sessionId('twice'),
         now: NOW,
       });
       check(again === 'already-recorded', `a redelivery is silent, got "${again}"`);
@@ -2580,7 +2818,7 @@ try {
         amountCents: 41895,
         reference: 'pi_test_clash',
         paymentIntentId: 'pi_test_clash',
-        sessionId: 'cs_test_clash0001',
+        sessionId: sessionId('clash'),
         now: NOW,
       });
       check(clash === 'double-pay', `a DIFFERENT payment on a confirmed row is a double pay, got "${clash}"`);
@@ -2618,7 +2856,7 @@ try {
         amountCents: 41895,
         reference: 'pi_test_late',
         paymentIntentId: 'pi_test_late',
-        sessionId: 'cs_test_late00001',
+        sessionId: sessionId('late'),
         now: NOW,
       });
       check(late === 'paid-after-release', `a payment on a released row records, got "${late}"`);
@@ -2768,9 +3006,9 @@ try {
       const slot = await freeProbeSlot();
       const inserted = (await sql`
         INSERT INTO appointments (name, phone, email, service, address, payment_route,
-                                  slot_start, status, assessment_tier)
+                                  slot_start, status, assessment_tier, admin_notes)
         VALUES ('Order Probe', '780-555-0177', 'order@example.com', 'water', '2 Order Rd',
-                'private', ${slot.toISOString()}, 'pending_review', 'standard')
+                'private', ${slot.toISOString()}, 'pending_review', 'standard', ${MARKER})
         RETURNING id
       `) as { id: number }[];
       const orderId = inserted[0].id;
@@ -2883,14 +3121,14 @@ try {
       check(unknown.status === 200, `an unhandled event type answers 200, got ${unknown.status}`);
 
       // ── A REAL PAYMENT CONFIRMS ──────────────────────────────────────────
-      const payId = await seedAwaitingPayment(41895, 'cs_test_webhook00001');
+      const payId = await seedAwaitingPayment(41895, sessionId('webhook1'));
       const payEvent = `evt_pay_${Date.now()}`;
       eventIds.push(payEvent);
       const paid = await post(
         sessionEvent(payId, {
           amount: 41895,
           eventId: payEvent,
-          sessionId: 'cs_test_webhook00001',
+          sessionId: sessionId('webhook1'),
         }),
       );
       check(paid.status === 200, `a paid session answers 200, got ${paid.status}`);
@@ -2901,7 +3139,7 @@ try {
         sessionEvent(payId, {
           amount: 41895,
           eventId: payEvent,
-          sessionId: 'cs_test_webhook00001',
+          sessionId: sessionId('webhook1'),
         }),
       );
       check(replay.status === 200, 'a redelivery answers 200');
@@ -2915,14 +3153,14 @@ try {
       //
       // The stale-link case: a session minted by an earlier approval at a
       // different price. This is the only place it becomes visible.
-      const wrongId = await seedAwaitingPayment(41895, 'cs_test_webhook00002');
+      const wrongId = await seedAwaitingPayment(41895, sessionId('webhook2'));
       const wrongEvent = `evt_wrong_${Date.now()}`;
       eventIds.push(wrongEvent);
       const wrong = await post(
         sessionEvent(wrongId, {
           amount: 39900,
           eventId: wrongEvent,
-          sessionId: 'cs_test_webhook00002',
+          sessionId: sessionId('webhook2'),
         }),
       );
       check(wrong.status === 200, 'a mismatched amount still answers 200 — nothing to retry');
@@ -2951,7 +3189,7 @@ try {
       // Driven by pointing the event at a row that exists and is payable, then
       // making the confirm UPDATE fail — the amount column is dropped from
       // under it for the length of this arm.
-      const failId = await seedAwaitingPayment(41895, 'cs_test_webhook00003');
+      const failId = await seedAwaitingPayment(41895, sessionId('webhook3'));
       const failEvent = `evt_fail_${Date.now()}`;
       eventIds.push(failEvent);
       await sql`ALTER TABLE appointments RENAME COLUMN paid_amount_cents TO paid_amount_cents_tmp`;
@@ -2961,7 +3199,7 @@ try {
           sessionEvent(failId, {
             amount: 41895,
             eventId: failEvent,
-            sessionId: 'cs_test_webhook00003',
+            sessionId: sessionId('webhook3'),
           }),
         );
         failStatus = failed.status;
@@ -2986,7 +3224,7 @@ try {
         sessionEvent(failId, {
           amount: 41895,
           eventId: failEvent,
-          sessionId: 'cs_test_webhook00003',
+          sessionId: sessionId('webhook3'),
         }),
       );
       check(recovered.status === 200, "Stripe's retry answers 200");
@@ -3027,10 +3265,11 @@ try {
     const slot = await freeProbeSlot();
     const inserted = (await sql`
       INSERT INTO appointments (name, phone, email, service, address, payment_route,
-                                slot_start, status, assessment_tier, stripe_session_id)
+                                slot_start, status, assessment_tier, stripe_session_id,
+                                admin_notes)
       VALUES ('Reapprove Probe', '780-555-0166', 'reapprove@example.com', 'water', '4 Again St',
               'private', ${slot.toISOString()}, 'pending_review', 'standard',
-              ${'cs_test_stale000000001'})
+              ${sessionId('stale')}, ${MARKER})
       RETURNING id
     `) as { id: number }[];
     const againId = inserted[0].id;
@@ -3063,7 +3302,7 @@ try {
       'and the un-expirable session is FLAGGED rather than silently left behind',
     );
     check(
-      (row[0].needs_attention as string).includes('cs_test_stale000000001'),
+      (row[0].needs_attention as string).includes(sessionId('stale')),
       'naming the session id, so the office can actually go and close it',
     );
   }
@@ -3075,9 +3314,9 @@ try {
     const slot = await freeProbeSlot();
     const inserted = (await sql`
       INSERT INTO appointments (name, phone, email, service, address, payment_route,
-                                slot_start, status, assessment_tier)
+                                slot_start, status, assessment_tier, admin_notes)
       VALUES ('Goodwill Probe', '780-555-0188', 'goodwill@example.com', 'water', '3 Free Ln',
-              'private', ${slot.toISOString()}, 'pending_review', 'standard')
+              'private', ${slot.toISOString()}, 'pending_review', 'standard', ${MARKER})
       RETURNING id
     `) as { id: number }[];
     const freeId = inserted[0].id;
@@ -4105,7 +4344,7 @@ console.log('\nBK-33 — refunds: the money, the claim, and the two records');
     {
       const stale = await seedAt('approved_awaiting_payment', {
         paid: true,
-        session: 'cs_test_bk44_stale',
+        session: sessionId('bk44_stale'),
       });
       for (const target of INVITE_HOLDING_STATUSES) {
         const location = await call(updateRoute, { id: String(stale), status: target });
@@ -4123,7 +4362,7 @@ console.log('\nBK-33 — refunds: the money, the claim, and the two records');
 
     // ── `rollBack`'s rule, applied to the editor ───────────────────────────
     {
-      const live = await seedAt('approved_awaiting_payment', { session: 'cs_test_bk44_live' });
+      const live = await seedAt('approved_awaiting_payment', { session: sessionId('bk44_live') });
       let location = await call(updateRoute, { id: String(live), status: 'pending_review' });
       check(
         location.includes('saved=blocked') && (await stateOf(live)).status === 'approved_awaiting_payment',
@@ -4372,27 +4611,57 @@ console.log('\nBK-33 — refunds: the money, the claim, and the two records');
     }
   }
 
+} catch (err) {
+  // Caught rather than rethrown so the `finally` below still cleans up AND the
+  // terminal block below still gets to speak. Rethrowing exited 1 with no
+  // summary at all, which is the whole defect (BK-49).
+  //
+  // THE FLAG, NOT THE VALUE, IS WHAT THE TERMINAL BLOCK READS (review S2).
+  // `throw null`, `throw undefined` and a bare `Promise.reject()` all leave
+  // `crashed` FALSY — so branching on the value alone would have swallowed the
+  // error and exited 0 GREEN, where the unfixed script at least exited 1. A fix
+  // that turns a loud failure into a silent pass is worse than the defect.
+  didCrash = true;
+  crashed = err;
 } finally {
-  const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1, leads: -1 }));
-  seeded = false;
-  console.log(
-    `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s), ${removed.files} file row(s), ${removed.leads} lead row(s)`,
-  );
-  const left = (await sql`
-    SELECT
-      (SELECT COUNT(*)::int FROM appointments
-        WHERE id = ANY(${createdIds}::int[]) OR admin_notes LIKE ${`${MARKER}%`}) AS appointments,
-      (SELECT COUNT(*)::int FROM blackout_dates
-        WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}) AS blackouts,
-      (SELECT COUNT(*)::int FROM appointment_files
-        WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}) AS files,
-      (SELECT COUNT(*)::int FROM leads
-        WHERE id = ANY(${createdLeadIds}::int[]) OR name LIKE ${`${LEAD_MARKER}%`}) AS leads
-  `) as { appointments: number; blackouts: number; files: number; leads: number }[];
-  const stillThere = left[0].appointments + left[0].blackouts + left[0].files + left[0].leads;
-  if (stillThere > 0) {
-    console.error(`  ✗ ${stillThere} seeded row(s) survived cleanup — remove them manually.`);
-    failures++;
+  // EVERY STATEMENT IN HERE CAN THROW, AND ONE THAT DID USED TO ESCAPE BOTH THE
+  // CATCH ABOVE AND THE TERMINAL BLOCK BELOW (review S3) — taking the recorded
+  // crash with it and exiting 1 with no summary, which is precisely the defect
+  // this ticket exists to remove, reappearing on the crash path it was added
+  // for. The leftover query runs immediately after a crash, which is exactly
+  // when the schema may be mid-mutation, so this is the likely case rather than
+  // the theoretical one.
+  try {
+    const removed = await cleanup().catch(() => ({ appointments: -1, blackouts: -1, files: -1, leads: -1 }));
+    seeded = false;
+    console.log(
+      `\n  cleaned up ${removed.appointments} appointment row(s), ${removed.blackouts} blackout row(s), ${removed.files} file row(s), ${removed.leads} lead row(s)`,
+    );
+    const left = (await sql`
+      SELECT
+        (SELECT COUNT(*)::int FROM appointments
+          WHERE id = ANY(${createdIds}::int[]) OR admin_notes LIKE ${`${MARKER}%`}) AS appointments,
+        (SELECT COUNT(*)::int FROM blackout_dates
+          WHERE day = ANY(${touchedDays}::date[]) OR reason LIKE ${`${MARKER}%`}) AS blackouts,
+        (SELECT COUNT(*)::int FROM appointment_files
+          WHERE id = ANY(${createdFileIds}::int[]) OR pathname LIKE ${`${FILE_PREFIX}%`}) AS files,
+        (SELECT COUNT(*)::int FROM leads
+          WHERE id = ANY(${createdLeadIds}::int[]) OR name LIKE ${`${LEAD_MARKER}%`}) AS leads
+    `) as { appointments: number; blackouts: number; files: number; leads: number }[];
+    const stillThere = left[0].appointments + left[0].blackouts + left[0].files + left[0].leads;
+    if (stillThere > 0) {
+      console.error(`  ✗ ${stillThere} seeded row(s) survived cleanup — remove them manually.`);
+      // Counted as a check so `N failed of M run` cannot report a failure that
+      // is not among the M (review nit).
+      checksRun++;
+      failures++;
+    }
+  } catch (err) {
+    console.error('  ✗ the cleanup/leftover block itself threw:', err);
+    if (!didCrash) {
+      didCrash = true;
+      crashed = err;
+    }
   }
 }
 
@@ -4420,8 +4689,25 @@ async function dayIsOffered(day: string): Promise<boolean> {
   return (body.dates.find((d) => d.date === day)?.slots.length ?? 0) > 0;
 }
 
+/**
+ * THREE TERMINAL STATES, EACH WITH ITS OWN EXIT CODE AND ITS OWN SUMMARY LINE
+ * (BK-49). 0 = passed, 1 = checks failed, 2 = crashed.
+ *
+ * A red-first check reads the EXIT CODE and this SUMMARY LINE. It must never
+ * read a count of `✗` markers: a crash prints none, so a marker count reports
+ * a truncated run as a clean one — reassuringly, and wrongly.
+ */
+if (didCrash) {
+  console.error(crashed);
+  console.error(
+    `\n✗ CRASHED after ${checksRun} check${checksRun === 1 ? '' : 's'} (${failures} had already failed)\n`,
+  );
+  process.exit(2);
+}
 if (failures > 0) {
-  console.error(`\n✗ ${failures} check${failures === 1 ? '' : 's'} failed\n`);
+  console.error(
+    `\n✗ ${failures} check${failures === 1 ? '' : 's'} failed of ${checksRun} run\n`,
+  );
   process.exit(1);
 }
-console.log('\n✓ admin write-path checks passed\n');
+console.log(`\n✓ admin write-path checks passed (${checksRun} checks)\n`);
