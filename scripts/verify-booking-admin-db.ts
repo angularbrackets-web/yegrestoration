@@ -186,7 +186,7 @@ const sessionId = (name: string) => `cs_test_${name}_${RUN}`;
  * `cleanup()` matches on `admin_notes LIKE MARKER%` OR `id = ANY(createdIds)`.
  * On the PRE-RUN sweep `createdIds` is empty by construction, so only the notes
  * arm is live — and these rows carry no notes, so that sweep could not see the
- * very leftovers its own comment says it exists to clear. 22 of them were found
+ * very leftovers its own comment says it exists to clear. 34 of them were found
  * sitting on the dev branch on 2026-08-31, from at least two interrupted runs,
  * and a full suite still reported `0 seeded row(s) survived cleanup`.
  *
@@ -3460,8 +3460,14 @@ console.log('\nBK-33 — refunds: the money, the claim, and the two records');
     const slot = await freeProbeSlot();
     const now = new Date().toISOString();
     refundProbe++;
-    const session = `cs_test_bk33_${refundProbe}`;
-    const intent = opts.intent === undefined ? `pi_test_bk33_${refundProbe}` : opts.intent;
+    // BK-49: `refundProbe` restarts at 0 every run, so these were FIXED across
+    // runs despite looking derived — `cs_test_bk33_1` every time. They carry
+    // MARKER and are swept on a clean exit, but a killed run stranded them and
+    // the next run then collided on `appointments_stripe_session_idx`, which is
+    // the whole defect. The counter keeps arms distinct WITHIN a run; RUN keeps
+    // them distinct BETWEEN runs. Both are needed.
+    const session = sessionId(`bk33_${refundProbe}`);
+    const intent = opts.intent === undefined ? `pi_test_bk33_${refundProbe}_${RUN}` : opts.intent;
     const inserted = (await sql`
       INSERT INTO appointments (name, phone, email, service, address, payment_route,
                                 slot_start, status, pipeline_stage, admin_notes,

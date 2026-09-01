@@ -71,10 +71,17 @@ real receipt — **`#38` was Interac, so no Stripe receipt exists**; whether the
 
 ## Safe to do now
 
-**§7's W-list, in order.** Start with **W0** — the admin verify script is not
-idempotent, so **every red-first gate below it produces worthless evidence until
-it is fixed.** Then the read-only health checks (W2 GBP, W3 Ads Policy Manager),
-then instrumentation (W5–W7), then compliance, then the surface defects.
+**§7's W-list, in order. W0 IS DONE** — BK-49, committed `22418dc` 2026-08-31.
+Do not re-do it. Its consequence for everything below: **`verify-booking-admin-db.ts`
+is now measured by `(exit code, summary line)` and never by a count of `✗`
+markers** — 0 passed, 1 failed *or* aborted on wreckage *or* refused a dirty
+pre-sweep, 2 crashed, 3 `--reset` ran nothing, 130 interrupted. **Exit 1 is
+overloaded**, so a red-first must read the summary line to tell a genuine red
+from an abort. Clear stranded rows with
+`npm run verify:booking:admin:db -- --reset`.
+
+Next: the read-only health checks (W2 GBP, W3 Ads Policy Manager), then
+instrumentation (W5–W7), then compliance, then the surface defects.
 
 ## Blocked, and on what
 
@@ -1296,7 +1303,11 @@ explanation is true is in §7B, not here.
 
 ### Hard constraints — read before ordering anything
 
-1. **W0 precedes every red-first gate in this list.** W5–W7, W18, W20 and W23–W26
+1. **W0 precedes every red-first gate in this list — DISCHARGED, and SCOPED.**
+   This constraint applies to red-first evidence taken **against
+   `verify-booking-admin-db.ts`**, which is what the sentence below is about.
+   Read unqualified it would void every red row in the repository, which is not
+   what it means and not what anyone checked. W5–W7, W18, W20 and W23–W26
    all red-first against `verify-booking-admin-db.ts`, whose fixture strands rows
    on any interrupted run and then crashes the next one **silently** — CLAUDE.md's
    crashed-script trap, failing in the reassuring direction. **Every "red-observed"
@@ -1333,10 +1344,13 @@ explanation is true is in §7B, not here.
       database, both exiting 0 and both printing the summary line — **never a
       marker count.**
 
-      **BK-49, reviewed 2026-08-31** (0 blockers / 5 should-fix / 6 nits, all
-      resolved); 8 red rows; typecheck 0, build clean, 23/23 verify scripts
-      green. **NOT COMMITTED — the box stays unticked.** Four corrections to this
-      item as written:
+      **DONE — BK-49, committed `22418dc` on 2026-08-31** (implementation review
+      0 blockers / 5 should-fix / 6 nits, all resolved); 8 red rows; typecheck 0,
+      build clean, 23/23 verify scripts green. **Committed, not pushed** — no
+      production code, so it rides with the next release. **The box is left
+      unticked deliberately: this file's own rule is that a box is read by its
+      body, and the body below is what a next session must act on.** Four
+      corrections to this item as written:
 
       1. **One fixed literal was named; there are nine**, and the collision is
          only the third-worst of the five findings.

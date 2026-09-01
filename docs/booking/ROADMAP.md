@@ -7,13 +7,26 @@
 > **`docs/booking/CONVERSION-2026-08-31.md`**.
 > Six conclusions were asserted and withdrawn in one day; that file names them so
 > you do not pick one up again. The work to do now is its **W0–W27
-> cause-independent list**, in order — **W0 first**, because
-> `verify-booking-admin-db.ts` is not idempotent and every red-first gate before
-> it produces worthless evidence.
-> **This ROADMAP's BK-44 Known-traps entry is STALE** — it says "fixed in code,
-> not yet deployed"; it shipped in `6ff41e2`. And `#37`'s provenance is no longer
-> unknown: the job was completed and paid twice, against a row that reads
-> `declined`.
+> cause-independent list**, in order.
+>
+> **W0 IS DONE — BK-49, committed `22418dc` 2026-08-31. Do not re-do it.** The
+> consequence for every gate below it: `verify-booking-admin-db.ts` is measured
+> by **`(exit code, summary line)`**, never by a count of `✗` markers. **Exit 1
+> is overloaded** — checks failed, *or* the run aborted on stranded rows, *or*
+> the pre-sweep failed — so read the summary line before scoring a red. Clear
+> wreckage with `npm run verify:booking:admin:db -- --reset` (which exits **3**,
+> having run nothing).
+>
+> **NEXT: W16 and W17.** W16 is bigger than §7 says. **The BK-44 "not yet
+> deployed" claim is STALE IN FOUR PLACES, not one** — `:285`, `:290`, `:2041`,
+> and `:2135` (which carries it for BK-45 "alongside BK-44"). It shipped in
+> **`7114aa5`** (+ addendum `77ad0f6`); `6ff41e2` is the *rollout documentation*
+> commit, not the code, and this block said otherwise until 2026-09-01. This
+> document already records the deploy correctly at `:2238`, so its two halves
+> contradict each other. **Grep the claim, not the entry** — CLAUDE.md's
+> copy-inventory trap, and this is an instance of it.
+> `#37`'s provenance is also still wrong at `:123-126`: the job was **completed**
+> and paid **Aug 25 and Aug 30**, against a row that reads `declined`.
 
 Self-service appointment booking. It replaces the contact form **as the quote
 path** — the form itself survives, demoted to a general "send us a message"
