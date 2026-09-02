@@ -25,15 +25,34 @@ Dropping prepay may still be right — but it is not a fix for the collapse, and
 must not be sold to the client as one, or September will disappoint with no
 explanation available.
 
-### The second fact, which changes the shape of the work
+### The second fact — ~~as first written~~ CORRECTED 2026-09-01
 
-`booking-payment.ts:629` is the **only** place in the codebase that writes
-`status = 'confirmed'`, and it sits inside `markPaid`. **Today the office
-physically cannot confirm a booking by hand.**
+~~`booking-payment.ts:629` is the only place that writes `status = 'confirmed'`,
+so the office physically cannot confirm a booking by hand. This is not "remove a
+guard" — it is "build a confirm decision that does not exist yet".~~
 
-So this is not "remove a guard". It is **"build a confirm decision that does not
-exist yet"**, with the guard relaxed to let it through. That is a feature, not a
-config change.
+**That was wrong, and it was the most expensive error in the first draft of this
+document.** Half of it is true: `booking-payment.ts:629` *is* the only writer of
+`status = 'confirmed'`. The conclusion drawn from it is false.
+
+**`approveFree` already is the confirm seam** (`review.ts:694-781`). It walks
+`pending_review → approved_awaiting_payment → confirmed` in a single POST by
+calling `markPaid(…, { method: 'none', amountCents: 0 })`, and `review.ts:301`
+routes to it whenever **`totalCents === 0`**. Under "the assessment is free",
+that is *every* approval. The office can hand-confirm today, and has been able to
+since BK-45.
+
+**Consequence: T1 is much smaller than this plan first said.** It is not "build a
+confirm decision" — it is *delete the two gates that stop `approveFree` firing on
+a tier-less row, and change one fallback*. `markPaid('none')` still stamps
+`paid_at`, so `editorMaySetStatus`'s invite-crossing rule is untouched, **BK-44's
+192-transition matrix survives, and the 33 flipped coordinates this document
+predicted do not happen.** The `confirmed_at` migration is also unnecessary —
+`approved_at` and `paid_at` both stamp on the same request.
+
+**The error's shape, recorded because it will recur:** "one function writes X"
+was read as "there is no route to X". A single writer with several callers is
+not a single route. Check the callers before concluding a path does not exist.
 
 ### Two pieces of good news
 
@@ -185,12 +204,46 @@ still produces a request in a hold state. Deleting it is the natural, wrong edit
 
 ---
 
-## Tickets
+## Tickets — REVISED 2026-09-01 after the client's answers
 
-**All Reviewed tier.** Every one touches a public write path, money, concurrency
-or the irreversible. There is no Light-tier work in this change.
+**The client answered:** the assessment is **free** (option a); **all prices come
+off the website** and the customer is quoted after the visit; **flat $150 travel
+fee** outside Edmonton / Spruce Grove / St. Albert / Beaumont / Leduc, disclosed
+at confirmation and **waived if the job goes ahead**; and **no review SLA** —
+"as soon as they can".
 
-**Order: T4 → T5 → T1 → T2 → T3 → T10 → T6 → T7 → T8 → T9 → T11**
+### THE ORDERING BUG IN THE FIRST VERSION OF THIS TABLE
+
+The first order was `T4 → T5 → T1 → T2 → T3 → T10 → T6 → …`, which put **T6
+three tickets after T2**. T2 retires Stripe; T6 moves the Ads conversion off the
+Stripe session. The booking conversion fires **only** on `/book/confirmed/`
+reached with a valid `cs_(test|live)_…` session id, so between T2 and T6 the
+account would have had **no primary conversion at all** — `Request quote` has
+been dark since Aug 11 — while a budget-capped PMax kept spending the full cap.
+**T6 now ships WITH T2 or before it.**
+
+**And T6 is not "small".** The honest new trigger is the office *confirm*, which
+is server-side, and `booking-confirmation.ts:213-217` forbids a server-side
+conversion path. Moving the event to `/book/received/` means **Ads bids on
+requests rather than confirmed bookings** — a measurement-model change, in the
+month the conversion collapse is still unexplained. Two assertions actively
+forbid the fix and must be inverted in the ticket:
+`verify-booking-confirmation.ts:285-287` and `:427-429`.
+
+### Verdicts that CHANGED from the first version (rule-rewrite trap)
+
+| Ticket | Was | Now | Why |
+| --- | --- | --- | --- |
+| **T1** | med, heaviest review, `confirmed_at` migration, 33 flipped matrix coordinates | **small–med, no migration, near-zero flipped coordinates** | `approveFree` already is the confirm seam — see the corrected second fact |
+| **T3** | large | **the largest ticket in the plan** | all pricing dies, not just timing sentences; six pins invert, not two |
+| **T5** | independent, small–med | **a strict subset of T3** — ship separately only to honour one-change-per-week | removing all pricing removes the multiplier by construction |
+| **T6** | small, late | **medium, and a blocker shipping with T2** | see above |
+| **T10** | blocker | **unnecessary if the $150 is disclosure-only; mandatory and the only GST surface if it is collected** | blocked on one client answer |
+| **T11** | med, likely migration | **small, doc-only** | nothing is prepaid, so the forward half is deleted by T3 |
+| Migrations | three | **one** (`office_override`) plus T8's index rebuild | `confirmed_at` not needed |
+
+**Order: T4 → T1 → T2 + T6 (same deploy) → T3 → T7 → T8 → T9 → T13 → T11**
+(T5 foldable into T3; T10 only if T13 = collected.)
 
 | # | Ticket | Size | Migration | Depends |
 | --- | --- | --- | --- | --- |
@@ -222,6 +275,45 @@ live. Building T3 against the wrong answer means writing the largest copy ticket
 twice.
 
 ---
+
+## The $150 travel fee arithmetically breaks the free path
+
+**This is the finding that decides whether T2 can happen at all.**
+`review.ts:301` routes to the free path on **`totalCents === 0`**, and
+`totalCents = base + travel + GST`. A $150 travel fee makes it
+`0 + 15000 + 750 = 15750 ≠ 0`, so the booking **falls through to the paid
+path** — Checkout Session, payment link, 12-hour deadline, expiry cron, the lot.
+
+**Charging the $150 through the booking system resurrects every single thing T2
+exists to retire.** So:
+
+- **Disclosure-only (recommended, and it matches what the client described).**
+  The fee is spoken at confirmation and lands on the office's final invoice,
+  outside this repo. Reuse `travel_fee_cents` as the *disclosed* figure with
+  `total_amount_cents = 0` so the free path still fires — and comment that
+  semantic change loudly, it is the same hazard class as forking the slot
+  predicate. **No migration. T10 unnecessary.**
+- **Collected in-system.** T2 cannot retire Checkout; the Interac mark-paid path
+  must survive as the collection route; and the $150 becomes **the only
+  GST-bearing supply in the system**, making T10 mandatory.
+
+**Nothing tracks "waived because the job went ahead", and nothing should** —
+there is no job, invoice or contract entity in this schema, and the decision
+arrives weeks later from outside every code path here.
+
+**Also: `150` / `15000` appears in zero assertions anywhere in the suite.** The
+new fee has no test coverage of any kind, and neither did the old one — nothing
+reads `TRAVEL_FEE_CENTS_PER_KM` or `TRAVEL_FEE_FREE_RADIUS_KM` outside their own
+definition and one admin hint. **This change reddens nothing; its gate must be
+written from scratch and seen red.**
+
+## A live footgun the changeover must close
+
+`review.ts:225-227`: an **empty** `assessment_amount` field falls back to
+`suggested.baseCents` — the tier price. Under a free assessment, an office
+member who tabs past that field and hits Approve **charges the customer $399 and
+opens a Checkout Session**. The fallback must become `0`, in the same commit
+that makes the assessment free.
 
 ## Blocking questions for the client
 
