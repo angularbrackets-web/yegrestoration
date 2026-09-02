@@ -759,6 +759,167 @@ console.log('\nThe fee terms reach both booking surfaces (BK-27)');
     'and it names the emailed copy a REQUEST, not a confirmation — RECEIVED_EMAILED_LINE, never EMAILED_LINE',
   );
 
+  // ── BK-50 · THE TIMING LINE, ON THE CARD, IN THE RIGHT PLACE ────────────
+  //
+  // `RECEIVED_TIMING_LINE` — "if you have not heard from us and the appointment
+  // is close, call or text us" — is the customer's ENTIRE recourse once the
+  // client's 2026-09-01 decision removes the stale-request sweep. Nothing
+  // auto-declines, nothing emails; a request nobody reviews goes silent.
+  //
+  // /book/received/ and the request email have always rendered it. This card
+  // did not, and this card is the branch that renders when storeConfirmation()
+  // fails — private browsing, storage pressure — i.e. exactly the visitor who
+  // cannot navigate back to /book/received/ to find the line there.
+  //
+  // SCOPED TO THE CARD, NOT THE FILE, and that is the whole point of the slice.
+  // `islandRaw` is the entire component: the {#if result} card AND the {:else}
+  // form below it. A whole-file check is satisfied by rendering the line on
+  // step 3 of the FORM, leaving the card — the only surface this assertion
+  // exists for — still missing it. Plan review measured the gap at ~20k
+  // characters of the same string.
+  //
+  // And `islandRaw` rather than a raw read, because `stripForUse` removes
+  // import statements: against unstripped source the IMPORT alone satisfies
+  // the check, so deleting the render stays green.
+  const cardAt = islandRaw.indexOf('{#if result}');
+  const formAt = islandRaw.indexOf('{:else}');
+  check(
+    cardAt !== -1 && formAt !== -1 && cardAt < formAt,
+    'the island\'s fallback card is locatable and precedes the form arm — the slice below is real',
+  );
+  const card = cardAt !== -1 && formAt !== -1 ? islandRaw.slice(cardAt, formAt) : '';
+  check(card.length > 0, 'and the card slice is non-empty');
+  check(
+    card.includes('RECEIVED_TIMING_LINE'),
+    'the fallback card renders RECEIVED_TIMING_LINE — once cron sweep 2 is deleted (T1/T2) it is the only thing telling a customer what to do when a request goes unanswered',
+  );
+
+  // ── AND UNCONDITIONALLY. `includes` CANNOT SEE A CONDITIONAL WRAPPER ─────
+  //
+  // Adversarial review moved the line INSIDE the existing
+  // `{#if result.emailSent}` block and every check above stayed green: the
+  // substring is present, and the constant order is unchanged because
+  // EMAILED still precedes TIMING. The suite passed on a card that shows the
+  // line only to the visitor who already has it in their inbox — and hides it
+  // from the one whose email did NOT send, who is precisely the person this
+  // ticket exists for. That break inverts the ticket's own thesis and three
+  // separately-justified scoping fixes could not see it.
+  //
+  // The general lesson, and it is the one this whole block kept re-learning:
+  // slicing fixes WHERE a needle may appear and says nothing about WHAT IT IS
+  // ATTACHED TO. So this walks Svelte block depth and requires the render to
+  // sit at the card's own level.
+  const beforeTiming = card.slice(0, card.indexOf('RECEIVED_TIMING_LINE'));
+  const opens = (beforeTiming.match(/\{#(?:if|each|await|key)\b/g) ?? []).length;
+  const closes = (beforeTiming.match(/\{\/(?:if|each|await|key)\}/g) ?? []).length;
+  // Depth 1, not 0: the slice STARTS at the card's own `{#if result}`, whose
+  // `{/if}` falls outside it. So the card's own level is one open block deep,
+  // and anything nested further is inside a second condition.
+  check(
+    opens === closes + 1,
+    `and it renders UNCONDITIONALLY — at the card's own block level, not nested in a further {#if} (${opens} opened, ${closes} closed before it; expected exactly one unclosed, the card itself). Gated on result.emailSent it would reach only the visitor who already got the email, and hide from the one who did not`,
+  );
+
+  // ── AND IN THE SAME ORDER THE OTHER TWO SURFACES USE ────────────────────
+  //
+  // The expected order is DERIVED from BookingConfirmation.svelte rather than
+  // written out here, so this pin cannot rot into a list that agrees with
+  // nothing. Any pair reshuffled on either surface reddens it.
+  //
+  // BK-50's first draft hard-coded a four-name subset — heading, lead, hold,
+  // timing — which holds in both files under EITHER placement, so it was green
+  // while the two surfaces read differently. The one constant that
+  // distinguishes the layouts is RECEIVED_EMAILED_LINE, and it was the one
+  // omitted. That is BK-48's negative-assertion trap in mirror form: a pin
+  // named for a category, shaped for one case.
+  const confirmation = stripForUse(
+    readFileSync(resolve(root, 'src/components/BookingConfirmation.svelte'), 'utf8'),
+  );
+  const SHARED_RECEIVED_CONSTANTS = [
+    'RECEIVED_HEADING',
+    'RECEIVED_LEAD',
+    'RECEIVED_HOLD_LINE',
+    'RECEIVED_EMAILED_LINE',
+    'RECEIVED_TIMING_LINE',
+  ];
+  const orderIn = (text: string) =>
+    SHARED_RECEIVED_CONSTANTS.filter((name) => text.includes(name)).sort(
+      (a, b) => text.indexOf(a) - text.indexOf(b),
+    );
+  const cardOrder = orderIn(card);
+  const confirmationOrder = orderIn(confirmation);
+  check(
+    confirmationOrder.length === SHARED_RECEIVED_CONSTANTS.length,
+    'BookingConfirmation.svelte renders all five shared request constants — it is the reference order, so a missing one would silently shrink the comparison below',
+  );
+  check(
+    cardOrder.join(' > ') === confirmationOrder.join(' > '),
+    `the card orders the five constants it shares with /book/received/ exactly as that page does (card: ${cardOrder.join(' > ')} | page: ${confirmationOrder.join(' > ')})`,
+  );
+
+  // THE THIRD SURFACE, and it needs its own comparison rather than a mention.
+  //
+  // Implementation review found the shipped comment claiming "the three
+  // surfaces cannot drift apart" when only two were compared. booking-email.ts
+  // renders NO RECEIVED_EMAILED_LINE — it IS the email — so the strict
+  // five-constant sequence above cannot apply to it. Comparing each pair on the
+  // constants they actually SHARE keeps every comparison as strong as its own
+  // overlap allows, instead of weakening all three to the intersection.
+  //
+  // What this catches that nothing did before: the timing line moved above the
+  // hold line in the request email.
+  const email = stripForUse(readFileSync(resolve(root, 'src/lib/booking-email.ts'), 'utf8'));
+  const emailOrder = orderIn(email);
+  const sharedWithEmail = cardOrder.filter((name) => emailOrder.includes(name));
+  check(
+    sharedWithEmail.length >= 4,
+    `the card and the request email share at least four ordered constants (${sharedWithEmail.join(' > ')})`,
+  );
+  check(
+    sharedWithEmail.join(' > ') === emailOrder.filter((n) => cardOrder.includes(n)).join(' > '),
+    `and the card orders them as the request email does (card: ${sharedWithEmail.join(' > ')} | email: ${emailOrder.filter((n) => cardOrder.includes(n)).join(' > ')})`,
+  );
+
+  // BOTH ARMS OF THE EMAIL, NOT JUST THE HTML ONE.
+  //
+  // `orderIn` sorts by FIRST occurrence, and in booking-email.ts that is always
+  // the HTML arm — so the plaintext arm was unreachable by the check above.
+  // Adversarial review swapped hold/timing in the text arm alone and the suite
+  // stayed green: the plaintext request email would have said "if you have not
+  // heard from us" before it said what we are holding.
+  //
+  // Every occurrence is paired instead: the Nth hold line must precede the Nth
+  // timing line, which holds arm by arm however many arms there are.
+  const allOf = (text: string, name: string) => {
+    const out: number[] = [];
+    for (let i = text.indexOf(name); i !== -1; i = text.indexOf(name, i + 1)) out.push(i);
+    return out;
+  };
+  const holds = allOf(email, 'RECEIVED_HOLD_LINE');
+  const timings = allOf(email, 'RECEIVED_TIMING_LINE');
+  check(
+    holds.length === timings.length && holds.length >= 2,
+    `the request email renders the hold and timing lines once per arm (${holds.length} hold, ${timings.length} timing — expected 2 each, html and text)`,
+  );
+  check(
+    holds.length === timings.length && holds.every((h, i) => h < timings[i]),
+    'and in EVERY arm the hold line precedes the timing line — the html arm alone is what a first-occurrence check sees',
+  );
+
+  // RECEIVED_NEXT_STEPS IS DELIBERATELY ABSENT FROM THE CARD AND FROM THE
+  // COMPARISON ABOVE. It renders on the other two surfaces and not here, which
+  // leaves the timing line without the antecedent it has there — a real gap,
+  // found by implementation review. It is NOT closed by adding the list,
+  // because two of its three steps ("we email you to approve it, with a secure
+  // payment link" / "confirmed once that payment goes through") describe the
+  // prepay flow the free-assessment changeover deletes. Adding it here would
+  // put two soon-false sentences on a new surface. Owner: T3, with the rest of
+  // the request copy. Recorded in ROADMAP Known traps.
+  check(
+    !card.includes('RECEIVED_NEXT_STEPS'),
+    'and the card does NOT render RECEIVED_NEXT_STEPS — its steps still describe the prepay flow, and T3 owns rewriting them',
+  );
+
   // NOT a check on `contact.astro`. The first version asserted that file
   // contains no `FEE_TERMS` — which it cannot, since all it renders is
   // `<ContactSection showForm={true} />`; the string could only appear there by

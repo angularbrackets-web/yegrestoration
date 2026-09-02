@@ -1511,6 +1511,228 @@ console.log('\nBK-46 — the page holds no money arithmetic of its own');
   );
 }
 
+// ---------------------------------------------------------------------------
+console.log('\nThe Upcoming table shows the state that now matters (BK-50)');
+// ---------------------------------------------------------------------------
+//
+// WHY EVERY ASSERTION HERE IS SLICED, and it is the whole reason this block is
+// written the way it is.
+//
+// `index.astro` renders TWO tables from the same helpers. The Past one has had
+// a Status column since BK-23, so the file ALREADY CONTAINS every needle the
+// obvious spelling of these checks would use: `>Status<`, `statusClasses(`,
+// `STATUS_LABELS`, and `'pending_review'`. A whole-file `includes` for any of
+// them passes with this ticket UNIMPLEMENTED — and the red-first rows meant to
+// prove these assertions work would have been false reds.
+//
+// Plan review found three of the four in that state. So the source is split at
+// the two section headings first, and every check below runs on ONE side of
+// that split.
+{
+  // Comments stripped, the same idiom this file already uses for the slashed-path
+  // scan above and for the same reason: prose ABOUT a helper is documentation,
+  // not a call. The `pastStatusLabel` check below is a negative, and the JSX
+  // comment that explains why the Upcoming cell must not use it names it — so
+  // an unstripped scan reds on its own explanation. (Observed: it did, on the
+  // first run of this block.)
+  const source = readFileSync(resolve(root, 'src/pages/admin/appointments/index.astro'), 'utf8')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+
+  const upcomingAt = source.indexOf('Upcoming <span');
+  const pastAt = source.indexOf('Past <span');
+
+  // THE SLICE MUST PROVE IT WAS FOUND. `''.includes(x)` is false and
+  // `!''.includes(x)` is true, so a failed extraction turns every positive
+  // check red and every NEGATIVE check vacuously green — the direction that
+  // hides a defect. BK-49's rule: a measurement that cannot show it ran is not
+  // a measurement.
+  check(
+    upcomingAt !== -1 && pastAt !== -1 && upcomingAt < pastAt,
+    'the Upcoming and Past sections are both locatable, in that order — the slice below is real',
+  );
+  const upcoming = upcomingAt !== -1 && pastAt !== -1 ? source.slice(upcomingAt, pastAt) : '';
+  check(upcoming.length > 0, 'and the Upcoming slice is non-empty');
+
+  check(
+    /<th[^>]*>\s*Status\s*<\/th>/.test(upcoming),
+    'the Upcoming table has a Status column — under review-then-confirm a pending_review row is otherwise identical to a confirmed one on the screen the office triages from',
+  );
+  check(
+    upcoming.includes('statusClasses(appointment.status)'),
+    'and the status is rendered as the badge, not bare text — statusClasses carries the amber "waiting on you" meaning the office reads at a glance',
+  );
+  // ON THE SAME ELEMENT. Two independent whole-slice `includes` are satisfied
+  // by a badge rendering the raw `{appointment.status}` and STATUS_LABELS
+  // sitting in a `title=` on a different cell — the office then reads
+  // `approved_awaiting_payment` on screen. Same class as the ordinal defect,
+  // closed for the <td> and left open for the <span> until now.
+  const badge = upcoming.match(/<span[^>]*statusClasses\(appointment\.status\)[^>]*>[\s\S]*?<\/span>/);
+  check(
+    badge !== null && badge[0].includes('STATUS_LABELS[appointment.status]'),
+    'and the badge element itself carries the STATUS_LABELS text — a label elsewhere on the row leaves the raw status rendering in the badge',
+  );
+  // The plausible wrong fix: copy the Past table's cell wholesale. That renders
+  // "Never reviewed" on a request that is merely waiting, and "Elapsed" on a
+  // confirmed visit that has not happened yet.
+  check(
+    !upcoming.includes('pastStatusLabel'),
+    'and NEVER pastStatusLabel — it renames live statuses for rows whose slot has gone, and both renamings are false on an upcoming row',
+  );
+
+  // Header/cell agreement. The column was inserted in two places and nothing
+  // else pins that they agree; a header added without its cell shifts every
+  // column right of it by one.
+  const thead = upcoming.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] ?? '';
+  const tbody = upcoming.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/)?.[1] ?? '';
+  check(thead.length > 0 && tbody.length > 0, 'the Upcoming thead and tbody are both locatable');
+  const headers = thead.match(/<th\b[\s\S]*?<\/th>/g) ?? [];
+  const cells = tbody.match(/<td\b[\s\S]*?<\/td>/g) ?? [];
+  check(
+    headers.length === cells.length,
+    `the Upcoming header and row have the same number of columns (${headers.length} th, ${cells.length} td)`,
+  );
+
+  // AND THE STATUS COLUMN IS IN THE SAME ORDINAL POSITION IN BOTH.
+  //
+  // A count alone does not defend this, and implementation review proved it by
+  // building the wrong version: header between Service and City, cell rendered
+  // LAST after Files. Counts still agreed 9/9, the suite still exited 0 — and
+  // every column from Status rightwards was mislabelled on the screen the
+  // office triages from (Status over City data, City over Route, Route over
+  // Files). C1 states the ordinal as a requirement; nothing was checking it.
+  //
+  // The rendered artifact did not close it either: it recorded the header array
+  // and the badge's text and classes, never which column the badge landed in.
+  const headerIndex = headers.findIndex((h) => /<th[^>]*>\s*Status\s*<\/th>/.test(h));
+  const cellIndex = cells.findIndex((c) => c.includes('statusClasses(appointment.status)'));
+  check(
+    headerIndex !== -1 && cellIndex !== -1 && headerIndex === cellIndex,
+    `the Status header and the status cell are the same column (th #${headerIndex}, td #${cellIndex}) — a matching COUNT with a mismatched position mislabels every column to its right`,
+  );
+
+  // ── THE COUNTER, AND WHY "IT IS COMPUTED" IS NOT ENOUGH ──────────────────
+  //
+  // `tsconfig.json` extends astro/tsconfigs/strict, which sets `strict: true`
+  // and NOT `noUnusedLocals` — that is `strictest`. So a counter computed in
+  // the frontmatter and never rendered typechecks, builds, and satisfies any
+  // check that only looks for the derivation. The client's condition was a
+  // number the office can SEE. Both halves are pinned.
+  const frontmatterEnd = source.indexOf('---', 3);
+  check(frontmatterEnd > 0, 'the frontmatter is locatable');
+  const frontmatter = source.slice(0, frontmatterEnd);
+  const template = source.slice(frontmatterEnd);
+
+  check(
+    /const\s+unreviewedCount\s*=\s*upcoming\s*\.filter\(/.test(frontmatter),
+    'an unreviewed counter is derived from the UPCOMING rows',
+  );
+  // THE OPERATOR, NOT THE PROXIMITY. The first spelling asked only that
+  // `'pending_review'` appear within 120 characters of `unreviewedCount` —
+  // which is equally true of `.filter((a) => a.status !== 'pending_review')`.
+  // Adversarial review flipped it and the suite stayed green, leaving a counter
+  // that reports every upcoming row NOT awaiting review.
+  check(
+    /unreviewedCount\s*=\s*upcoming\s*\.filter\(\s*\(\s*\w+\s*\)\s*=>\s*\w+\.status\s*===\s*'pending_review'\s*\)/.test(
+      frontmatter,
+    ),
+    "and it keys on `=== 'pending_review'` — a proximity check cannot tell === from !==",
+  );
+  check(
+    template.includes('unreviewedCount'),
+    'and it is RENDERED — noUnusedLocals is off, so a counter computed and never shown passes typecheck, build, and the derivation check above',
+  );
+
+  // ── THE SENTENCE ITSELF, AND WHY IT IS PINNED RATHER THAN TRUSTED ────────
+  //
+  // BK-50's plan review made this wording a blocker: the counter's sentence is
+  // the one new string that can be TRUE TODAY AND FALSE LATER. Cron sweep 2 is
+  // still live, so "auto-declined at slot-4h" would be accurate right now — and
+  // would silently become a lie the day T1/T2 deletes the sweep, on an office
+  // screen, with nobody owning it.
+  //
+  // Implementation review then found the obvious hole: the wording had been
+  // specified in the ticket and pinned by NOTHING. A4b is satisfied by any
+  // mention of the identifier, so a later edit to
+  // "{n} upcoming requests — auto-declined at slot-4h" reddened no assertion,
+  // typechecked, and built. That is CLAUDE.md's negative-assertion trap exactly:
+  // a claim added to a surface and not added to any banned list.
+  //
+  // SCOPED TO THE COUNTER'S OWN ELEMENT, not to "the text above the table".
+  //
+  // The first version of this check sliced `source.slice(0, upcomingAt)` and
+  // asserted /text-amber-\d/ over it. That region CONTAINS THE FRONTMATTER, and
+  // `statusClasses` returns 'bg-amber-900/40 text-amber-300 …' two lines into
+  // it — so recolouring the counter to red left the check green. Caught by
+  // red-first, which is the entire reason a colour assertion gets a red row of
+  // its own: the pin was named for the counter and matched the whole file.
+  const counterAt = template.indexOf('{unreviewedCount > 0');
+  const counterEnd = template.indexOf(')}', counterAt);
+  check(
+    counterAt !== -1 && counterEnd > counterAt,
+    'the unreviewed counter renders as its own guarded element — the slice below is real',
+  );
+  const counter = counterAt !== -1 && counterEnd > counterAt ? template.slice(counterAt, counterEnd) : '';
+  check(counter.length > 0, 'and the counter slice is non-empty');
+  // THE NUMBER ON SCREEN, not the identifier somewhere in the block.
+  //
+  // `template.includes('unreviewedCount')` above is satisfied by the GUARD
+  // alone. Adversarial review used that twice: once rendering `{warningCount}`
+  // in the body while the guard still read `unreviewedCount` — so the office
+  // reads the count of never-sent notifications under the words "not yet
+  // reviewed" — and once rendering the word "Some" and no number at all. Both
+  // passed. This block is a structural copy of the `warningCount` block two
+  // lines above it, which is exactly why that substitution is the likely defect
+  // rather than a contrived one.
+  check(
+    /\{\s*unreviewedCount\s*\}/.test(counter),
+    'the counter RENDERS unreviewedCount as its number — the guard expression alone satisfies a bare identifier check, and the sibling warningCount block is one substitution away',
+  );
+  check(
+    !/\{\s*warningCount\b/.test(counter),
+    'and it does not render warningCount — the two counters sit two lines apart and count different things',
+  );
+  check(
+    /class="[^"]*text-amber-\d/.test(counter),
+    'and it is amber, not red — statusClasses reserves amber for "waiting on you" and red for a fault',
+  );
+  // ── A WHITELIST, NOT A BANNED LIST. THIS IS THE THIRD ATTEMPT. ──────────
+  //
+  // The first version banned named shapes — `auto-declin`, `releases the
+  // slot`, `slot-4h`. Adversarial review probed seven natural phrasings of the
+  // same claim and SIX walked through, including the one BK-50's own §C2
+  // prints as forbidden: "the slot is released automatically". The banned
+  // regex wanted the active voice; the ticket's example is passive, and the
+  // two sat one line apart.
+  //
+  // That is CLAUDE.md's negative-assertion trap for the third time in this one
+  // ticket, and the third time inside a pin written to prevent it. A banned
+  // list enumerates the sentences somebody already thought of. The claim here
+  // is not "these phrasings are wrong" — it is "this sentence says a count and
+  // a state and NOTHING ELSE", and that is a whitelist.
+  //
+  // So: strip the tags and the {expressions}, collapse the whitespace, and
+  // require the remaining literal text to be exactly the approved copy. Any
+  // added clause — in any voice, tense or vocabulary — reddens, and the
+  // failure message shows what was added.
+  // The slice opens mid-expression (`{unreviewedCount > 0 && (`), so the guard
+  // is dropped before normalising — it is the condition, not the sentence.
+  const guardEnd = counter.indexOf('&& (');
+  const counterBody = guardEnd === -1 ? counter : counter.slice(guardEnd + 4);
+  const counterText = counterBody
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\{[^{}]*\}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const APPROVED_COUNTER_TEXT = 'upcoming not yet reviewed';
+  check(
+    counterText === APPROVED_COUNTER_TEXT,
+    `the counter says a count and a state and nothing else — got "${counterText}", expected "${APPROVED_COUNTER_TEXT}". Any clause about what happens next is true only while cron sweep 2 lives and becomes an unowned falsehood the day T1/T2 deletes it`,
+  );
+}
+
 // A compile-time tie: if `Appointment` ever loses one of the fields the helpers
 // destructure, this file stops typechecking rather than silently drifting.
 const _shape: Pick<Appointment, 'slot_start' | 'status' | 'source' | 'email'> | null = null;

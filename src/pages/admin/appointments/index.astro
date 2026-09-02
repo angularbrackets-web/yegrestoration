@@ -51,6 +51,25 @@ try {
 
 const { upcoming, past } = partitionAppointments(appointments, new Date());
 const warningCount = upcoming.filter(hasNotificationWarning).length;
+// BK-50. THE SECOND THING THE OFFICE MUST LOOK AT, and it needs its own number.
+//
+// `warningCount` was the only one until this commit. CRON SWEEP 2 IS STILL
+// LIVE while this
+// ships (`vercel.json` */15, expire-payments.ts) — it still declines unanswered
+// requests at slot-4h and still emails the customer. The client's 2026-09-01
+// decision REMOVES that, in T1/T2: once it lands, an unreviewed request holds
+// its slot until a human acts, and if nobody does the slot is simply lost.
+// This count is half of what will replace the sweep — the Status column below
+// is the other half — and both ship FIRST, deliberately, so the deletion never
+// lands on a screen that cannot show what it left behind.
+//
+// UPCOMING ONLY, mirroring `warningCount`. The cost is real and is recorded in
+// the ticket: this number drops to zero the moment the slot passes, which is
+// when the failure completes. The row is not lost — it lands in Past labelled
+// "Never reviewed" — but the counter stops nagging. Whether elapsed requests
+// should keep nagging is a client decision nobody has made, so it is not made
+// here.
+const unreviewedCount = upcoming.filter((a) => a.status === 'pending_review').length;
 
 function serviceLabel(service: string) {
   return SERVICE_LABELS[service] ?? service;
@@ -143,6 +162,25 @@ const savedMessage =
               notification that never sent
             </p>
           )}
+          {/*
+            BK-50. AMBER, NOT RED, and the wording carries NO MECHANISM.
+
+            Amber because `statusClasses` below already establishes it as "this
+            is waiting on you"; red is for faults (`no_show`, and the warning
+            line above). A request awaiting review is not a fault.
+
+            The sentence says a count and a state, and deliberately says nothing
+            about what happens next. Anything of the shape "will be auto-declined
+            at slot-4h" is true today and FALSE the day cron sweep 2 is deleted —
+            an unowned false statement of exactly the kind this ticket refused to
+            create elsewhere. This string survives that deletion untouched.
+          */}
+          {unreviewedCount > 0 && (
+            <p class="text-amber-400 text-sm mt-1">
+              {unreviewedCount} upcoming {unreviewedCount === 1 ? 'request' : 'requests'} not yet
+              reviewed
+            </p>
+          )}
         </div>
         <div class="flex items-center gap-4 shrink-0">
           <span class="text-zinc-600 text-sm">{appointments.length} total</span>
@@ -171,6 +209,19 @@ const savedMessage =
                   <th class="pb-3 pr-6 font-medium">Name</th>
                   <th class="pb-3 pr-6 font-medium">Phone</th>
                   <th class="pb-3 pr-6 font-medium">Service</th>
+                  {/*
+                    BK-50. THE STATUS COLUMN, AND IT BELONGS ON THIS TABLE FIRST.
+
+                    Past has had one since BK-23; Upcoming never did, because
+                    under prepay a request that nobody reviewed was swept out at
+                    slot-4h and never grew old on this screen. The client's
+                    2026-09-01 decision deletes that sweep (T1/T2, not yet
+                    shipped) — after which a `pending_review` row sits here
+                    indefinitely, visually identical to a `confirmed` one on the
+                    only screen the office triages from. This column ships
+                    before the deletion, not with it.
+                  */}
+                  <th class="pb-3 pr-6 font-medium">Status</th>
                   <th class="pb-3 pr-6 font-medium">City</th>
                   <th class="pb-3 pr-6 font-medium">Route</th>
                   <th class="pb-3 pr-6 font-medium">Files</th>
@@ -229,6 +280,24 @@ const savedMessage =
                         </a>
                       </td>
                       <td class="py-3.5 pr-6">{serviceLabel(appointment.service)}</td>
+                      {/*
+                        `STATUS_LABELS`, NEVER `pastStatusLabel`. That helper
+                        renames live statuses for rows whose slot has gone —
+                        `confirmed` becomes "Elapsed", `pending_review` becomes
+                        "Never reviewed". Both are false on an upcoming row: it
+                        has not been missed, it is waiting. Copying the Past
+                        table wholesale is the plausible wrong fix here.
+
+                        No link in this cell. `verify-booking-admin.ts` scans
+                        admin pages for `.url`/`.pathname` (the BK-09 Blob-leak
+                        pin), and a status cell given a link is the one way this
+                        column could trip it.
+                      */}
+                      <td class="py-3.5 pr-6 whitespace-nowrap">
+                        <span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${statusClasses(appointment.status)}`}>
+                          {STATUS_LABELS[appointment.status]}
+                        </span>
+                      </td>
                       <td class="py-3.5 pr-6">{appointment.city}</td>
                       <td class="py-3.5 pr-6">
                         <span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${

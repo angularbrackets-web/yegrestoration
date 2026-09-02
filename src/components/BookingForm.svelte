@@ -46,6 +46,7 @@
     RECEIVED_HEADING,
     RECEIVED_HOLD_LINE,
     RECEIVED_LEAD,
+    RECEIVED_TIMING_LINE,
   } from '../lib/booking-copy';
   import {
     reportBookingFunnelEvent,
@@ -703,6 +704,44 @@
       {#if result.emailSent}
         <p class="text-yeg-text-secondary text-sm mt-2">{RECEIVED_EMAILED_LINE}</p>
       {/if}
+      <!--
+        BK-50. THE CUSTOMER'S ENTIRE SAFETY NET, AND THIS CARD WAS THE ONE
+        SURFACE OF THREE THAT OMITTED IT.
+
+        `/book/received/` and the request email both render
+        `RECEIVED_TIMING_LINE`; this card did not. That matters less TODAY,
+        while cron sweep 2 is still live — it declines unanswered requests at
+        slot-4h and emails the customer about it. The client's 2026-09-01
+        decision removes that, in T1/T2: after it lands nothing sweeps and
+        nothing emails, and a request nobody reviews goes silent, permanently.
+        This line is then the only thing telling the customer what to do about
+        it, which is why it ships BEFORE the deletion rather than with it.
+
+        And this is the surface where it matters most: this branch renders when
+        `storeConfirmation()` fails, which is private-browsing and storage
+        pressure — a visitor who CANNOT navigate back and re-read
+        /book/received/ to find the line there.
+
+        LAST IN THE CARD, and the position is load-bearing rather than
+        cosmetic. Both siblings close their REQUEST BLOCK with it — and the
+        two do so after DIFFERENT things, which is why this sentence has now
+        been wrong twice. BookingConfirmation.svelte puts it after the
+        reference AND the emailed line, then continues into the have-ready box.
+        booking-email.ts renders no emailed line at all — it IS the email — so
+        there it follows the hold line and the next-steps list, before
+        have-ready and the fee terms. Neither closes its FILE with it.
+        Generalising across the two is what produced both errors.
+
+        The first draft of BK-50 put this line directly after
+        RECEIVED_HOLD_LINE, justified as matching the confirmation page; that
+        justification was false about the file it named, and plan review caught
+        it twice independently. verify-cutover.ts now pins the order against
+        BOTH other surfaces — strictly against BookingConfirmation.svelte, which
+        shares five constants with this card, and on the four it shares with
+        booking-email.ts. Constants are named rather than line numbers, because
+        line numbers in a comment rot silently.
+      -->
+      <p class="text-yeg-text-secondary text-sm mt-4">{RECEIVED_TIMING_LINE}</p>
     </div>
   {:else}
     <form onsubmit={handleSubmit} novalidate>
