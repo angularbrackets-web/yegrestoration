@@ -88,9 +88,9 @@ Status Dashboard and **struck one that does not exist** — there is no August
 2026 core update; only the **August 2026 spam update (18 Aug, 2d 16h)**, now
 recorded in the clean window's standing caveats.
 
-Next: **W15** (needs the user — `#38` held a real Sun **2026-09-06** 3:30 p.m.
-slot; if that date has passed, the slot is moot but the row and its ICS are
-not), then the
+**W15 is DONE — 2026-09-02.** `#38` was the user's own end-to-end test, cancelled
+through the admin panel. It was never a real customer; the "real Sep 6 slot"
+framing in earlier drafts of this file was wrong. Next: the
 read-only health checks (W2 GBP, W3 Ads Policy Manager), then instrumentation
 (W5–W7), then compliance, then the surface defects.
 
@@ -1399,7 +1399,9 @@ explanation is true is in §7B, not here.
 7. **W23 precedes W26.** Reschedules happen off-system; a reminder on a
    phone-rescheduled slot tells a real customer the wrong time.
 8. **W1 precedes W4** — the client reads them together.
-9. **W15 is time-boxed** — `#38` holds a real **Sep 6** slot.
+9. ~~**W15 is time-boxed** — `#38` holds a real **Sep 6** slot.~~ **DONE
+   2026-09-02, and the premise was false: `#38` was the user's own test, not a
+   customer. Cancelled through the panel.**
 10. **W9 precedes W5/W6's verification artifact** (GA4 DebugView).
 
 ### Tier 0 — method integrity
@@ -1517,10 +1519,18 @@ explanation is true is in §7B, not here.
       Interac payments.** *Determination only* — retroactive remediation is a
       client + accountant decision (§7B). **Artifact:** a per-payment table —
       payer, date, amount, artifact-or-none.
-- [ ] **W15 · Cancel `#38`'s live Sep 6 slot through the admin panel.** A
-      developer test holds one of only 30 weekly slots. **Never by row delete** —
-      a hard delete strands the ICS invite. **Artifact:** the slot free in
-      availability **and** the `CANCEL` ICS in the recipient's calendar.
+- [x] **W15 · DONE 2026-09-02 — and its premise was wrong.** The user cancelled
+      `#38` through the admin panel, as required. **`#38` was the USER'S OWN
+      end-to-end test, not a real customer** — so the framing carried by this
+      item and by three other places in these documents ("a *real* Sep 6 slot",
+      "time-boxed", "money to return") was false. **No customer was affected and
+      there is no money to return**, which also retires the *"prove it with an
+      Interac inbox search for $658.88 dated Aug 31"* instruction attached to
+      this item elsewhere.
+      **Artifact: NOT captured** — the ICS recipient was the user, and the slot
+      is their own. Per CLAUDE.md this item is therefore *closed on the user's
+      direct report*, not on an observed artifact; recorded plainly rather than
+      logged as though an artifact existed.
 - [x] **W16 · Correct the stale "not deployed" claims — DONE 2026-09-01.**
       As written this item described **one** entry and named the **wrong**
       commit. Both were undercounts, and the item is recorded here in corrected
