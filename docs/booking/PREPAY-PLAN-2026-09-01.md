@@ -191,11 +191,28 @@ enumerated with reasons in T1's ticket.**
 
 > *"paid … at the visit / at the end of the visit / on site / on the day"*
 
-with the message *"that is the pre-prepay claim, and it must not survive the flip
-by even one deploy."* **These were written to stop exactly the reversion the
-client now wants.** Under the new flow they sit **green while asserting the
-opposite of what the copy must say.** They must be **inverted in the ticket** —
-not deleted, not discovered later.
+~~These were written to stop exactly the reversion the client now wants. They
+must be inverted in the ticket.~~
+
+**CORRECTED 2026-09-01: DO NOT INVERT THEM. KEEP THEM AS THEY ARE.** That
+instruction was written while blocking question 1 was **unanswered**, and it is
+correct only for the answer the client did *not* give. They chose **"the
+assessment itself is free"**, so **nothing is paid at the visit** and the ban is
+**still true**. Inverting it would remove a live, correct guard.
+
+This is CLAUDE.md's rule-rewrite trap firing on this document: a case enumerated
+under the old predicate flipped verdict when the predicate changed, and the row
+would have survived unexamined because it still *looked* right.
+
+**One real edge:** travel-fee copy saying *"payable at the visit"* fires this pin
+within its 40-character bound — a legitimate red for the wrong reason. Handle it
+with a **named allowlist entry**, never by loosening the regex. And note the pin
+is shaped for the *assessment fee*; it covers no other money-at-the-visit claim.
+
+**`BOOKED_CLAIM_SHAPES` also stays unchanged** — a submission still produces a
+request in a hold state. The temptation to delete it is *stronger* now, because
+"book your free assessment" and "you're booked" feel like one happy path. They
+are not.
 
 **Do not touch `BOOKED_CLAIM_SHAPES`** (`verify-cutover.ts:714-721`,
 `verify-booking-email.ts:955-970`). It bans the *instant-confirmation* grammar
