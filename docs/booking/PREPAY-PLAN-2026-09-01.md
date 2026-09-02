@@ -163,9 +163,27 @@ computed figures go. One exception worth keeping: the `sketch` description's
 *"lab results take 3–5 business days"* is a **client requirement from
 2026-08-18**, not decoration.
 
-**Still open from this decision, and small:** what the office should see when the
-customer chooses nothing ("Not specified"), and whether the type belongs on the
-Upcoming list as well as the detail page.
+**The three follow-ups, ANSWERED 2026-09-02 — this decision is now closed:**
+
+1. **Customer chose nothing → show the office NOTHING.** Not "Not specified",
+   not a blank row — **omit the Assessment field entirely.** So the render
+   condition inverts cleanly: today it is gated on *money*, and it becomes
+   gated on *the tier being present*. That is a smaller change than it looks
+   and it is the whole fix for the price-gating defect above.
+2. **Detail page is enough for now.** The type does **not** go on the Upcoming
+   list. *(Contrast BK-50's Status column, which did belong there — status is
+   what the office triages by; the assessment type is context they want once
+   they have opened the row.)*
+3. **Keep `Decline — at capacity` as the only decline reason for now.**
+   Explicitly revisitable later. **Consequence to state plainly rather than
+   leave implied:** an office member who cancels after a phone call — customer
+   changed their mind, wrong service, outside the area — sends a message
+   saying we are at capacity, which is untrue in every one of those cases. The
+   client has accepted that for now. It is the same gap the retired
+   `expiredRequestMessage` repoint would close, and it becomes more visible the
+   day cron sweep 2 is deleted, because the office will then be declining
+   requests they simply missed. **Do not treat this as settled forever — it is
+   settled for now, by a client who said so.**
 
 ### The standing context, and it changes how to build### The standing context, and it changes how to build
 
