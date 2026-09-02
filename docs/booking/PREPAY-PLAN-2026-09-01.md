@@ -185,7 +185,7 @@ computed figures go. One exception worth keeping: the `sketch` description's
    requests they simply missed. **Do not treat this as settled forever — it is
    settled for now, by a client who said so.**
 
-### The standing context, and it changes how to build### The standing context, and it changes how to build
+### The standing context, and it changes how to build
 
 **This is a NEW organisation, learning by doing. They expect to change their
 minds as they learn.** Two 2026-09-01 answers already reversed earlier ones.
@@ -241,7 +241,7 @@ with the Ads call data; the periods and the counting rules differ.**
 
 | # | Decision | Verdict |
 | --- | --- | --- |
-| 1 | **Drop payment at booking** | **Directionally defensible, wrongly specified.** §5 of CONVERSION found a *free* diagnostic books **worse** than one priced $1–$49.99, and its lead recommendation was a **free triage lane + paid report**, or a **$99–149 deposit** — not blanket free. The client took half the recommendation and dropped the half carrying the evidence. Re-open the number. |
+| 1 | **Drop payment at booking** | **Directionally defensible, wrongly specified.** §5 of CONVERSION found a *free* diagnostic books **worse** than one priced $1–$49.99, and its lead recommendation was a **free triage lane + paid report**, or a **$99–149 deposit** — not blanket free. The client took half the recommendation and dropped the half carrying the evidence. ~~Re-open the number.~~ **STRUCK 2026-09-02 — decision 1 is FINAL and has been re-confirmed four times. Do not re-open it. This verdict was written before the client answered.** |
 | 2 | **Photos optional** | **Unsupported, low value, sequenced wrong.** Mandatory photos were live during the best three booking days the form ever had (Aug 14–16 carried 6 of 9). The gate already leaks — it counts uploads that *failed*. Ship the tracking (W5) and the scroll fix (W18) first, or this deletes the only instrument that could show whether the file field ever blocked anyone. |
 | 3 | **Cancel the weekend 1.5×** | **Approve.** Cheapest and safest of the four. 10 of 30 weekly slots carry it. Not a config flip: the multiplier plus **six surfaces that state it in words** — grep the *claim*, not `AFTER_HOURS_NOTE`. |
 | 4 | **Office double-booking + back-dating** | **Refuse the double-booking half as specified.** See below. Back-dating already works and wants a different feature. |
@@ -656,20 +656,29 @@ that makes the assessment free.
 
 ## Blocking questions for the client
 
-1. **What does "free" mean** — free to *book* with $399 invoiced at the visit, or
-   is the assessment itself free? *(Blocks T3, scopes T10, swings ~200
-   assertions.)*
+> ⚠️ **QUESTIONS 1, 3 AND 5 IN THIS LIST ARE ANSWERED. They are struck below and
+> kept as history. Do not put them to the client again — 1 and 5 are the same
+> question and it has now been asked four times.**
+
+1. ~~**What does "free" mean** — free to *book* with $399 invoiced at the visit, or
+   is the assessment itself free?~~ **ANSWERED: the assessment ITSELF is free,
+   unconditionally (decision 1).**
 2. **"Book at any time"** — off-grid start times, or any date at the five
    existing grid times? *(The first is a `btree_gist` schema project; the second
    is nearly free.)*
-3. **Does the Stripe path stay alive** for collecting after the visit, or is it
-   retired? *(Decides whether `verify-stripe-webhook.ts` and BK-33 are dead or
-   reusable.)*
+3. ~~**Does the Stripe path stay alive** for collecting after the visit, or is it
+   retired?~~ **ANSWERED 2026-09-02: IT STAYS (decision 11).** `verify-stripe-webhook.ts`
+   and BK-33 are **reusable, not dead**. ⚠️ **This question went UNANSWERED while
+   T2 — the plan's largest ticket — was written against it, and T2 is now struck
+   as a result. That is the most expensive mistake in this document: a ticket
+   built on an open question nobody noticed was open.**
 4. **What replaces the refund promise?** `FEE_TERMS_REFUND` promises every
    customer a full refund; nothing is prepaid to refund. *(See the open HIGH
    trap in ROADMAP Known traps.)*
-5. **Will they accept a deposit instead of $0**, and at what number? §5 says free
-   books worse than $1–$49.99; §8 proposes $99–149.
+5. ~~**Will they accept a deposit instead of $0**, and at what number?~~ **ANSWERED
+   AND CLOSED — the client chose free, unconditionally, and has re-confirmed it.
+   Do not ask again.** §5's evidence (free books worse than $1–$49.99) is real
+   and is recorded; it is not a licence to re-litigate a settled decision.
 6. **Who reviews free bookings, in what committed time, including Sat/Sun?**
    (Both are open days.) And **what does a declined customer get?** — under free
    bookings there is no money to return as an apology.

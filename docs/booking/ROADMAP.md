@@ -2838,7 +2838,16 @@ add a pass briefed to *break it* rather than to review it. See the ticket's
 
 ## Open questions for the client
 
-> ### ⚑ OPEN AND BLOCKING, 2026-09-02 — added by the free-booking changeover
+> ### ~~⚑ OPEN AND BLOCKING~~ — **ANSWERED 2026-09-02, SAME DAY. DECISION 15.**
+>
+> **The assessment type STAYS as a customer choice, becomes OPTIONAL, and is NO
+> LONGER REQUIRED TO APPROVE** — a fourth reading, better than the three below.
+> The office sees it on the detail page only; when the customer picks nothing the
+> office sees nothing. Full spec in `PREPAY-PLAN-2026-09-01.md` under
+> "DECISION 15". **The three readings below are kept as history — do not act on
+> them, and do not ask the client this again.**
+>
+> ~~Original question:~~
 >
 > **Do the three assessment TYPES survive as a customer choice, now that there
 > are no prices attached?** Client decision 12 removed fixed pricing entirely.
