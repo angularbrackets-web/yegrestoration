@@ -81,6 +81,59 @@ elsewhere in this document that contradicts it is older and loses.
 | 9 | **Jobber-style quoting/invoicing deferred**, revisit after this batch | Was ~$39/mo, one ticket. Not now |
 | 10 | Office wants to **book at any time from the admin panel**, including over an existing customer's slot, and to record work already done | The double-booking half is **countered**, not accepted — see `office_override` |
 
+### DECISIONS ADDED 2026-09-02 — these correct the table above
+
+**11 · STRIPE STAYS. It is NOT retired, NOT deleted, NOT dormant-by-removal.**
+The user's words: *"i didnt ask to delete Stripe entirely… we will work on
+implementing a workflow similar to jobber that covers improvements to quotes,
+invoices, payments etc — stripe will be used there."* What was actually asked
+for is only two things: **(a) do not show payment tiers to customers when they
+book**, and **(b) booking must not require a payment.**
+
+> **This answers "Blocking questions for the client" #3**, which asked *"Does
+> the Stripe path stay alive, or is it retired?"* — and which was **NEVER
+> ANSWERED before T2 was written against it.** T2, the plan's largest ticket,
+> was specified on an open question. It is struck; see the ticket table.
+> `verify-stripe-webhook.ts` and BK-33 are **reusable, not dead.**
+
+**12 · THERE IS NO FIXED PRICING, for now.** The user, 2026-09-02: *"currently
+pricing will be decided by the client, so, no fixed pricing at least for now"*
+and *"lets leave it to the client to determine the pricing, split etc."*
+
+> **This is larger than "hide the tiers."** `TIER_DEFAULT_CENTS`
+> ($399/$699/$1,199) and `TIER_SERVICE_OVERRIDE_CENTS` now describe **no real
+> price**. They must not be displayed, and — critically — **must not remain the
+> value the office approves on by default.** `review.ts:227` and
+> `[id].astro:1776` would charge a customer a figure that no longer exists as a
+> concept. That raises the footgun from "wrong amount" to "invented amount".
+
+**13 · ALL customer-facing prices come off — confirmed explicitly**, including
+the surfaces outside the booking flow: the **homepage** terms box
+(`ContactSection.astro:344-358`, the same box as `/book/`), the homepage eyebrow
+*"Credited in full when you go ahead"* (`:287`), and **`/llms.txt:54`**'s
+credited-in-full sentence — a price claim in words, with no dollar sign, which a
+constant-driven sweep misses.
+
+**14 · The insurance / private billing split is the client's to determine.**
+Not assumed either way. Nothing in the quoting/invoicing direction may be built
+on a guess about it. *(Production shows 2 of 15 appointments insurance-route,
+but the panel is known to under-record — it is not evidence.)*
+
+### STILL OPEN, and it blocks part of the work
+
+**Do the three assessment TYPES survive as a customer choice, with no prices
+attached?** The user was asked and did not pick — reasonably, since it is a
+client question. It matters because **the tier key is required to approve**
+(`review.ts:215`, `:246`, and `[id].astro:1764` renders *no Approve button*
+without one). Three readings, materially different work:
+
+1. Keep the three choices, hide the prices. Office workflow unchanged.
+2. One assessment, no choice — office must then set a tier by hand on **every**
+   booking before it can be approved.
+3. One assessment, and the tier requirement removed from approval entirely.
+
+**Do not guess.** Everything that does not depend on this can proceed.
+
 ### The standing context, and it changes how to build
 
 **This is a NEW organisation, learning by doing. They expect to change their
@@ -209,6 +262,14 @@ rebuild (after deploy).
 
 ## The test suite: 2,113 assertion sites
 
+> ⚠️ **THE NUMBERS BELOW ARE T2's COST AND T2 IS STRUCK (decision 11).**
+> With Stripe retained, **~0 of these die.** `verify-stripe-webhook.ts` stays
+> green at 91/91 — it needs no database, key or network, so nothing in the
+> free-booking change can reach it. The real remaining cost is **T3's copy
+> sweep** plus the tier-required arms (`verify-booking-payload.ts:302-321`,
+> `verify-booking-form.ts:179-198`), and it must be re-counted against T3 alone.
+> Treat every figure in this section as historical.
+
 | | sites |
 | --- | ---: |
 | **Die outright** | **435** |
@@ -301,8 +362,9 @@ verdict that instrumentation must precede any funnel change:
 
 1. **W9 → W5/W6** — instrumentation. The island emits **zero** funnel events
    today. Nothing below is evidence-based without it. Let it settle a week.
-2. **In parallel, non-funnel, no interference:** cancel `#38`'s Sep 6 slot
-   (W15); **resend `#36`'s `charge.refunded` BEFORE T2** — see the deadline
+2. **In parallel, non-funnel, no interference:** ~~cancel `#38`'s Sep 6 slot
+   (W15)~~ — **DONE 2026-09-02; it was the user's own test booking, not a
+   customer**; **resend `#36`'s `charge.refunded` BEFORE T2** — see the deadline
    below; the "since 2008" / `foundingDate` / postal-code / trust-claims
    cleanup; and **strike W20/W21 from the schedule** (see below).
 3. **T1** — the confirm seam, plus the `review.ts:225-227` footgun.
@@ -317,7 +379,16 @@ verdict that instrumentation must precede any funnel change:
 **T11 reduces** to T3 deleting the refund promise plus a one-off `#36` repair.
 **T13 never existed** — the travel fee needs no ticket under decision 8.
 
-### ⏰ A DEADLINE: `#36` must be repaired BEFORE T2
+### ⏰ ~~A DEADLINE: `#36` must be repaired BEFORE T2~~ — CAUSE VOID 2026-09-02
+
+> **The stated cause is gone: T2 is struck and the webhook is NOT being
+> retired** (decision 11), so "before T2" bounds nothing. **But do not close
+> this as "no deadline" —** that would be the rule-rewrite trap, a case
+> disappearing because its predicate changed. Stripe's own event-resend
+> retention window is an external behaviour and must be read from Stripe's
+> docs, never recalled. The refund was 2026-08-20. **Re-derive the real window
+> and record the actual date.** The repair itself is still owed either way:
+> `#36` states on production that money is ours which went back.
 
 Booking `#36` states on production that money is ours which went back on
 2026-08-20. The cheap repair — resending its `charge.refunded` to the live
@@ -343,7 +414,7 @@ impression formed before it.
 | T4 | Photos optional | small | — | — |
 | T5 | Remove weekend 1.5× | small–med | — | before T3 |
 | T1 | **The confirm seam** — new confirm route; drop `paid_at` check, **keep BK-33's refunded check**; add `confirmed_at`; re-derive all 33 flipped verdicts | med code, heaviest review | column | — |
-| T2 | Stop producing `approved_awaiting_payment` / `payment_expired`; retire Checkout, webhook, mark-paid; delete cron sweep 1 | **largest** | **none** | T1 |
+| ~~T2~~ | ~~Retire Checkout, webhook, mark-paid; delete cron sweep 1~~ **STRUCK 2026-09-02 — decision 11. The client never asked for it, and it was written against unanswered blocking question #3.** `approved_awaiting_payment` **cannot** stop being produced: `markPaid` guards on it (`booking-payment.ts:668`) and it is the one confirmation path. `payment_expired` and cron sweep 1 go dormant with zero edits once totals are $0. Whatever remains folds into T1. | ~~largest~~ **~none** | none | — |
 | T3 | Copy + email cutover — ~39 constants, 17 prose sites, 6 templates; invert the two pins | large | — | T2, T5 |
 | T10 | GST receipt on the offline path (= W25, promoted to blocker) | med | likely | T2 |
 | T6 | Move the Ads conversion off the Stripe session | small | — | T2 |
@@ -433,14 +504,41 @@ is exactly the tidy untruth the expired message was written to avoid. It convert
 a deletion into a route change and keeps ~10 live assertions. ⚑ Confirm with the
 client.
 
-### THE ONE QUESTION THE CLIENT STILL HAS TO ANSWER
+### ~~THE ONE QUESTION THE CLIENT STILL HAS TO ANSWER~~ — ANSWERED 2026-09-01
 
-**When a request is never reviewed and its slot passes, what happens?**
+~~**When a request is never reviewed and its slot passes, what happens?**
 (i) the slot is quietly released and the request marked lapsed, **with no email**
 — probably what "no automatic cancellation" actually meant; or (ii) nothing at
-all, and the office cleans up by hand. Cheap to build either way, **expensive to
-un-say**, because it lands in T3's customer copy and in how the office is
-trained.
+all, and the office cleans up by hand.~~
+
+**ANSWERED 2026-09-01: option (ii), in its strongest form. The slot is simply
+LOST.** No automatic cancellation, no email, no lapse marker — **the business
+absorbs it.** Decision 4 means what it says.
+
+**The three safety conditions the client attached, and they are conditions
+rather than nice-to-haves:**
+
+1. a **Status column** on the Upcoming table,
+2. an **unreviewed count**,
+3. **`RECEIVED_TIMING_LINE`** on `BookingForm.svelte`'s fallback card.
+
+**These are `BK-50`, and BK-50 must land BEFORE cron sweep 2 is deleted.** It is
+that deletion's safety net; shipping the deletion first leaves a real customer
+holding a slot nobody will look at, with no email and no in-product signal to
+the office.
+
+**Two items from the minimum list above are deliberately NOT in BK-50** —
+item 3 (keep elapsed `pending_review` rows in Upcoming) and item 4 (request age).
+Item 3 is still ⚑ **a client decision**, and the plan flagged it as one before
+this answer arrived. **It carries a cost worth stating: with the narrow count,
+the unreviewed number drops to zero at the exact moment the slot passes — it
+stops nagging when the failure completes.** That is the argument for asking.
+
+**Still unrewritten, deliberately:** `approve`'s comment block at
+`review.ts:250` (the sentence is at `:252`) — *"Task 4's auto-decline at
+slot-4h is what normally makes this unreachable"* —
+becomes false the day the sweep dies and is **true today**. It belongs to the
+commit that deletes the sweep, not to BK-50. Recorded in ROADMAP Known traps.
 
 ## The $150 travel fee arithmetically breaks the free path
 
@@ -542,8 +640,8 @@ substitute — they are monthly and cover only the Google channel.
 1. ~~GBP read-only check~~ — **DONE 2026-09-01. Verified, not suspended.**
 2. **Ads Policy Manager, read-only.** A disapproved asset leaves no
    change-history row, so "no changes after Aug 9" does not cover it.
-3. **W15** — cancel `#38`'s Sun 2026-09-06 3:30 p.m. slot **through the admin
-   panel, never a row delete.** Probably no money to return (`payment_reference`
+3. ~~**W15**~~ — **DONE 2026-09-02.** `#38` was the user's own end-to-end test,
+   cancelled through the admin panel as required. Probably no money to return (`payment_reference`
    empty) — prove it with an Interac inbox search for **$658.88 dated Aug 31**.
 4. **"Since 2008"** — 15 source sites + 18 built files + `/llms.txt`. Site only;
    **do not edit GBP.** Delete `foundingDate` rather than correct it.

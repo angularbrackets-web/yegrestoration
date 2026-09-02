@@ -17,6 +17,22 @@
 > wreckage with `npm run verify:booking:admin:db -- --reset` (which exits **3**,
 > having run nothing).
 >
+> **⚑ CURRENT WORK, 2026-09-02 — the plan of record is
+> `docs/booking/PREPAY-PLAN-2026-09-01.md`.** Read its "THE CLIENT'S DECISIONS
+> — FINAL" table **and then "DECISIONS ADDED 2026-09-02"**, which corrects it.
+> This file's W-list is still valid for the cause-independent items; the
+> free-booking changeover lives in that plan, not here.
+>
+> **BK-50 is implemented, reviewed (three rounds), committed and NOT PUSHED.**
+> It is the safety net for deleting cron sweep 2 and **must be live before that
+> deletion ships.** See phase P12 below.
+>
+> **STRIPE STAYS — T2 IS STRUCK (plan decision 11).** The client never asked to
+> retire Stripe; it is wanted for a future Jobber-style quotes/invoices/payments
+> workflow. T2 was written against the plan's own *unanswered* blocking question
+> #3. Any instruction anywhere that sequences work "with T2" or "after T2" is
+> stale — re-derive it.
+
 > **W16 AND W17 ARE DONE — 2026-09-01. Do not re-do them.**
 >
 > **W16 · every "fixed in code, NOT deployed" claim in this file was false and
@@ -48,7 +64,10 @@
 > cite sections rather than line numbers, and verify external dates against the
 > source.** CLAUDE.md's copy-inventory trap, twice in one document.
 >
-> **NEXT: W15 (needs the user — `#38` holds a real Sep 6 slot), then the
+> **W15 IS DONE — 2026-09-02. `#38` was the USER'S OWN end-to-end test, not a
+> real customer, and it was cancelled through the admin panel. Every earlier
+> line calling its Sep 6 slot "real" was wrong; no customer was ever affected
+> and there is no money to return. NEXT: the
 > read-only health checks W2/W3.** W5/W6 are blocked on W9 (GA4 re-auth, user
 > only). **W20/W21 ordering is an open question for the user.**
 >
@@ -291,6 +310,137 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 - `blackout_dates` PK column is `day`, not `date`.
 
 ## Known traps
+
+- **⚠ THE FREE ASSESSMENT SILENTLY DISARMS BK-44's INVITE-CROSSING GUARD, and
+  the plan of record reads the mechanism as reassurance.** Found 2026-09-02 by
+  an independent audit; verified in source.
+  `editorMaySetStatus` (`src/lib/booking-status.ts:354`) refuses to let the
+  admin status dropdown move a row into the calendar-invite-holding set with
+  `if (row.paid_at === null) return false;`, and `:367` refuses again if the
+  payment was refunded. Under the free assessment **every** approval runs
+  `approveFree` → `markPaid({ method: 'none', amountCents: 0 })`, which stamps
+  `paid_at` and sets `payment_status = 'paid'` (`booking-payment.ts:632`).
+  Nothing clears `paid_at` afterwards, and there will be no refunds to trip the
+  second check. **So after the changeover every row that has ever been approved
+  permanently satisfies both gates**, and a `cancelled` or `declined` booking
+  becomes **one dropdown selection away from `confirmed`** — dispatching a crew
+  and mailing a calendar invite.
+  **The rule stays in the code and stops protecting anything.** BK-44's
+  192-transition matrix still passes, because the assertions test the rule, not
+  what the rule now excludes — and `PREPAY-PLAN`'s corrected "second fact" cites
+  the very same mechanism (*"`markPaid('none')` still stamps `paid_at`, so
+  `editorMaySetStatus`'s invite-crossing rule is untouched"*) as evidence that
+  nothing breaks. Untouched is exactly the problem: the predicate is intact and
+  its meaning is gone.
+  This is CLAUDE.md's rule-rewrite trap in its least visible form — not a case
+  that flipped verdict, but a **guard whose protection evaporated while every
+  test stayed green.** Severity: HIGH (operational, not monetary — the money
+  risk genuinely does disappear; the accidental-un-cancellation risk does not).
+  **Owner: T1.** Decide deliberately what protects the invite-holding set when
+  money no longer can, and re-derive BK-44's matrix against the new meaning
+  rather than the old predicate.
+
+- **Decision 8 destroys the only recorded artifact that can close BK-33, BK-46
+  and BK-48.** All three are open *pending an artifact*, and this file names a
+  single one that closes all three: one real booking **with a non-zero travel
+  fee** — refund it while `confirmed` to exercise BK-33's flag branch, read the
+  header total for BK-46, and read the GST registration number off the receipt
+  for BK-48. Decision 8 takes the travel fee out of the codebase entirely and
+  forces `totalCents` to zero, so **no Checkout Session is created and no Stripe
+  receipt exists to read.** The artifact becomes unbuildable and three tickets
+  lose their only recorded path to closure. **Owner: nobody — needs a decision.**
+  The cheap replacement is likely a deliberate $1 live charge or a live Stripe
+  invoice, which is the same probe the invoicing work will need anyway.
+
+- **The office can charge a customer a price that no longer exists.** Client
+  decision 12 (2026-09-02) removed fixed pricing entirely — the client now
+  decides pricing case by case — so `TIER_DEFAULT_CENTS` ($399/$699/$1,199)
+  describes **nothing real**. Two sites still treat it as the default:
+  `src/pages/admin/appointments/[id].astro:1776` pre-fills the approval amount
+  with `suggestedQuote.baseCents`, and `src/pages/api/admin/appointments/review.ts:227`
+  falls back to `suggested.baseCents` when the field is empty. An office member
+  who tabs past a blank amount and clicks Approve **opens a Stripe Checkout
+  Session for an invented figure.** The travel-fee input at `[id].astro:1804`
+  is the same defect by another door — `review.ts:301` routes on a total that
+  includes travel, so any non-zero value there sends a *free* assessment down
+  the paid path. **Severity: HIGH — it takes real money from a real customer,
+  and it gets worse the day the assessment is announced as free.**
+  **Owner: T1.** Fix both fallbacks to `0` and delete the travel-fee input in
+  the same commit that makes the assessment free.
+
+- **Five statements go false the day cron sweep 2 is deleted, and they are
+  spread across four files.** BK-50 **implements** the safety net for the client's
+  2026-09-01 decision — **reviewed 2026-09-01, committed, NOT pushed, so NOT
+  live** — (an unreviewed request's slot is simply lost — no
+  auto-cancellation, no email) but deliberately did **not** rewrite the prose
+  that the *later* deletion falsifies, because every one of those statements is
+  **true while the cron is still live** (`vercel.json` `*/15 * * * *` →
+  `expire-payments.ts`). Rewriting them early would put false comments in the
+  tree for the length of the interval. The set, so the owning ticket inherits a
+  list rather than one line:
+  `review.ts:250` (*"Task 4's auto-decline at slot-4h is what normally makes
+  this unreachable"*), `db.ts:123` (*"Stamped by … the stale-request expiry
+  sweep"*), `expire-payments.ts:210` (*"the ONLY automatic way out of it"*),
+  `expire-payments.ts:56-57` (`EXPIRED_REQUEST_NOTE`), and
+  `verify-booking-email.ts:1919-1957` (*"Each sweep sends ITS OWN message"*).
+
+  **EXPANDED 2026-09-01 by adversarial review, and the first list had the
+  dangerous omission.** It catalogued *comments* and missed the **executing
+  assertions**, which are the ones that will actually turn red:
+  `verify-booking-admin-db.ts:2322` (*"a stale request inside slot-4h is
+  declined"*), `:2325` (*"a request still outside slot-4h is left alone"*),
+  `:2342` (`counts.requestsExpired >= 2`) and the `Auto-declined by the expiry
+  sweep` note assertion. **This is the BK-44 trap exactly** — a fix that
+  reddens existing arms is a question about the arms, and arriving at those
+  reds without warning is how BK-44 nearly loosened a rule instead of fixing a
+  fixture. Also add: `expire-payments.ts:37` and `:255`, `booking-config.ts:103`,
+  `booking-copy.ts:708` and `:808`.
+
+  **And BK-50's own four**, listed because the ticket that wrote this entry
+  created them while stating the principle against them:
+  `index.astro:56` and `:216`, `BookingForm.svelte:713`,
+  `verify-booking-admin.ts` (the comment above `APPROVED_COUNTER_TEXT`) — each says cron sweep 2 is still live, true
+  today and false on deletion day.
+
+  **Therefore:** the commit that deletes sweep 2 re-derives every one of these
+  in the same commit, and expects `verify-booking-admin-db.ts` to go red before
+  it starts. This is CLAUDE.md's rule-rewrite trap with the rewrite scheduled
+  rather than accidental. **Owner: T1 of `PREPAY-PLAN-2026-09-01.md`** — originally written as "T1/T2", corrected the same day: **T2 is struck** (decision 11, Stripe stays), so the sweep deletion is T1's or it is nobody's. **Confirm it has an owner before starting T1.**
+
+- **A copy constant that renders ONLY on a web surface is read by no
+  claim-shape pin.** Narrowed 2026-09-01 by BK-50's implementation review; the
+  first version of this entry was over-broad and is corrected here rather than
+  left standing. `verify-cutover.ts`'s `BOOKED_CLAIM_SHAPES` and
+  `ONSITE_PAYMENT_SHAPE` run over the literal source of the five files in
+  `CLAIM_SURFACES` — which contains components and pages, **not**
+  `booking-copy.ts` — so on those surfaces they see only an *identifier* like
+  `RECEIVED_TIMING_LINE`, never the sentence it holds.
+  **What DOES cover the constants, and the reason the first draft of this entry
+  was wrong:** `verify-booking-email.ts` applies the same shapes to the
+  **rendered message** (`:951-965` over the confirmed message, `:1438-1461` over
+  the request message), and its own comment at `:951-953` says exactly that —
+  *"applied to the message rather than to a page — the surface that file's
+  CLAIM_SURFACES list does not cover."* So any constant that reaches an email is
+  covered. **The gap is the constants that never do** — `RECEIVED_EMAILED_LINE`
+  (it *is* the email), the received-page-only copy, and `QUOTE_TIMING_NOTE`.
+  A false claim edited into one of those is invisible to the whole suite.
+  **Therefore:** before relying on the claim-shape pins for a copy change, ask
+  whether that constant reaches a *message*. If it only reaches a page, it is
+  unguarded. Severity: medium. **Owner: nobody — needs a ticket.**
+
+- **`RECEIVED_NEXT_STEPS` renders on `/book/received/` and in both arms of the
+  request email, but not on `BookingForm.svelte`'s fallback card** — so the card
+  shows `RECEIVED_TIMING_LINE` (*"if you have not heard from us…"*) without the
+  antecedent that tells the customer they would hear from us at all. Found by
+  BK-50's implementation review. **It was deliberately NOT fixed by adding the
+  list**, because two of its three steps still describe the prepay flow — *"we
+  email you to approve it, with a secure payment link"* and *"confirmed once
+  that payment goes through"* — both false under the free assessment. Adding
+  them would have put two soon-false sentences on a new customer surface.
+  `verify-cutover.ts` pins the absence with the reason attached, so the gap
+  cannot be closed by accident before the copy is right.
+  **Owner: T3 of `PREPAY-PLAN-2026-09-01.md`**, with the rest of the request
+  copy.
 
 - **Deleting an appointment row does not retract a calendar invite already
   issued for it.** Observed 2026-08-19: two test rows were deleted directly from
@@ -2642,7 +2792,7 @@ six conclusions were asserted and withdrawn in one day.
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-49 | **W0** — `verify-booking-admin-db.ts` is not idempotent against its own wreckage, and a crash in it exits 1 printing no summary, so a red-first check reads the crash as a pass. Nine fixed session literals collide on `appointments_stripe_session_idx`; `cleanup()`'s pre-run arm cannot see the rows it exists to clear; the leftover check shares the delete's predicate and cannot fail; the `paymentsExpired` count is global and reddens on the clock | Light (harness) **+ one fresh-agent implementation review anyway** — see the ticket's "Why Light is uncomfortable here" | ✅ **reviewed 2026-08-31** (0 blockers / 5 should-fix / 6 nits, all resolved); 8 red rows; typecheck 0, build clean, 23/23 verify scripts green. **Committed `22418dc`, not pushed** — no production code, so it rides with the next release |
+| BK-49 | **W0** — `verify-booking-admin-db.ts` is not idempotent against its own wreckage, and a crash in it exits 1 printing no summary, so a red-first check reads the crash as a pass. Nine fixed session literals collide on `appointments_stripe_session_idx`; `cleanup()`'s pre-run arm cannot see the rows it exists to clear; the leftover check shares the delete's predicate and cannot fail; the `paymentsExpired` count is global and reddens on the clock | Light (harness) **+ one fresh-agent implementation review anyway** — see the ticket's "Why Light is uncomfortable here" | ✅ **reviewed 2026-08-31** (0 blockers / 5 should-fix / 6 nits, all resolved); 8 red rows; typecheck 0, build clean, 23/23 verify scripts green. **Committed `22418dc` and PUSHED — it is LIVE.** *Corrected 2026-09-02: this row read "not pushed" until then; `git branch -r --contains 22418dc` puts it in `origin/main`. This is the exact defect W16 corrected across a dozen sites eight days earlier, recurring. **Verify with the command, never from this file.*** |
 
 **BK-49 gates the rest of the W-list.** §7's hard constraint 1: *"Every
 'red-observed' logged before W0 is worthless evidence."* W5, W6, W7, W18, W20 and
@@ -2670,7 +2820,45 @@ describes. **Consequence for sequencing that is the user's to take, not
 planning's:** §7's constraint 6 defers W20/W21 behind W7 settling — if W7 is a
 three-ticket arc, that constraint unblocks W20/W21 *sooner*, not later.
 
+### P12 — free-booking changeover (client decisions 2026-09-01 / 09-02)
+
+**Plan of record: `docs/booking/PREPAY-PLAN-2026-09-01.md`.** Read its decisions
+table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
+
+| Ticket | Scope | Tier | Status |
+| --- | --- | --- | --- |
+| BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **Committed `<sha>`, NOT PUSHED — this carries production code including a customer-facing island, so pushing it IS the deploy.** |
+
+**The lesson this phase paid for, worth the next ticket's attention:** two review
+rounds signed BK-50 off, and a third **adversarial** pass then ran seven breaks
+of which **six stayed green** — including two inside assertions written
+specifically to prevent that class of defect. On money- or copy-critical work,
+add a pass briefed to *break it* rather than to review it. See the ticket's
+"What review changed".
+
 ## Open questions for the client
+
+> ### ⚑ OPEN AND BLOCKING, 2026-09-02 — added by the free-booking changeover
+>
+> **Do the three assessment TYPES survive as a customer choice, now that there
+> are no prices attached?** Client decision 12 removed fixed pricing entirely.
+>
+> It blocks real work because **the tier key is required to approve a booking**:
+> `review.ts:215` and `:246` refuse without one, and
+> `admin/appointments/[id].astro:1764` renders **no Approve button at all** for a
+> tier-less row — only Decline. Three readings, materially different work:
+>
+> 1. **Keep the three choices, hide the prices.** Office workflow unchanged.
+> 2. **One assessment, no choice.** The office must then set a tier by hand on
+>    *every* booking before it can be approved.
+> 3. **One assessment, and the tier requirement dropped from approval.** Cleanest
+>    end state, slightly more code.
+>
+> **Do not guess.** Everything not depending on it can proceed.
+>
+> Also open and client-owned: the **insurance vs private billing split**
+> (decision 14) — it shapes any quoting/invoicing tool choice, because insurers
+> do not pay Stripe invoices. Not to be assumed either way.
 
 All three were answered on 2026-08-08. Kept here as decisions rather than
 deleted, because BK-04/05/06 are written against them.
