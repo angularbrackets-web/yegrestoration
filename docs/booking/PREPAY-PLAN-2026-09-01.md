@@ -119,22 +119,55 @@ Not assumed either way. Nothing in the quoting/invoicing direction may be built
 on a guess about it. *(Production shows 2 of 15 appointments insurance-route,
 but the panel is known to under-record — it is not evidence.)*
 
-### STILL OPEN, and it blocks part of the work
+### ~~STILL OPEN~~ — ANSWERED 2026-09-02 · DECISION 15
 
-**Do the three assessment TYPES survive as a customer choice, with no prices
-attached?** The user was asked and did not pick — reasonably, since it is a
-client question. It matters because **the tier key is required to approve**
-(`review.ts:215`, `:246`, and `[id].astro:1764` renders *no Approve button*
-without one). Three readings, materially different work:
+**Do the three assessment TYPES survive as a customer choice, with no prices?**
+**ANSWERED: YES, but OPTIONAL — and it is not a precondition of confirming.**
 
-1. Keep the three choices, hide the prices. Office workflow unchanged.
-2. One assessment, no choice — office must then set a tier by hand on **every**
-   booking before it can be approved.
-3. One assessment, and the tier requirement removed from approval entirely.
+The user's words: *"Customer can choose the assessment type which will be
+optional and will be available for the client to view as part of the information
+provided, but will not be a mandatory thing to confirm a booking. again, client
+may reach out to the customer over call/email and then decide whether to confirm
+or cancel a booking."*
 
-**Do not guess.** Everything that does not depend on this can proceed.
+This is **none of the three readings the plan offered** — it is a fourth: keep
+the picker, make it optional, show the answer to the office, and drop the tier
+requirement from approval. Recorded because inventing options and then being
+given a better one is the normal case, not a failure.
 
-### The standing context, and it changes how to build
+**What it means, concretely:**
+
+| # | Change | Site |
+| --- | --- | --- |
+| 1 | Tier picker **stays**, prices removed | `BookingForm.svelte` |
+| 2 | Tier becomes **optional** on the public door | `booking-payload.ts:285-287`, `booking-form.ts:273-274` |
+| 3 | Approval **no longer requires a tier** | `review.ts:215`, `:246` |
+| 4 | The panel must render **Approve** for a tier-less row | `[id].astro:1764` — today that arm offers **Decline only** |
+| 5 | Amount defaults to **$0.00**, fallback to `0` | `[id].astro:1776`, `review.ts:227` |
+| 6 | Travel-fee input deleted | `[id].astro:1804` |
+
+**⚠️ FOUND WHILE CONFIRMING THIS, AND IT DEFEATS THE STATED REQUIREMENT.**
+The office's only view of the chosen type is
+`[id].astro:770-772`, and it is **gated on `money && money.kind !== 'none'`** —
+it renders the tier name *inside* the price block. Under a free assessment
+`money.kind` is `'none'`, so **the type the customer chose stops being displayed
+anywhere.** The decision says it must be *"available for the client to view as
+part of the information provided."* Un-gate it from the money, or the change
+delivers the opposite of what was asked. It is also **absent from the Upcoming
+list entirely** (`index.astro`), which is the screen the office triages from.
+
+**The tier copy carries no prices** — `ASSESSMENT_TIER_NAMES` and
+`ASSESSMENT_TIER_DESCRIPTIONS` (`booking-copy.ts:565-587`) describe deliverables
+only. So the picker survives price removal intact; only `FEE_TERMS_*` and the
+computed figures go. One exception worth keeping: the `sketch` description's
+*"lab results take 3–5 business days"* is a **client requirement from
+2026-08-18**, not decoration.
+
+**Still open from this decision, and small:** what the office should see when the
+customer chooses nothing ("Not specified"), and whether the type belongs on the
+Upcoming list as well as the detail page.
+
+### The standing context, and it changes how to build### The standing context, and it changes how to build
 
 **This is a NEW organisation, learning by doing. They expect to change their
 minds as they learn.** Two 2026-09-01 answers already reversed earlier ones.
