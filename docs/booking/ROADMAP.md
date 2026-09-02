@@ -360,8 +360,13 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   with `suggestedQuote.baseCents`, and `src/pages/api/admin/appointments/review.ts:227`
   falls back to `suggested.baseCents` when the field is empty. An office member
   who tabs past a blank amount and clicks Approve **opens a Stripe Checkout
-  Session for an invented figure.** The travel-fee input at `[id].astro:1804`
-  is the same defect by another door — `review.ts:301` routes on a total that
+  Session for an invented figure.** The travel-fee input is the same defect by
+  another door — and **cite it by its range, not by `:1804`, which is only the
+  hint paragraph.** The `<div>` is `[id].astro:1784-1806`; the `<input
+  name="travel_fee">` is `:1788-1795`; `:1804` is the `$1.15/km` help text.
+  **Deleting `:1804` alone removes the explanation and leaves the live input** —
+  the strictly worse outcome. This entry mis-cited it on first writing and the
+  error propagated into a session handoff before a fact-check caught it — `review.ts:301` routes on a total that
   includes travel, so any non-zero value there sends a *free* assessment down
   the paid path. **Severity: HIGH — it takes real money from a real customer,
   and it gets worse the day the assessment is announced as free.**
