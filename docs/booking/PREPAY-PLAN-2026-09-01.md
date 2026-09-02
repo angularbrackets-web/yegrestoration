@@ -295,8 +295,48 @@ forbid the fix and must be inverted in the ticket:
 | **T11** | med, likely migration | **small, doc-only** | nothing is prepaid, so the forward half is deleted by T3 |
 | Migrations | three | **one** (`office_override`) plus T8's index rebuild | `confirmed_at` not needed |
 
-**Order: T4 → T1 → T2 + T6 (same deploy) → T3 → T7 → T8 → T9 → T13 → T11**
-(T5 foldable into T3; T10 only if T13 = collected.)
+**REVISED ORDER, after the 2026-09-01 audit** — the previous line referenced a
+`T13` that was never defined, and put T4 first against this document's own
+verdict that instrumentation must precede any funnel change:
+
+1. **W9 → W5/W6** — instrumentation. The island emits **zero** funnel events
+   today. Nothing below is evidence-based without it. Let it settle a week.
+2. **In parallel, non-funnel, no interference:** cancel `#38`'s Sep 6 slot
+   (W15); **resend `#36`'s `charge.refunded` BEFORE T2** — see the deadline
+   below; the "since 2008" / `foundingDate` / postal-code / trust-claims
+   cleanup; and **strike W20/W21 from the schedule** (see below).
+3. **T1** — the confirm seam, plus the `review.ts:225-227` footgun.
+4. **T2 + T6, same deploy.**
+5. **T3, with T5 folded in.** Its own week, alone.
+6. **T4** — after instrumentation, its own week.
+7. **STOP. Measure a month.** Then reconsider T7/T8/T9 against what the office
+   actually did. `#37` shows their real pain is **reschedule and
+   mark-completed**, not double-booking.
+
+**T10 is STRUCK** (decision 8 leaves no GST-bearing supply in the repo).
+**T11 reduces** to T3 deleting the refund promise plus a one-off `#36` repair.
+**T13 never existed** — the travel fee needs no ticket under decision 8.
+
+### ⏰ A DEADLINE: `#36` must be repaired BEFORE T2
+
+Booking `#36` states on production that money is ours which went back on
+2026-08-20. The cheap repair — resending its `charge.refunded` to the live
+endpoint — **works only while the webhook is live.** T2 retires it. Miss this
+window and the row is repaired by hand, forever.
+
+### W20/W21 are now BACKWARDS and are still scheduled
+
+They exist to strike *"no obligation"* and *"free, no-obligation quote"* because
+those were false under the credit model. Under decision 1 they are the **true and
+best claims** for the in-zone majority. **Shipping them as written deletes the
+new offer from the paid channel in the month it launches.** Strike them from the
+schedule and re-derive inside T3.
+
+**But do not simply invert them either:** "no obligation" is still false for an
+out-of-zone customer, because the $150 is waived if they proceed — so **the only
+person who ever pays it is the one who declined.** That is a decline fee wearing
+a travel fee's name, and disclosure after commitment does not repair a general
+impression formed before it.
 
 | # | Ticket | Size | Migration | Depends |
 | --- | --- | --- | --- | --- |
@@ -329,6 +369,79 @@ twice.
 
 ---
 
+## THE STALE-REQUEST PROBLEM — decision 4's consequence
+
+*(The decision table promised this section and the first version of this document
+did not contain it. That hole was found by review on 2026-09-01.)*
+
+### The good news first: removing the sweep costs ZERO slot availability
+
+Sweep 2 only fires at `slot_start < now + 4h` — always **today**. `MIN_NOTICE_DAYS
+= 1` means a slot inside today is never publicly bookable anyway. The suite says
+so itself (`verify-booking-admin-db.ts:2389-2398`): *"an availability assertion
+here would pass identically before and after the release."* **Do not argue "we
+lose slots" — it is false.**
+
+### What it actually cost, and what has to replace it
+
+The sweep did two things nothing else does: it got an unanswerable row **out of
+the office's way**, and it **told the customer the truth**. Both need replacing.
+
+**1. `pending_review` holds its slot, and now nothing but a human releases it.**
+It is absent from `SLOT_RELEASING_STATUSES`, so `SLOT_HOLDING_STATUSES` includes
+it by construction. ~60 bookable slots are visible at once and each is now
+holdable indefinitely.
+
+**2. The office cannot see the state that now matters.** The Upcoming table
+renders **Slot · Name · Phone · Service · City · Route · Files** — verified, and
+there is **no Status column**. Under review-then-confirm, a `pending_review` row
+is visually identical to a `confirmed` one on the only screen the office works
+from. `statusClasses` exists and is called *only* from the Past table.
+
+**3. Once the slot passes, the row leaves Upcoming for Past** — so a missed
+request does not nag, it **disappears**, into a muted history table, correctly
+labelled "Never reviewed" where nobody is looking.
+
+**4. `approve` then refuses it.** `review.ts` rejects any slot at or before now
+(`review: 'elapsed'`), and its comment says the auto-decline *"is what normally
+makes this unreachable, and the two compose deliberately."* **Delete the sweep
+and `elapsed` becomes the common case** — the office can neither approve nor
+leave the row, only decline it by hand. That is an automatic cancellation
+performed manually, which is what the client said they did not want. **Rewrite
+that comment in the same commit**; leaving it is the stale-comment-becomes-
+justification shape the ROADMAP already records three times.
+
+### The minimum that makes "no auto-cancellation" safe rather than merely absent
+
+1. **A Status column on the Upcoming table** — ~10 lines; `statusClasses` and
+   `STATUS_LABELS` are already imported. **This is a blocker for shipping
+   decision 4, not a nicety.**
+2. **An "Unreviewed (N)" count**, mirroring the existing `warningCount`.
+3. **Keep elapsed `pending_review` rows in Upcoming** (one line in
+   `partitionAppointments`), ideally grouped as "Overdue — never reviewed".
+   ⚑ *Client decision: do they want past-dated requests nagging them?*
+4. **Request age on pending rows** — `formatAdminTimestamp` already exists.
+5. **Add `RECEIVED_TIMING_LINE` to `BookingForm.svelte`'s fallback card.** That
+   line — *"If you have not heard from us and the appointment is close, call or
+   text us"* — is now the customer's **entire** safety net, and that one surface
+   omits it.
+
+**Do NOT delete `expiredRequestMessage` — repoint it.** Give the office a second
+decline button, *"we did not get to this"*. Otherwise an office declining a
+request they simply missed sends `DECLINED_LEAD` — *"we are at capacity"* — which
+is exactly the tidy untruth the expired message was written to avoid. It converts
+a deletion into a route change and keeps ~10 live assertions. ⚑ Confirm with the
+client.
+
+### THE ONE QUESTION THE CLIENT STILL HAS TO ANSWER
+
+**When a request is never reviewed and its slot passes, what happens?**
+(i) the slot is quietly released and the request marked lapsed, **with no email**
+— probably what "no automatic cancellation" actually meant; or (ii) nothing at
+all, and the office cleans up by hand. Cheap to build either way, **expensive to
+un-say**, because it lands in T3's customer copy and in how the office is
+trained.
+
 ## The $150 travel fee arithmetically breaks the free path
 
 **This is the finding that decides whether T2 can happen at all.**
@@ -340,12 +453,36 @@ path** — Checkout Session, payment link, 12-hour deadline, expiry cron, the lo
 **Charging the $150 through the booking system resurrects every single thing T2
 exists to retire.** So:
 
-- **Disclosure-only (recommended, and it matches what the client described).**
-  The fee is spoken at confirmation and lands on the office's final invoice,
-  outside this repo. Reuse `travel_fee_cents` as the *disclosed* figure with
-  `total_amount_cents = 0` so the free path still fires — and comment that
-  semantic change loudly, it is the same hazard class as forking the slot
-  predicate. **No migration. T10 unnecessary.**
+- **Disclosure-only. CONFIRMED by the client 2026-09-01: handled entirely
+  outside the system.** The fee is spoken at confirmation and lands on the
+  office's final invoice, outside this repo. **No migration. T10 is struck, not
+  deferred** — decision 8 leaves no GST-bearing supply in the repo.
+
+  ⚠️ **~~Reuse `travel_fee_cents` as the disclosed figure with
+  `total_amount_cents = 0`.~~ CORRECTED — that does not work.** `amountsFrom`
+  (`review.ts:225-231`) computes `totalCents = base + travel + gst` **from the
+  form fields**, and `review.ts:301` routes on that total. Typing 150 into
+  `travel_fee` sends the booking to the **paid** path — Checkout Session,
+  deadline, expiry cron, all of it. `approveFree` does write `travel_fee_cents`,
+  but it is only *reachable* when travel is zero. **Keep the fee out of the
+  codebase entirely, exactly as the decision table says.**
+
+  **Three changes are still mandatory, none optional:**
+  1. **Delete the travel-fee input.** `[id].astro:1804` still tells the office
+     *"$1.15/km round trip beyond 30 km"* — and **any non-zero value typed there
+     opens a Checkout Session on a free assessment.** Replace with a static line
+     naming the five municipalities and the flat $150, marked *"spoken at
+     confirmation — do not type an amount here."*
+  2. **`review.ts:225-227`'s fallback must become `0`** — see the footgun below.
+  3. **`booking-payment.ts:288`'s Stripe line** (*"Round trip beyond the free
+     radius"*) describes the retired rule. Dies with T2; wrong in the interim if
+     T2 slips.
+
+  ⚑ **Client decision: should the five municipalities live in code at all?** Right
+  now the boundary exists only in a conversation. One array in
+  `booking-config.ts` beside `CLOSED_WEEKDAYS`, rendered into that hint, is the
+  whole implementation — and this is a new organisation whose service area will
+  change.
 - **Collected in-system.** T2 cannot retire Checkout; the Interac mark-paid path
   must survive as the collection route; and the $150 becomes **the only
   GST-bearing supply in the system**, making T10 mandatory.
