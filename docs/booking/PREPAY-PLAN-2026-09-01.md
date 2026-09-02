@@ -63,6 +63,42 @@ not a single route. Check the callers before concluding a path does not exist.
 
 ---
 
+## THE CLIENT'S DECISIONS — FINAL, 2026-09-01
+
+Answered over two rounds on 2026-09-01. **This is the specification.** Anything
+elsewhere in this document that contradicts it is older and loses.
+
+| # | Decision | Notes |
+| --- | --- | --- |
+| 1 | **The on-site assessment is FREE**, unconditionally, for everyone | Answered as option (a) of a three-way question. Not "free to book, invoiced later" |
+| 2 | **ALL prices come off the website.** No tiers shown. **The customer is quoted after the visit** | Bigger than "drop Tier 1" — this is every price surface |
+| 3 | **Review-then-confirm**: book → `pending_review` → office reviews, may call → confirm or decline → notify → visit | `pending_review` already is this state |
+| 4 | **NO automatic cancellation, of any kind** | Deletes cron sweep 2. **New on 2026-09-01 and it removes a safety net** — see the stale-request problem below |
+| 5 | **No review SLA** — "as soon as they can" | Client declined to name a time |
+| 6 | **Photos optional** — recommended, not required | Currently mandatory since BK-22 |
+| 7 | **No weekend surcharge** | Removes the 1.5× multiplier and six copy surfaces |
+| 8 | **Flat $150 travel fee** outside **Edmonton / Spruce Grove / St. Albert / Beaumont / Leduc.** Told to the customer **verbally at confirmation**. Owed **only if they have the visit and then do not proceed.** **Handled entirely OUTSIDE the system** | No in-system charge, invoice or receipt *for now*. This keeps T2 possible — see the arithmetic section below |
+| 9 | **Jobber-style quoting/invoicing deferred**, revisit after this batch | Was ~$39/mo, one ticket. Not now |
+| 10 | Office wants to **book at any time from the admin panel**, including over an existing customer's slot, and to record work already done | The double-booking half is **countered**, not accepted — see `office_override` |
+
+### The standing context, and it changes how to build
+
+**This is a NEW organisation, learning by doing. They expect to change their
+minds as they learn.** Two 2026-09-01 answers already reversed earlier ones.
+
+**Therefore: build for cheap change, not for permanence.** Prefer one constant
+with many readers over a decision spread across files; prefer a config value over
+a hard-coded rule; and **do not build the elaborate version of anything whose
+shape is still being learned** — the waiver tracking, the quote object, the SMS
+channel, the reminder system. The client will tell you what they need after a
+month of real use. This is a deliberate instruction, not laziness.
+
+**What that means concretely for decision 8:** the $150 stays out of the codebase
+entirely. No column, no email block, no charge path. The only honest changes are
+the office-facing hint that still says *"$1.15/km beyond 30 km"* and the Stripe
+line item that says *"Round trip beyond the free radius"* — and the latter dies
+with T2 anyway.
+
 ## Google Business Profile — checked 2026-09-01, read-only
 
 First GBP evidence in this investigation. **Nothing was edited.**
