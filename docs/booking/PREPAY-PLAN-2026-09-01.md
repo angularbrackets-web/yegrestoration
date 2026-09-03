@@ -197,6 +197,48 @@ computed figures go. One exception worth keeping: the `sketch` description's
    requests they simply missed. **Do not treat this as settled forever — it is
    settled for now, by a client who said so.**
 
+### DECISION 16, 2026-09-02 — THE CLIENT IS EXPERIMENTING, NOT SETTLING
+
+**This reframes every ticket in this document and it was not written down until
+2026-09-03.** The user's words:
+
+> *"client is trying to understand what is working and what is not working... they
+> started with free assessment, then they thought its a good idea to try paid
+> booking, now they want to go back to free assessment, they feel like they are ok
+> to handle one or two bad customer bookings which end up free, moreover they will
+> be communicating well with customers on any bookings made and decide if its a
+> good fit, again, this is not final, they may change again, but they wanted to
+> experiment."*
+
+**Four things follow, and they bind:**
+
+1. **This is the THIRD pricing model in three weeks** — free → paid tiers → free.
+   A fourth is explicitly possible. **Every ticket here should be costed on the
+   assumption that it will be reversed**, not on the assumption it is permanent.
+2. **"One or two bad bookings which end up free" is an ACCEPTED cost.** Do not
+   design guards, gates or copy whose purpose is preventing a customer getting a
+   free assessment they did not deserve. The client has priced that risk and
+   taken it. *(This is why the free assessment is not a fraud surface and should
+   not be reviewed as one.)*
+3. **The office phone call is the qualifying step, by design.** The client will
+   talk to every customer and judge fit. So the software's job is to **surface
+   the request and get out of the way** — not to qualify, score or filter. It
+   also means the office desk is now load-bearing; see the operational risk in
+   `ROADMAP.md`.
+4. **The owner does NOT want jobs-per-month analysis.** They asked to experiment
+   and observe, not to model. `MEASURING-THE-FREE-CHANGEOVER.md` is the whole of
+   the agreed measurement and it is deliberately one page.
+
+**⚠️ The trap this decision creates:** an experiment that is expected to reverse
+makes *deletion* expensive and *structure* valuable. See BK-53's "delete to a
+boundary" section — the reversible thing is the structure, not the sentences,
+because the sentences get rewritten on every flip anyway.
+
+**⚠️ And the trap it does NOT remove:** free → paid → free is a **round trip**,
+not a random walk. It may be a concluded experiment rather than an oscillation.
+So do not build two-mode machinery on the assumption the $399/$699/$1,199 ladder
+specifically returns — §5's evidence pointed at **$99–149**, not at that ladder.
+
 ### The standing context, and it changes how to build
 
 **This is a NEW organisation, learning by doing. They expect to change their
