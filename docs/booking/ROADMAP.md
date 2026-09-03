@@ -74,6 +74,12 @@
 >    one to avoid** — you pay 1–2 conversion cycles now and again on any flip
 >    back, on the primary bidding signal, in the month the offer is being judged.
 >    This is T6, orphaned when T2 was struck.
+> ⚑ **AT ANY FLIP, EITHER DIRECTION: DRAIN FIRST.** `pending_review` rows
+>    submitted under the OLD copy must be resolved under the OLD rules before
+>    deploying — else a customer who read *"free"* gets a payment link, or one
+>    holding a live Checkout Session pays for what the site now calls free.
+>    Population is tiny today; **the check must be MADE at deploy time, not
+>    assumed.**
 > 1. **`BK-53` — prices off every surface**, plus the weekend 1.5× removal.
 > 2. **The invite-guard tightening.** ⚠️ **Smaller than this file claimed for two
 >    days — see the corrected Known-traps entry.** `paid_at` IS cleared
@@ -337,7 +343,22 @@ never been seen working in production either. One booking settles three:
 **There is no rehearsal available** — test mode cannot reach the database (see
 above), so the only test is a live one.
 
-### Operational items only the user can do — NONE of them done
+### Operational items only the user can do
+
+> **AGREED BY THE USER 2026-09-03 — commitments, not suggestions:**
+>
+> 1. **Brief the office** on the free model **and on their new role**: under
+>    decisions 3/4/5 the office review IS the booking gate, and under decision 16
+>    the office phone call IS the qualifying step. They have never been briefed,
+>    and `#37` — a real customer, job completed, paid twice, recorded `declined` —
+>    is the standing evidence that the panel under-records reality.
+> 2. **Request the carrier's August call detail record.** ⚠️ **SUPERSEDES
+>    `PREPAY-PLAN-2026-09-01.md`'s "Worth re-asking, previously declined".** Now
+>    agreed. `MEASURING-THE-FREE-CHANGEOVER.md` wants it **before the flip**, for
+>    a baseline answer rate — it is the only thing separating *"demand fell"* from
+>    *"we were on a job site and the phone rang out"*.
+
+**The rest below are still undone:**
 
 - **Brief the office.** A live risk since the P9 flip, and now including
   *"refunds happen in the admin panel, not in Stripe"*, which as of 2026-08-22
@@ -565,6 +586,24 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   whatever the invoicing work becomes. **Owner: the quotes/invoices workflow,
   when it is specified.** Do not delete §9's bullet; it is right about the
   mechanism and wrong only about the conclusion under decisions 1 and 9.
+
+- **THE RESEND BUTTON RE-RENDERS TODAY'S TERMS ONTO YESTERDAY'S CUSTOMER.**
+  Found 2026-09-02. `resend.ts` calls `planForAppointment(appointment, …, now)` —
+  **current constants against a stored row.** The numeric half is safe
+  (`paymentClaim`/`paidAmounts` derive from `settled`), but the terms block reads
+  `FEE_TERMS_ITEMS`, `feeTermsPaymentFor()`, `FEE_TERMS_REFUND` and
+  `FEE_TERMS_CREDIT` as **unconditional constants**. So once prices come off,
+  clicking Resend on a paid-era confirmed booking mails that customer **free-mode
+  terms, including a refund policy contradicting what they were charged.**
+  Production has real paid rows — `#36` was a live `cs_live_` charge of $628.43.
+  **Compounded by there being no per-booking snapshot of accepted terms:**
+  `terms_acked_at` is a bare timestamp, so nothing records *which* terms a row
+  agreed to. **A flip in either direction rewrites the evidence of what past
+  customers agreed to**, and it cannot be fixed retroactively.
+  **The fix is not a flag:** row-gate the terms block on `settled.totalCents > 0`,
+  exactly as `paymentClaim` eight lines above already is, and snapshot a
+  `terms_version` at insert. Severity: **HIGH — customer-facing, and the
+  irreversible half worsens with every booking taken.** **Owner: BK-53.**
 
 - **A GATE CAN BE CORRECT ABOUT THE DEFECT IT WAS WRITTEN FOR AND DECORATIVE
   ABOUT EVERY OTHER SPELLING OF IT.** Found 2026-09-02 by BK-51's adversarial

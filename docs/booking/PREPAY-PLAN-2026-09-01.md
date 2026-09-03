@@ -223,8 +223,9 @@ computed figures go. One exception worth keeping: the `sketch` description's
 3. **The office phone call is the qualifying step, by design.** The client will
    talk to every customer and judge fit. So the software's job is to **surface
    the request and get out of the way** — not to qualify, score or filter. It
-   also means the office desk is now load-bearing; see the operational risk in
-   `ROADMAP.md`.
+   also means the office desk is now load-bearing — and briefing them is now an AGREED
+   user commitment, recorded under `ROADMAP.md`'s "Operational items only the
+   user can do".
 4. **The owner does NOT want jobs-per-month analysis.** They asked to experiment
    and observe, not to model. `MEASURING-THE-FREE-CHANGEOVER.md` is the whole of
    the agreed measurement and it is deliberately one page.
@@ -742,7 +743,8 @@ that makes the assessment free.
 8. **Which is true — "Open 24 hours" or 30 slots a week, 11:30–15:30, Fridays
    closed?** Both are currently published.
 
-**Worth re-asking, previously declined:** the carrier's **call detail record** for
+**~~Worth re-asking, previously declined~~ — AGREED BY THE USER 2026-09-03.**
+The carrier's **call detail record** for
 August. It is free, needs no deploy, and is the only thing that separates "demand
 fell" from "we were on a job site and did not answer." GBP's 53 calls do not
 substitute — they are monthly and cover only the Google channel.
