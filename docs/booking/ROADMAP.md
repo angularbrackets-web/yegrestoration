@@ -34,12 +34,40 @@
 > issued, `paid_at` stamped — with none of the gates.
 >
 > ### BK-51's gates before it merges to `main`
-> 0. ⛔ **A DECISION FIRST: the Ads conversion dies with the free model.** A free
->    approval mints no Stripe session, and the booking conversion fires *only* on
->    the Stripe redirect — `/book/received/` fires nothing, by design. So
->    `Assessment booked` can never fire again. **The user chose to PAUSE the
->    campaign** (2026-09-02) rather than spend ~CA$59/day blind. Confirm it is
->    paused before BK-53 ships. This is T6, orphaned when T2 was struck.
+> ⏰ **HARD EXTERNAL DEADLINE, EXPIRES THIS WEEK AND UNRELATED TO ANY OF THIS.**
+> Booking **#36** was refunded in the live Stripe dashboard on **2026-08-20** and
+> the row still says on production that the money is ours. The cheap repair is a
+> `charge.refunded` resend. Stripe's Dashboard resend window is understood to be
+> **15 days → ~2026-09-04**, the CLI (`stripe events resend`) **30 days →
+> ~2026-09-19**; after that it is a hand repair forever. **`PREPAY-PLAN` asked for
+> this window to be re-derived from Stripe's own docs and it never was — so
+> confirm it in the Dashboard, where the presence or absence of the Resend button
+> is the definitive answer.** Day 13 as of 2026-09-02.
+>
+> 0. ⚠️ **A DECISION: the Ads conversion under the free model. CORRECTED
+>    2026-09-02 — the first version of this box overstated it.** A free
+>    approval mints no Stripe session, so `Assessment booked` effectively stops.
+>    **But it is NOT "zero conversion input", and the account is not going dark.**
+>    `CONVERSION` §3A's own table: **`Website call` (30) and `Calls from ads` (15)
+>    are Active and last fired Aug 31** — 45 of August's 66 conversions, both
+>    living in `Analytics.astro:29-35`, untouched by BK-51/52/53. Meanwhile
+>    `Assessment booked` has been **Misconfigured since Aug 20** and `Request
+>    quote` since **Aug 11**. So BK-53 does not kill a live signal; it makes an
+>    already-dead one structurally dead.
+>
+>    **And pausing is not free.** Google documents "campaign status" as a
+>    learning-disrupting change and "Reactivated" as a trigger for re-entering
+>    Learning; whether the accumulated model survives a pause is **not stated in
+>    Google's docs** — do not assume either way. Nothing removes a dark
+>    conversion action before **13 months**, and archiving is reversible.
+>
+>    **Therefore the recommendation to pause was made on a false premise and is
+>    withdrawn.** The honest options are: leave it running on the phone
+>    conversions that are actually firing; or pause for budget reasons, knowing it
+>    costs relearning. **Re-pointing the conversion to `/book/received/` is the
+>    one to avoid** — you pay 1–2 conversion cycles now and again on any flip
+>    back, on the primary bidding signal, in the month the offer is being judged.
+>    This is T6, orphaned when T2 was struck.
 > 1. **`BK-53` — prices off every surface**, plus the weekend 1.5× removal.
 > 2. **The invite-guard tightening.** ⚠️ **Smaller than this file claimed for two
 >    days — see the corrected Known-traps entry.** `paid_at` IS cleared
