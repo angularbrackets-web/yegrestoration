@@ -1197,21 +1197,38 @@ measured against seven days of a six-day-old booking system. The Interac ledger
 names roughly **eleven payers across two months — that may be the entire
 company.** At that volume, **one referral source, one week away, or one storm is
 the whole signal**, and a statistical apparatus is being applied to single-digit
-monthly job counts. **Nobody has asked how many jobs a month this business
-normally does.**
+monthly job counts. ~~**Nobody has asked how many jobs a month this business
+normally does.**~~ **ASKED AND DECLINED, 2026-09-03 — see decision 16 in
+`PREPAY-PLAN-2026-09-01.md`.** The owner explicitly does not want jobs-per-month
+modelling; they asked to experiment and observe. `MEASURING-THE-FREE-CHANGEOVER.md`
+is the whole of the agreed measurement. **Do not ask again.**
 
 ### The three to chase first
+
+> **STATUS 2026-09-03: #1 is DONE, #2 is DECLINED, #3 is AGREED.** Read the
+> annotations before acting on any of them — this list predates the client's
+> decisions and two of its three items have moved.
 
 1. **Google Business Profile — Performance data and account status.** Ten
    minutes, one login, six months of day-level history on the non-paid phone and
    map channel. Highest information density left anywhere.
-2. **The job list with dates, June–August, split insured vs self-pay.** §3D proved
+2. ~~**The job list with dates, June–August, split insured vs self-pay.**~~
+   ⛔ **DECLINED by the owner 2026-09-03 (decision 16). Do not chase it.** Its
+   closing clause — *"tells us whether $399 is a coherent product"* — is moot:
+   decision 12 removed fixed pricing and decision 1 made the assessment free.
+   ~~ §3D proved
    payments cannot date demand; only jobs can. It sizes the catastrophe tail
    against a market rate, dates the July storm wave against the Aug 15/16 break,
-   and tells us whether $399 is a coherent product for the customers who remain.
+   and tells us whether $399 is a coherent product for the customers who remain.~~
 3. **The carrier's call detail record for August.** The only measurement that can
    separate *"demand went away"* from *"we were on a job site."* **The plan has
    been asking the client to describe this; ask for the file.**
+   ✅ **AGREED BY THE USER 2026-09-03.** `MEASURING-THE-FREE-CHANGEOVER.md` wants
+   it **before the flip**, so there is a baseline answer rate.
+
+*(#1, the GBP check, was **DONE read-only 2026-09-01** — verified, not suspended.
+Its artifact is the "Google Business Profile" section of `PREPAY-PLAN`. **Do not
+re-run it:** editing a service-area GBP is a suspension trigger.)*
 
 ## 4. FINDINGS NOBODY WAS LOOKING FOR
 
