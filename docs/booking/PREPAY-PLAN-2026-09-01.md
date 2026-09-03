@@ -1,7 +1,13 @@
 # Free-booking changeover — plan of record
 
-**Opened 2026-09-01.** The client's 2026-09-01 decisions, costed. Nothing here is
-built. Read `ROADMAP.md`'s READ FIRST and `CONVERSION-2026-08-31.md`'s START
+**Opened 2026-09-01.** The client's 2026-09-01 decisions, costed.
+
+> ⚠️ **"Nothing here is built" WAS TRUE ON 2026-09-01 AND IS FALSE NOW.**
+> **BK-50** (the unreviewed-request safety net) and **BK-51** (T1's money half —
+> the phantom-price fix) are **built, reviewed and committed, NOT pushed.** This
+> document does not mention BK-51 anywhere else, and its decision-15 table below
+> cites line numbers BK-51 moved. **Read `docs/booking/tickets/BK-51.md` and
+> `ROADMAP.md`'s P12 table before treating anything here as unbuilt.** Read `ROADMAP.md`'s READ FIRST and `CONVERSION-2026-08-31.md`'s START
 HERE first — this document assumes both.
 
 ---
@@ -137,18 +143,24 @@ given a better one is the normal case, not a failure.
 
 **What it means, concretely:**
 
-| # | Change | Site |
-| --- | --- | --- |
-| 1 | Tier picker **stays**, prices removed | `BookingForm.svelte` |
-| 2 | Tier becomes **optional** on the public door | `booking-payload.ts:285-287`, `booking-form.ts:273-274` |
-| 3 | Approval **no longer requires a tier** | `review.ts:215`, `:246` |
-| 4 | The panel must render **Approve** for a tier-less row | `[id].astro:1764` — today that arm offers **Decline only** |
-| 5 | Amount defaults to **$0.00**, fallback to `0` | `[id].astro:1776`, `review.ts:227` |
-| 6 | Travel-fee input deleted | `[id].astro:1804` |
+> **⚠ EVERY LINE NUMBER IN THIS TABLE WAS RE-DERIVED 2026-09-02 AFTER BK-51.
+> Five of the original six were stale or dead.** BK-51 edited both `review.ts`
+> and `[id].astro`, which is where every drifted citation in this whole document
+> lives. Cite the symbol, then grep.
+
+| # | Change | Site (re-derived 2026-09-02) | State |
+| --- | --- | --- | --- |
+| 1 | Tier picker **stays**, prices removed | `BookingForm.svelte:1137-1187` (picker), and prices sit in **four** places not one: `:1173` per-radio, `:1198-1215` the quote block, `:1115` the `FEE_TERMS_ITEMS` terms box, `:1150-1151` `AFTER_HOURS_NOTE` (*"1.5× the weekday price"* — a price claim with no dollar sign) | **not started** — belongs with the prices-off ticket |
+| 2 | Tier becomes **optional** on the public door | `booking-payload.ts:285-287` *(still exact)*, `booking-form.ts:272-274` *(was `:273-274`)* | **not started** |
+| 3 | Approval **no longer requires a tier** | `review.ts:220` *(was `:215`)* and `:263-264` *(was `:246`; **`:246` is now the travel refusal** — do not edit it by line number)* | **not started** |
+| 4 | The panel must render **Approve** for a tier-less row | `[id].astro:1818` *(was `:1764`)*; the Decline-only arm is `:1928-1948` | **not started** |
+| 5 | Amount defaults to **$0.00**, fallback to `0` | `[id].astro:1830`, `booking-review.ts:206-209` (`approvalAmountCents`) | ✅ **DONE by BK-51** — verify, do not redo |
+| 6 | Travel-fee input deleted | `[id].astro:1841-1878` is now prose only; the route refuses a non-zero fee at `review.ts:245` | ✅ **DONE by BK-51.** ⚠ The original citation `:1804` was the **hint paragraph**; deleting it alone would have left the live input. See ROADMAP Known traps |
 
 **⚠️ FOUND WHILE CONFIRMING THIS, AND IT DEFEATS THE STATED REQUIREMENT.**
 The office's only view of the chosen type is
-`[id].astro:770-772`, and it is **gated on `money && money.kind !== 'none'`** —
+`[id].astro:806-859` (**re-derived 2026-09-02; was cited as `770-772`, which
+drifted ~39 lines**), and it is **gated on `money && money.kind !== 'none'`** —
 it renders the tier name *inside* the price block. Under a free assessment
 `money.kind` is `'none'`, so **the type the customer chose stops being displayed
 anywhere.** The decision says it must be *"available for the client to view as

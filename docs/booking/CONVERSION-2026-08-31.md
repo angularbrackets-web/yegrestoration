@@ -91,7 +91,11 @@ recorded in the clean window's standing caveats.
 **W15 is DONE — 2026-09-02.** `#38` was the user's own end-to-end test, cancelled
 through the admin panel. It was never a real customer; the "real Sep 6 slot"
 framing in earlier drafts of this file was wrong. Next: the
-read-only health checks (W2 GBP, W3 Ads Policy Manager), then instrumentation
+read-only health checks — **W2 (GBP) IS DONE: `PREPAY-PLAN-2026-09-01.md`'s
+"Google Business Profile" section IS the W2 artifact, read-only, 2026-09-01,
+verified/not-suspended. DO NOT RE-RUN IT** — W2's own body warns that editing a
+service-area GBP can trigger suspension, so re-entering that surface for an
+answer already in hand is a live risk. **Only W3 remains**, then instrumentation
 (W5–W7), then compliance, then the surface defects.
 
 ## Blocked, and on what
@@ -1417,7 +1421,7 @@ explanation is true is in §7B, not here.
 
       **DONE — BK-49, committed `22418dc` on 2026-08-31** (implementation review
       0 blockers / 5 should-fix / 6 nits, all resolved); 8 red rows; typecheck 0,
-      build clean, 23/23 verify scripts green. **Committed, not pushed** — no
+      build clean, 23/23 verify scripts green. **Committed and PUSHED — LIVE.** *(This read "not pushed" until 2026-09-02; verify with `git branch -r --contains 22418dc`, never from this line.)* — no
       production code, so it rides with the next release. **The box is left
       unticked deliberately: this file's own rule is that a box is read by its
       body, and the body below is what a next session must act on.** Four
@@ -1686,7 +1690,13 @@ deadlines at 3:58 a.m., and the insurance-credit wording.
   pre-prepay claim, which must not survive the flip by even one deploy."*
   Re-scope it in a ticket; do not quietly edit. Then grep the claim across
   `src/` in **both** grammars, per CLAUDE.md's copy-inventory trap.
-- **Do not make `approveFree` ($0 approval) the default** no-payment path. Every
+- ⚠ **PARTLY WITHDRAWN 2026-09-02 — see `ROADMAP.md` Known traps for the full
+  resolution. The mechanism below is right; the conclusion no longer binds.**
+  Decision 1 makes the assessment free, so no money is taken at the visit for it,
+  and job billing is deferred entirely to the future quotes/invoices workflow
+  (decision 9), outside this repo. **The half that DOES still bind: revenue views
+  read zero.** BK-51 has made `approveFree` the default and shipped (committed,
+  not pushed). ~~**Do not make `approveFree` ($0 approval) the default** no-payment path.~~ Every
   such row records `payment_status='paid'`, `paid_amount_cents=0` — revenue views
   read zero — and the GST registration line is suppressed when there are no
   amounts (`booking-email.ts:557-566`). If money is then taken at the visit,

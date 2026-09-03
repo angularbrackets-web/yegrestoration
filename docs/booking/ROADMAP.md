@@ -1,5 +1,64 @@
 # Booking system — roadmap
 
+> ## ✅ RESOLVED 2026-09-02 — the deploy coupling is GONE, and here is the shape
+>
+> **BK-50 IS LIVE.** Pushed `8b81fb0..73e21ce` on 2026-09-02. Its two `src/`
+> files (`BookingForm.svelte`'s post-submission timing line, and the admin
+> Upcoming table's Status column + unreviewed count) are in production.
+>
+> **BK-51 IS NOT, AND CANNOT BE PUSHED BY ACCIDENT.** Its code lives on the local
+> branch **`bk51-gated`**, not on `main`. `main` now equals `origin/main`, so a
+> bare `git push` ships nothing. **This is structural, not a warning to
+> remember.**
+>
+> ```bash
+> git log --oneline origin/main..main     # expect EMPTY
+> git log --oneline main..bk51-gated      # BK-51's commits live here
+> git checkout bk51-gated                 # to work on BK-51 / BK-53
+> ```
+>
+> **⚠️ THE DOCS ARE ON `main`; THE GATED CODE IS ON `bk51-gated`.** This file,
+> and tickets BK-51/52/53, were copied onto `main` deliberately so a cold session
+> reads current documentation without checking out the gated branch. **The
+> `src/` and `scripts/` changes for BK-51 exist ONLY on `bk51-gated`.** If a
+> ticket describes code you cannot find, you are on `main` — that is expected.
+>
+> **⚠️ Do NOT `git push origin bk51-gated`** without first confirming Vercel
+> Preview environment isolation. A preview deploy of BK-51 pointed at the
+> production Neon database would allow a real free approval — email sent, ICS
+> issued, `paid_at` stamped — with none of the gates.
+>
+> ### BK-51's gates before it merges to `main`
+> 0. ⛔ **A DECISION FIRST: the Ads conversion dies with the free model.** A free
+>    approval mints no Stripe session, and the booking conversion fires *only* on
+>    the Stripe redirect — `/book/received/` fires nothing, by design. So
+>    `Assessment booked` can never fire again. **The user chose to PAUSE the
+>    campaign** (2026-09-02) rather than spend ~CA$59/day blind. Confirm it is
+>    paused before BK-53 ships. This is T6, orphaned when T2 was struck.
+> 1. **`BK-53` — prices off every surface**, plus the weekend 1.5× removal.
+> 2. **The invite-guard tightening.** ⚠️ **Smaller than this file claimed for two
+>    days — see the corrected Known-traps entry.** `paid_at` IS cleared
+>    (`review.ts:404`, `:616`, `:754`), so the guard is not decorative; it means
+>    *"this row passed through `confirmed`"*. What grows is volume, not kind.
+>    **It does not have to block the push.** Still unticketed.
+
+> ## 🔢 THE NUMBERING, because there are eight schemes and none is self-explaining
+> | Scheme | What it is | Files? |
+> | --- | --- | --- |
+> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-51**; next free is **BK-52**. | ✅ |
+> | **T1–T11** | Plan-internal ticket *ideas* in `PREPAY-PLAN`. Prose bullets nobody is obliged to update. **T2 and T10 are STRUCK. T13 never existed.** | ❌ |
+> | **W0–W27** | A separate work list in `CONVERSION` §7. | ❌ |
+> | **Task 1–7** | Subtasks *inside* BK-23 only. | ❌ |
+> | **Deploy 1 / 1.5 / 2 / 3** | Historical release groupings. | ❌ |
+> | **R1–R4** | Discipline rules in `CONVERSION` §3. | — |
+> | **R14, R30–R33** | Red-observed rows inside tickets. **`R4` the rule ≠ `R14` the row.** | — |
+> | **#36 / #37 / #38** | Production appointment row ids. | — |
+>
+> **Live cross-scheme mappings a cold reader will otherwise miss:**
+> **BK-51 IS "T1's money half"** — `PREPAY-PLAN` never says so. **T10 = W25**
+> (T10 struck, W25 still listed live). **T7 ≠ W7** — unrelated work, ordered in
+> the same sentences.
+
 > ## ⛔ READ FIRST — 2026-08-31
 > **Web bookings collapsed on 2026-08-16 and the cause is NOT RECOVERABLE.**
 > Before touching the booking funnel, terms copy, pricing, or the Google Ads
@@ -68,7 +127,7 @@
 > real customer, and it was cancelled through the admin panel. Every earlier
 > line calling its Sep 6 slot "real" was wrong; no customer was ever affected
 > and there is no money to return. NEXT: the
-> read-only health checks W2/W3.** W5/W6 are blocked on W9 (GA4 re-auth, user
+> read-only health check **W3** — **W2 is DONE** (the GBP check in `PREPAY-PLAN`, 2026-09-01; do not re-run it, it is a suspension-risk surface).** W5/W6 are blocked on W9 (GA4 re-auth, user
 > only). **W20/W21 ordering is an open question for the user.**
 >
 > ⚠ **"COMMITTED" IN THIS FILE NEVER MEANS "LIVE". On this project
@@ -113,8 +172,12 @@ Three things a session will otherwise get wrong: **photos are already mandatory*
 sitewide removal of "free" from every title, meta description and the nav label.
 Only the second explains the message form falling too.
 
-**No policy or code has been changed. The next step is measurement, not building.
-Do not build BK-47.**
+~~**No policy or code has been changed. The next step is measurement, not
+building.**~~ **BOTH CLAUSES ARE FALSE AS OF 2026-09-02.** Three tickets have
+shipped code since: **BK-49** (live), **BK-50** and **BK-51** (committed, NOT
+pushed). The "measurement first" ordering was overridden deliberately by the user
+on 2026-09-02 — W9 is blocked on them and BK-51 is not a funnel change.
+**`Do not build BK-47` still stands.**
 
 ---
 
@@ -320,11 +383,41 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   payment was refunded. Under the free assessment **every** approval runs
   `approveFree` → `markPaid({ method: 'none', amountCents: 0 })`, which stamps
   `paid_at` and sets `payment_status = 'paid'` (`booking-payment.ts:632`).
-  Nothing clears `paid_at` afterwards, and there will be no refunds to trip the
-  second check. **So after the changeover every row that has ever been approved
-  permanently satisfies both gates**, and a `cancelled` or `declined` booking
-  becomes **one dropdown selection away from `confirmed`** — dispatching a crew
-  and mailing a calendar invite.
+  > ## ⚠️ THIS ENTRY'S CENTRAL PREMISE IS FALSE. CORRECTED 2026-09-02.
+  >
+  > ~~*"Nothing clears `paid_at` afterwards, so after the changeover every row
+  > that has ever been approved permanently satisfies both gates."*~~
+  > **Wrong, and it inflated this trap's severity — and a push gate — for two
+  > days.** `paid_at` is set to NULL in **three** places, all added by BK-33's
+  > implementation review: `review.ts:404` (`approve`), `:616` (`rollBack`),
+  > `:754` (`approveFree`) — each on entry to `approved_awaiting_payment` or
+  > return to `pending_review`.
+  >
+  > `markPaid` is the only writer of `paid_at`, in the same statement as
+  > `status='confirmed'`. So the predicate is not stale, it is **precise**:
+  >
+  > ### `paid_at IS NOT NULL` ⟺ **this row passed through `confirmed`.**
+  >
+  > **The guard did not become decorative. It quietly became the RIGHT
+  > predicate** — exactly what a `confirmed_at` column would have been built to
+  > provide. `pending_review` and `approved_awaiting_payment` rows carry NULL, so
+  > the free-crew-dispatch door BK-44 closed **stays closed.**
+  >
+  > **What degrades is VOLUME, not kind.** The rows sitting one dropdown from
+  > `confirmed` grow from *customers who paid money* to *every request the office
+  > ever approved and then cancelled or declined*. Real and worth closing — but
+  > smaller than this entry claimed, and **not caused by BK-51.**
+  >
+  > **The stale claim is live in five more source locations:**
+  > `booking-status.ts:222-238` and `:370-376`, `booking-payment.ts:683-685`
+  > (which names an *"unassigned ticket"* for work BK-33 already did),
+  > `booking-admin.ts:565-572`, `update.ts:204-206`.
+  > **Owner: the invite-guard ticket.**
+  >
+  > **Method note, third recurrence of this shape:** the false premise was written
+  > here, copied verbatim into `tickets/BK-51.md`, quoted into a session handoff,
+  > and used to justify a **push gate** — none of the four checked it against
+  > `review.ts`. **Grep the claim; never inherit it.**
   **The rule stays in the code and stops protecting anything.** BK-44's
   192-transition matrix still passes, because the assertions test the rule, not
   what the rule now excludes — and `PREPAY-PLAN`'s corrected "second fact" cites
@@ -336,9 +429,13 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   that flipped verdict, but a **guard whose protection evaporated while every
   test stayed green.** Severity: HIGH (operational, not monetary — the money
   risk genuinely does disappear; the accidental-un-cancellation risk does not).
-  **Owner: T1.** Decide deliberately what protects the invite-holding set when
-  money no longer can, and re-derive BK-44's matrix against the new meaning
-  rather than the old predicate.
+  ~~**Owner: T1.**~~ **Owner: UNASSIGNED — needs a ticket, and it is GATE 2 on
+  BK-51's push.** BK-51 is T1's money half and **explicitly refused this item**
+  (`tickets/BK-51.md`), so "Owner: T1" named nobody. Decide deliberately what
+  protects the invite-holding set when money no longer can, and re-derive BK-44's
+  192-transition matrix against the new **meaning** rather than the intact
+  predicate. **BK-51 is the commit that flips the guard from live to
+  decorative** — not the prices-off deploy.
 
 - **Decision 8 destroys the only recorded artifact that can close BK-33, BK-46
   and BK-48.** All three are open *pending an artifact*, and this file names a
@@ -370,8 +467,176 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   includes travel, so any non-zero value there sends a *free* assessment down
   the paid path. **Severity: HIGH — it takes real money from a real customer,
   and it gets worse the day the assessment is announced as free.**
-  **Owner: T1.** Fix both fallbacks to `0` and delete the travel-fee input in
-  the same commit that makes the assessment free.
+  ~~**Owner: T1.** Fix both fallbacks to `0` and delete the travel-fee input in
+  the same commit that makes the assessment free.~~
+
+  **RESOLVED IN CODE by BK-51, 2026-09-02 — committed, NOT PUSHED, therefore NOT
+  LIVE.** Kept in full because the shape recurs and because the fix went further
+  than this entry asked. Both fallbacks are `0`, the input and its hint are gone
+  (the `<div>`, `:1784-1806`, not the hint line), and `[id].astro:1820`'s
+  *"Suggested $399.00 before GST"* went with them — **the same phantom price
+  stated in prose, four lines below the constant, which this entry never named.**
+  The user overrode *"the same commit that makes the assessment free"*: BK-51 is
+  its own ticket and its own commit.
+
+  **What BK-51 found that this entry did not, and the reason the input was not
+  enough:** `[id].astro:587` reads `travel` **from the query string**, and
+  `review.ts` still parsed `travel_fee` from the form, so a hand-edited
+  `?confirm=1&base=0.00&travel=150.00` rendered a $150 confirm panel whose button
+  charged it. **Deleting a screen field does not close a route.** `amountsFrom`
+  now refuses any non-zero travel fee outright, which is the only form of the fix
+  that makes the claim *"no field can create one"* true.
+
+- **`approved-free-unsent` IS A REACHABLE PRODUCTION BRANCH WITH NO
+  BEHAVIOURAL ARM.** BK-51, 2026-09-02. `approveFree` now reports three
+  outcomes — the customer was written to, there was nobody to write to, or the
+  send failed. The third **cannot be produced in the verify harness**: it has no
+  Resend key, and a *muted* send is not a *failed* one, so `notified` is only
+  ever `'sent'` or `'none'` there. What IS pinned is that the flash key exists
+  (the derived `REVIEW_MESSAGES` completeness check fires when it is deleted —
+  measured). What is **not** pinned is that the branch is reached on a real
+  failure, which means the office-facing warning for "we tried and it did not
+  go" is untested on the path BK-51 made the default. Severity: medium —
+  operational, and it is the same shape as the guard BK-51 was written to fix.
+  The honest fix is a `deps`-injectable seam through the route;
+  `verify-booking-email.ts` already has one for other senders.
+  **Owner: unassigned, needs a ticket.** *(Recorded here because it lived only
+  in `BK-51.md`, and a defect recorded in a closed ticket is a defect nobody
+  reads.)*
+
+- **`CONVERSION` §9 FORBIDS WHAT `PREPAY-PLAN` MANDATES, AND BK-51 HAS BUILT
+  IT.** Found 2026-09-02 by a handoff audit; verified in both documents.
+  `CONVERSION-2026-08-31.md:1689` says *"**Do not make `approveFree` ($0
+  approval) the default** no-payment path"*, with a real reason: every such row
+  records `payment_status='paid'`, `paid_amount_cents=0`, so **revenue views
+  read zero**, and the GST registration line is suppressed when there are no
+  amounts — *"if money is then taken at the visit, the system produces no
+  GST-compliant artifact for a supply over $30."*
+  `PREPAY-PLAN` makes `approveFree` the confirm seam and BK-51 makes it the
+  default. **Nothing reconciled them, and the prescribed reading order hits the
+  mandate before the prohibition.**
+  **The resolution, stated here so it stops being an open contradiction.** Most
+  of the objection does not bind: the assessment is **free** (decision 1), so no
+  money is taken at the visit for it, and job billing is deferred entirely to the
+  future quotes/invoices workflow (decision 9) — outside this repo. **The half
+  that DOES still bind and is unaddressed: revenue views read zero.** Every
+  free-confirmed booking records a $0 payment, so any report counting
+  `paid_amount_cents` will show nothing for real work. That is not a blocker for
+  BK-51 — there are no such reports in this repo — but it is a live constraint on
+  whatever the invoicing work becomes. **Owner: the quotes/invoices workflow,
+  when it is specified.** Do not delete §9's bullet; it is right about the
+  mechanism and wrong only about the conclusion under decisions 1 and 9.
+
+- **A GATE CAN BE CORRECT ABOUT THE DEFECT IT WAS WRITTEN FOR AND DECORATIVE
+  ABOUT EVERY OTHER SPELLING OF IT.** Found 2026-09-02 by BK-51's adversarial
+  pass, which ran **eleven breaks against a twice-reviewed implementation and all
+  eleven stayed green** — four of them charging a real customer real money. The
+  ticket's own behavioural assertions were sound. Everything *around* them was a
+  source regex shaped for the exact strings that ticket happened to delete:
+  - banning `suggestedQuote.baseCents` never required `value="0.00"`, so a
+    hardcoded `value="399.00"` restored the original defect verbatim;
+  - banning `parseAmountCents(` in the route never required
+    `approvalAmountCents` to be **called**, so the route could hand-roll a parser
+    that strips commas before validating — reviving BK-23's comma-decimal bug,
+    where `46,50` charges **$4,650.00**;
+  - a *positive* pin (`name="action" value="approve"` exists in the file) was
+    satisfied by a **different panel's** button, so flipping the review panel's
+    button to `approve` skipped the confirm step entirely.
+  **Therefore, three rules.** (a) **Every negative pin needs its positive twin** —
+  ban the old spelling AND require the new one, by name. (b) **Pin the claim
+  shape, not the constant**: BK-51's panel now bans *any* money figure but one
+  named exception, which is `verify-cutover.ts`'s `BOOKED_CLAIM_SHAPES` pattern
+  that BK-51 cited and did not copy. (c) **A positive pin must be slice-scoped**,
+  or it is satisfied by any occurrence anywhere in the file. Severity: **high for
+  the method.** This is the sibling of CLAUDE.md's negative-assertion trap, one
+  level up: that one is about a pin covering the wrong claim, this one about a
+  pin covering the right claim in only one of its spellings.
+
+- **A DERIVED PIN THAT OVER-MATCHES IS A PIN THE NEXT PERSON LOOSENS.** BK-51,
+  2026-09-02. A new check derived the set of review outcomes by grepping
+  `review.ts` for every `? 'a' : 'b'` — and reported `payment-link`, a
+  `messageType` ternary 460 lines from any review outcome, as an unmapped flash
+  message. It cried wolf on its first run. **A derived pin is worth far more than
+  a hand-listed one** — this one catches a deleted flash key that would otherwise
+  render *nothing at all* to the office — **but it must parse the construct it is
+  about rather than pattern-match near it.** The fixed version reads the
+  `review:` expression and takes only a ternary's ARMS, never the condition's own
+  literals. **Therefore:** when a pin goes red on something that is not a defect,
+  the fix is a more precise derivation, never a looser one — and never deletion.
+
+- **`git checkout -- <file>` RESTORES TO HEAD, NOT TO WORKING STATE**, and used
+  to undo a red-first break it silently discards uncommitted work. BK-51,
+  2026-09-02: a break/restore loop over two production files wiped that round's
+  uncommitted fixes, after which the surviving verify scripts ran **green against
+  reverted sources** — a green that meant nothing. Caught only by grepping for a
+  constant that should have existed. **Therefore:** back the file up before
+  breaking it (`cp` to the scratchpad and restore from that), or commit first.
+  **Third sibling of the crashed-script and unlanded-break traps, and all three
+  mislead in the reassuring direction.**
+
+- **A RED-FIRST ROW THAT GOES GREEN MUST FIRST PROVE THE BREAK LANDED.** Found
+  2026-09-02 by BK-51. The recorded rule from BK-33/BK-49 is *"assert the run
+  COMPLETED — exit code and summary line — never a count of `✗` markers."*
+  BK-51's R14 satisfied that rule completely: the run completed, printed its
+  summary line, and exited **0**. The break had **not applied** — a `perl`
+  substitution silently failed to match the target import line's quoting, so
+  nothing was edited and a no-op was on its way to being logged as *"the
+  assertion did not fire"*. It was caught only by re-running with an assertion
+  that the target string existed before editing, at which point the row fired
+  normally.
+  **This is the crashed-script trap's sibling and it fails in the same
+  direction** — reassuringly. A crash produces no `✗`; a no-op produces a
+  legitimate green. Both are read as "the pin does not cover this", and both are
+  wrong. **Therefore:** every red-first break must assert its target exists
+  before it edits, and prefer a break that fails loudly (an `assert` in the
+  edit script) over a regex that can miss. Severity: low for production, **high
+  for the method** — it is the third distinct way this project's red-first
+  measurements have lied in the reassuring direction.
+
+- **A NEW BEHAVIOUR CAN BE INVISIBLE TO A 1,509-CHECK SUITE, and its red-first
+  row is the only thing that says so.** Found 2026-09-02 by BK-51. The ticket
+  added a branch to `approveFree` distinguishing a free approval that emailed
+  somebody from one that could not — office-entered rows may carry no email
+  (BK-35's P7 exemption), and the existing `approved-free` message tells the
+  office *"the customer has their confirmation and calendar invite"* on a row
+  where nobody was written to. **Deleting that branch changed NOTHING in the
+  whole suite**, because every free-path arm in `verify-booking-admin-db.ts`
+  inserts a row **with** an email address. The behaviour was shipped-and-unpinned
+  and only the red-first found it; a fourth arm was added and the suite went
+  1509 → 1513.
+  **Therefore:** a red-first row exists for every behaviour the ticket ADDS, not
+  only for every rule it changes — and the row that stays green on a landed break
+  is the finding, not a formality. Same family as BK-50's adversarial pass, where
+  six of seven breaks stayed green against twice-reviewed code.
+
+- **`review=approved-free` CONTAINS `review=approved`, and four assertions were
+  matching on the substring.** Found 2026-09-02 by BK-51; the **ninth** member of
+  the "assertion that cannot fail" family (the eighth was BK-49's `finally`-block
+  leftover check). `verify-booking-admin-db.ts` gated three paid-path arms and
+  one refund arm on `location.includes('review=approved')`. `review.ts:780`
+  redirects the $0 path to `approved-free`, so each arm would have reported
+  *"approving reports success"* while silently taking the goodwill path.
+  **It was concealing three of the fourteen reds BK-51's fallback change
+  produces**: predicted at eleven, measured at fourteen once the matchers were
+  anchored on the value boundary (`/[?&]review=(…)(?:&|$)/`). The obvious set-
+  membership rewrite reproduces the bug verbatim, because the first member still
+  substring-matches the longer value — **so the fix is a SHAPE, not an intent.**
+  **Therefore:** a redirect-outcome pin is anchored on the value boundary, and
+  when a fix is applied to N sites of a pattern, grep the pattern rather than
+  fixing the N the finding named.
+
+- **Two out-of-scope defects BK-51 recorded rather than fixed, both now
+  unowned because T2 is struck.** (a) `booking-payment.ts:288`'s Stripe line item
+  *"Round trip beyond the free radius"* describes the retired per-km rule and is
+  now **unreachable** — nothing can set a non-zero travel fee. (b)
+  `TRAVEL_FEE_CENTS_PER_KM` / `TRAVEL_FEE_FREE_RADIUS_KM` are **dead exports**
+  describing a *retired* rule, not a paused one: decision 8 replaced per-km with
+  a flat $150. BK-51 pins that nothing in `src/` reads them, which prevents
+  reintroduction without deleting them. (c) `booking-copy.ts:437` justifies live
+  customer-facing `FEE_TERMS_PAYMENT` with *"an editable amount **and a
+  travel-fee field at approval**"* — the second clause is false as of BK-51.
+  **Owner for all three: the prices-off copy ticket**, which is already opening
+  both files.
 
 - **Five statements go false the day cron sweep 2 is deleted, and they are
   spread across four files.** BK-50 **implements** the safety net for the client's
@@ -2832,7 +3097,10 @@ table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **Committed `<sha>`, NOT PUSHED — this carries production code including a customer-facing island, so pushing it IS the deploy.** |
+| BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **Committed `3542a0a`+`3e1f5bc`, NOT PUSHED — TWO gates:** the prices-off copy ticket **and** a replacement protection for the invite-holding set (see Known traps) |
+| BK-53 | **GATE 1 — prices off every surface**, plus the weekend 1.5× removal. Site, terms box, `/llms.txt`, and **every confirmation email**, which still prices and refunds an assessment nobody is charged for. **Blocks BK-51's push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02**, not started |
+| BK-52 | **Decision 15** — assessment type stays, becomes optional, stops gating approval; Approve renders for tier-less rows; the office's view of the type un-gated from the price block. **Does not unblock the push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02** with a full scoping pass — the plan's six-item table was missing its sharpest item (`appointmentMoney` hides the settled amount on tier-less rows) and 5 of 6 line numbers were stale |
+| BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **Committed `3770b66`, NOT PUSHED — this carries production code including a customer-facing island, so pushing it IS the deploy.** |
 
 **The lesson this phase paid for, worth the next ticket's attention:** two review
 rounds signed BK-50 off, and a third **adversarial** pass then ran seven breaks
