@@ -143,6 +143,10 @@ given a better one is the normal case, not a failure.
 
 **What it means, concretely:**
 
+> **⚠️ AND THEY RESOLVE AGAINST `bk51-gated`, NOT `main`** — BK-51's code is not
+> on `main`, so on `main` these land on unrelated code while looking freshly
+> verified. Check out `bk51-gated` before using them.
+>
 > **⚠ EVERY LINE NUMBER IN THIS TABLE WAS RE-DERIVED 2026-09-02 AFTER BK-51.
 > Five of the original six were stale or dead.** BK-51 edited both `review.ts`
 > and `[id].astro`, which is where every drifted citation in this whole document

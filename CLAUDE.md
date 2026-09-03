@@ -19,6 +19,21 @@ Read the area's `ROADMAP.md` before starting anything.
   Reviewers are always fresh agents, never forks, and receive only the ticket
   file, the diff, and gate output — never the implementer's conversation or
   reasoning.
+- **Adversarial pass** — a THIRD fresh agent, briefed to *break it*, not review
+  it: introduce real defects into the production code, run the gate, and report
+  every break that stays **green**. Added 2026-09-03 because it was already being
+  mandated by three tickets while this section defined no such thing.
+  **Triggered by: anything that moves money, changes a status transition, or
+  touches the appointment insert.** Explicitly **NOT** triggered by copy-only
+  tickets. It is not a third opinion — reviewers ask *"is this right?"*, an
+  adversary asks *"what still passes that shouldn't?"*, and only the second
+  question finds a pin shaped for the one spelling the ticket happened to delete.
+  Measured twice: BK-50, six of seven breaks green after two review rounds;
+  BK-51, **eleven of eleven** green, four of them able to charge a real customer.
+  Rules that make it honest — all three were paid for: **assert the break
+  LANDED** before scoring it; score on **(exit code, summary line)**, never a `✗`
+  count; and restore from a **file backup**, never `git checkout --`, which
+  reverts to HEAD and eats uncommitted work.
 - **Conflict** — findings are blocker / should-fix / nit. Blockers get fixed;
   refusing one in writing is allowed. Only a *disputed blocker* goes to a third
   fresh agent as tiebreaker. No standing third review.

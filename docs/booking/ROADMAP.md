@@ -1,5 +1,46 @@
 # Booking system — roadmap
 
+> ## ⏰ A DEADLINE THAT HAS NOTHING TO DO WITH ANY OF THE BOOKING WORK
+>
+> **Moved to its own block 2026-09-03: it was buried under a BK-51 heading, so a
+> reader who had decided BK-51 was parked skipped it entirely.**
+> Booking **#36** was refunded in the live Stripe dashboard on **2026-08-20** and
+> the row still says on production that the money is ours. The cheap repair is a
+> `charge.refunded` resend. Stripe's Dashboard resend window is understood to be
+> **15 days → ~2026-09-04**, the CLI (`stripe events resend`) **30 days →
+> ~2026-09-19**; after that it is a hand repair forever. **`PREPAY-PLAN` asked for
+> this window to be re-derived from Stripe's own docs and it never was — so
+> confirm it in the Dashboard, where the presence or absence of the Resend button
+> is the definitive answer.**
+>
+> **Do not read a day-count from this file — compute it.** The refund is dated
+> **2026-08-20**; `date -j -f %Y-%m-%d 2026-08-20 +%s` against today gives the
+> elapsed days. An earlier version of this line said "Day 13 as of 2026-09-02",
+> which was already wrong the next morning. **Write the check, never the answer**
+> — the same rule this file applies to deploy status.
+>
+
+> ## 🙋 EVERYTHING BLOCKED ON THE HUMAN — the one index, 2026-09-03
+> *(Assembled from five files. `### Operational items only the user can do` further
+> down is a 2026-08-22 list and is HISTORICAL — do not read it as current.)*
+>
+> | # | Item | Where |
+> | --- | --- | --- |
+> | 1 | ⏰ **`#36`'s `charge.refunded` resend** — cheap-repair window closes ~2026-09-04 | block above |
+> | 2 | ✅ **Brief the office** on the free model and their new qualifying role — **AGREED 2026-09-03** | Operational items |
+> | 3 | ✅ **Carrier's August call detail record** — **AGREED 2026-09-03**, wanted BEFORE the flip | `MEASURING-THE-FREE-CHANGEOVER.md` |
+> | 4 | **The Ads / T6 decision** — leave running (default), pause for budget, or re-point (avoid) | `BK-53.md` |
+> | 5 | **Confirm Vercel Preview env isolation** before `bk51-gated` is ever pushed to a remote | coupling block |
+> | 6 | **W9 GA4 re-auth** (`invalid_grant`) — blocks W5 | §7 of CONVERSION |
+> | 7 | **W20/W21 ordering** | below |
+> | 8 | **Sherwood Park / Fort Saskatchewan** — do they owe the $150? Shapes BK-53's copy | `BK-51.md` |
+> | 9 | **Client questions** #6 insurance credit, #7 founding year + BBB/IICRC/Licensed, #8 "Open 24 hours" vs 30 slots | Open questions |
+> | 10 | **Three measurement moves that must happen BEFORE the flip** — write today's numbers, pick success/failure numbers, pick the review date | `MEASURING-THE-FREE-CHANGEOVER.md` |
+>
+> **📏 The measurement plan is `docs/booking/MEASURING-THE-FREE-CHANGEOVER.md`** —
+> one page, deliberately. It contains three things that must happen **before**
+> BK-53 ships, and BK-53 is the next thing to ship.
+
 > ## ✅ RESOLVED 2026-09-02 — the deploy coupling is GONE, and here is the shape
 >
 > **BK-50 IS LIVE.** Pushed `8b81fb0..73e21ce` on 2026-09-02. Its two `src/`
@@ -34,22 +75,6 @@
 > issued, `paid_at` stamped — with none of the gates.
 >
 > ### BK-51's gates before it merges to `main`
-> ⏰ **HARD EXTERNAL DEADLINE, EXPIRES THIS WEEK AND UNRELATED TO ANY OF THIS.**
-> Booking **#36** was refunded in the live Stripe dashboard on **2026-08-20** and
-> the row still says on production that the money is ours. The cheap repair is a
-> `charge.refunded` resend. Stripe's Dashboard resend window is understood to be
-> **15 days → ~2026-09-04**, the CLI (`stripe events resend`) **30 days →
-> ~2026-09-19**; after that it is a hand repair forever. **`PREPAY-PLAN` asked for
-> this window to be re-derived from Stripe's own docs and it never was — so
-> confirm it in the Dashboard, where the presence or absence of the Resend button
-> is the definitive answer.**
->
-> **Do not read a day-count from this file — compute it.** The refund is dated
-> **2026-08-20**; `date -j -f %Y-%m-%d 2026-08-20 +%s` against today gives the
-> elapsed days. An earlier version of this line said "Day 13 as of 2026-09-02",
-> which was already wrong the next morning. **Write the check, never the answer**
-> — the same rule this file applies to deploy status.
->
 > 0. ⚠️ **A DECISION: the Ads conversion under the free model. CORRECTED
 >    2026-09-02 — the first version of this box overstated it.** A free
 >    approval mints no Stripe session, so `Assessment booked` effectively stops.
@@ -85,12 +110,19 @@
 >    days — see the corrected Known-traps entry.** `paid_at` IS cleared
 >    (`review.ts:404`, `:616`, `:754`), so the guard is not decorative; it means
 >    *"this row passed through `confirmed`"*. What grows is volume, not kind.
->    **It does not have to block the push.** Still unticketed.
+>    **⚖️ RESOLVED 2026-09-03 — IT DOES NOT BLOCK THE PUSH.** Three places gave
+>    three answers to a deploy question. The tie-break is the corrected fact:
+>    `paid_at` is cleared, so the guard means *"this row passed through
+>    `confirmed`"* and BK-51 does not break it. What grows is **volume** — rows
+>    one dropdown from `confirmed` go from *customers who paid* to *every request
+>    approved then cancelled*. Real, worth a ticket, **not a gate.**
+>    **GATE 1 (BK-53) is therefore the only blocker.** Any text elsewhere calling
+>    this GATE 2 or a push blocker is superseded by this line. Still unticketed.
 
 > ## 🔢 THE NUMBERING, because there are eight schemes and none is self-explaining
 > | Scheme | What it is | Files? |
 > | --- | --- | --- |
-> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-51**; next free is **BK-52**. | ✅ |
+> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-53**; **next free is BK-54.** *(BK-52 and BK-53 were drafted 2026-09-02.)* | ✅ |
 > | **T1–T11** | Plan-internal ticket *ideas* in `PREPAY-PLAN`. Prose bullets nobody is obliged to update. **T2 and T10 are STRUCK. T13 never existed.** | ❌ |
 > | **W0–W27** | A separate work list in `CONVERSION` §7. | ❌ |
 > | **Task 1–7** | Subtasks *inside* BK-23 only. | ❌ |
@@ -127,7 +159,7 @@
 > This file's W-list is still valid for the cause-independent items; the
 > free-booking changeover lives in that plan, not here.
 >
-> **BK-50 is implemented, reviewed (three rounds), committed and NOT PUSHED.**
+> ~~**BK-50 is implemented, reviewed (three rounds), committed and NOT PUSHED.**~~ **SHIPPED 2026-09-02 — LIVE.** Verify: `git branch -r --contains 3770b66`.
 > It is the safety net for deleting cron sweep 2 and **must be live before that
 > deletion ships.** See phase P12 below.
 >
@@ -343,7 +375,7 @@ never been seen working in production either. One booking settles three:
 **There is no rehearsal available** — test mode cannot reach the database (see
 above), so the only test is a live one.
 
-### Operational items only the user can do
+### Operational items only the user can do — ⚠️ HISTORICAL (2026-08-22). The current index is the 🙋 block at the top of this file.
 
 > **AGREED BY THE USER 2026-09-03 — commitments, not suggestions:**
 >
@@ -478,7 +510,12 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   > here, copied verbatim into `tickets/BK-51.md`, quoted into a session handoff,
   > and used to justify a **push gate** — none of the four checked it against
   > `review.ts`. **Grep the claim; never inherit it.**
-  **The rule stays in the code and stops protecting anything.** BK-44's
+  > ⚠️ **EVERYTHING FROM HERE TO THE END OF THIS ENTRY WAS WRITTEN ON THE FALSE
+  > PREMISE CORRECTED ABOVE, AND IS RETAINED ONLY AS HISTORY.** `paid_at` IS
+  > cleared. The guard is **not** decorative and BK-51 is **not** the commit that
+  > breaks it. Read the correction box, not what follows.
+
+  ~~**The rule stays in the code and stops protecting anything.** BK-44's
   192-transition matrix still passes, because the assertions test the rule, not
   what the rule now excludes — and `PREPAY-PLAN`'s corrected "second fact" cites
   the very same mechanism (*"`markPaid('none')` still stamps `paid_at`, so
@@ -530,8 +567,8 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
   ~~**Owner: T1.** Fix both fallbacks to `0` and delete the travel-fee input in
   the same commit that makes the assessment free.~~
 
-  **RESOLVED IN CODE by BK-51, 2026-09-02 — committed, NOT PUSHED, therefore NOT
-  LIVE.** Kept in full because the shape recurs and because the fix went further
+  **RESOLVED IN CODE by BK-51, 2026-09-02 — on branch `bk51-gated`, NOT on
+  `main`, therefore NOT LIVE.** Kept in full because the shape recurs and because the fix went further
   than this entry asked. Both fallbacks are `0`, the input and its hint are gone
   (the `<div>`, `:1784-1806`, not the hint line), and `[id].astro:1820`'s
   *"Suggested $399.00 before GST"* went with them — **the same phantom price
@@ -3175,10 +3212,10 @@ table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **Committed `3542a0a`+`3e1f5bc`, NOT PUSHED — TWO gates:** the prices-off copy ticket **and** a replacement protection for the invite-holding set (see Known traps) |
+| BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **On `bk51-gated`, NOT on `main` — TWO gates:** the prices-off copy ticket **and** a replacement protection for the invite-holding set (see Known traps) |
 | BK-53 | **GATE 1 — prices off every surface**, plus the weekend 1.5× removal. Site, terms box, `/llms.txt`, and **every confirmation email**, which still prices and refunds an assessment nobody is charged for. **Blocks BK-51's push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02**, not started |
 | BK-52 | **Decision 15** — assessment type stays, becomes optional, stops gating approval; Approve renders for tier-less rows; the office's view of the type un-gated from the price block. **Does not unblock the push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02** with a full scoping pass — the plan's six-item table was missing its sharpest item (`appointmentMoney` hides the settled amount on tier-less rows) and 5 of 6 line numbers were stale |
-| BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **Committed `3770b66`, NOT PUSHED — this carries production code including a customer-facing island, so pushing it IS the deploy.** |
+| BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **SHIPPED 2026-09-02 — LIVE** as part of the fast-forward `8b81fb0..73e21ce`. Verify with `git branch -r --contains 3770b66`, never from this line. |
 
 **The lesson this phase paid for, worth the next ticket's attention:** two review
 rounds signed BK-50 off, and a third **adversarial** pass then ran seven breaks
