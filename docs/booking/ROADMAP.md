@@ -42,7 +42,13 @@
 > ~2026-09-19**; after that it is a hand repair forever. **`PREPAY-PLAN` asked for
 > this window to be re-derived from Stripe's own docs and it never was — so
 > confirm it in the Dashboard, where the presence or absence of the Resend button
-> is the definitive answer.** Day 13 as of 2026-09-02.
+> is the definitive answer.**
+>
+> **Do not read a day-count from this file — compute it.** The refund is dated
+> **2026-08-20**; `date -j -f %Y-%m-%d 2026-08-20 +%s` against today gives the
+> elapsed days. An earlier version of this line said "Day 13 as of 2026-09-02",
+> which was already wrong the next morning. **Write the check, never the answer**
+> — the same rule this file applies to deploy status.
 >
 > 0. ⚠️ **A DECISION: the Ads conversion under the free model. CORRECTED
 >    2026-09-02 — the first version of this box overstated it.** A free
