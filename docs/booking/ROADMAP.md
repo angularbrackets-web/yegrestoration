@@ -23,6 +23,11 @@
 > `src/` and `scripts/` changes for BK-51 exist ONLY on `bk51-gated`.** If a
 > ticket describes code you cannot find, you are on `main` — that is expected.
 >
+> **Merging later:** `main`'s docs are AHEAD of `bk51-gated`'s. When BK-51's
+> gates clear, rebase `bk51-gated` onto `main` and resolve every `docs/` conflict
+> by **taking `main`'s side** — the branch carries code, `main` carries the
+> record.
+>
 > **⚠️ Do NOT `git push origin bk51-gated`** without first confirming Vercel
 > Preview environment isolation. A preview deploy of BK-51 pointed at the
 > production Neon database would allow a real free approval — email sent, ICS
