@@ -1622,8 +1622,20 @@ explanation is true is in §7B, not here.
 - [ ] **W21 · Strike "free" / "no-obligation" from the two Ads description assets.
       Same day as W20, nothing else touched.** A broader creative rewrite is out
       of scope — it restarts PMax asset learning.
-- [ ] **W22 · Disclose that a travel fee may apply beyond 30 km, before payment.
-      UNTICKETED until now.** `#38` proves it is real (57750 → 65888 = CA$50 +
+- [ ] **W22 · Disclose that a travel fee may apply beyond 30 km, before payment.**
+      ✅ **OWNED 2026-09-05 — BK-53 TAKES IT.** No longer unticketed. Decision 17
+      makes this urgent rather than tidy: the client's answer is *"visit is free
+      **except for travel fee** if client decides when confirming the booking"*,
+      so **"free" is now a CONDITIONAL claim** and BK-53 is the deploy that puts
+      the word "free" on the site. Disclosing the fee and claiming the visit is
+      free are **the same sentence, on the same surface, in the same push** —
+      splitting them would ship an unqualified "free assessment" for one deploy.
+      BK-53's gate enforces it as a **coupling pin**: the free claim and the
+      travel-fee qualifier must co-occur or the build is red.
+      **The AMOUNT is still undecided and is still a client question** — this
+      item's own rule, unchanged: *disclosing that a fee may apply needs no
+      client decision; naming the amount does.*
+      ~~**UNTICKETED until now.**~~ `#38` proves it is real (57750 → 65888 = CA$50 +
       GST); the terms copy's own comment concedes the form price is *"false for a
       job beyond 30 km."* **Disclosing that a fee may apply needs no client
       decision; naming the amount does.** **Reviewed.**
