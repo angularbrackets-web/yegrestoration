@@ -1233,7 +1233,17 @@ re-run it:** editing a service-area GBP is a suspension trigger.)*
 ## 4. FINDINGS NOBODY WAS LOOKING FOR
 
 - **`src/pages/[service].astro:79` says "About 30 minutes, no obligation"** — live
-  on all six service pages, which are the Google Ads landing pages, on the
+  on all ~~six~~ **FOUR** service pages ⚠ **(count corrected 2026-09-05 — verified
+  three ways: `services.ts` has four `page:` blocks, four slugs, and `dist/`
+  builds four directories: water-damage-restoration, fire-smoke-damage,
+  mold-removal, sewage-cleanup. Storm is deliberately page-less,
+  `services.ts:323`)**, ⚠ **which are ASSERTED to be the Google Ads landing
+  pages BY THIS SENTENCE ALONE, with no source — and §3A's own Ads pull captured
+  no asset-group final URL. The campaign is Performance Max, which has no ad
+  groups. Meanwhile `:1241` records the live ad "pointing at a page that charges
+  $399" — and these four pages have NEVER carried a price, so that sentence
+  points at `/book/`. TREAT THE LANDING-PAGE PREMISE AS UNTESTED. Reading the
+  asset-group final URLs is read-only and folds into W3.** On the
   primary CTA. False under the credit model. `ContactSection.astro:59-69` already
   argues this in the repo's own words; the argument never reached this file.
   Same Competition Bureau general-impression exposure BK-29 existed to close.

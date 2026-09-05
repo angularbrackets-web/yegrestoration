@@ -503,6 +503,37 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+### ⚠️ `/insurance-claims/` GIVES AWAY THE $699 DELIVERABLE, FOR FREE, TODAY — found 2026-09-05
+
+**Severity: moderate, and live right now — it does NOT wait for BK-53.**
+**Owner: needs a ticket. Recorded without one deliberately, per the
+out-of-scope rule.**
+
+`src/pages/insurance-claims.astro:70` promises, in an FAQ answer:
+
+> *"**At the assessment we give you a written scope with real costs**, so you
+> can compare the repair against your deductible and likely premium impact and
+> decide with actual numbers."*
+
+**"Real costs" is a repair estimate, and a repair estimate is the `$699` tier**
+(`booking-copy.ts:403`). The page also promises unconditionally at `:269-271`
+that *"**Every job includes** moisture mapping, a photo inventory … and a
+written scope of work"*, and at `:36` that *"**We submit the scope**, answer the
+adjuster's questions, and agree on pricing directly with your insurer"* — while
+`booking-copy.ts:335-338` **bans** any claim that the assessment is billed to an
+insurer, scoped by design to the booking block and never applied to this page.
+
+**Why it matters beyond tidiness:** this is a claim carried **by a sentence, not
+by a constant**, on a page `verify-cutover.ts`'s five-file `CLAIM_SURFACES`
+does not scan — the copy-inventory trap, and the second instance found this
+session on a page nobody had inventoried. It also **shapes the free-visit
+decision**: any answer that makes the written scope a *paid* deliverable
+contradicts a promise already live here.
+
+**Do not fix inline in BK-53.** BK-53 owns the booking funnel's price claims;
+this is an unrelated page making a deliverable claim, and folding it in would
+widen a ticket already carrying 28 blockers.
+
 - **⚠ THE FREE ASSESSMENT SILENTLY DISARMS BK-44's INVITE-CROSSING GUARD, and
   the plan of record reads the mechanism as reassurance.** Found 2026-09-02 by
   an independent audit; verified in source.
