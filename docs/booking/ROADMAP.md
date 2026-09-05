@@ -504,9 +504,39 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
-### ⚠️ `/insurance-claims/` GIVES AWAY THE $699 DELIVERABLE, FOR FREE, TODAY — found 2026-09-05
+### 🔴 THREE LIVE SURFACES SAY THE ASSESSMENT PRODUCES A WRITTEN DOCUMENT. IT DOES NOT. — found 2026-09-05
 
-**Severity: moderate, and live right now — it does NOT wait for BK-53.**
+⚠️ **ESCALATED THE SAME DAY IT WAS WRITTEN.** This entry was first recorded as
+*"`/insurance-claims/` gives away the $699 deliverable"* — **severity moderate,
+a pricing leak.** Hours later **decision 20** (user: *"client assesses the
+site/damage, **nothing is handed over to the customer in writing**"*) turned it
+into something else: these are **false statements about what the visit
+produces**, not generous ones. The original framing is kept below because the
+pricing leak is still true; **the severity is now driven by the falsity.**
+
+**Severity: HIGH, live right now, and it does NOT wait for BK-53.**
+
+**All three attach a written document TO THE ASSESSMENT:**
+
+| Surface | The claim |
+| --- | --- |
+| `insurance-claims.astro:70` | *"**At the assessment we give you a written scope with real costs**"* — worst of the three: it is in the claim-filing context, where a customer is most likely to rely on it, **and** "real costs" is a repair estimate, the `$699` tier |
+| `services.ts:389` (sewage FAQ) | *"**The assessment gives you a written scope**"* |
+| `services.ts:291` (mould FAQ) | *"we start with **an assessment and a written scope**, so you know the cost before any work begins"* |
+
+✅ **The seam — do NOT over-sweep.** *"a written scope **before work starts**"*
+stays **TRUE** under decision 20, because the quote precedes the work:
+`services.ts:262`, `:226`, `:106`, `:346`, `TestimonialsSection.astro:18-19`,
+`about.astro:195`, `llms.txt.ts:38`, and `insurance-claims.astro:30`/`:270`
+(both scoped to *"every **job**"*). **Only the three above are false.**
+
+⚠️ **None is reachable from any constant** — all three are prose in their own
+words, and `verify-cutover.ts`'s five-file `CLAIM_SURFACES` sees none of them.
+**CLAUDE.md's copy-inventory trap, third instance inside this one ticket.**
+
+**Owner: NEEDS A TICKET. Do not fix inline in BK-53** — that ticket owns the
+booking funnel's price claims and already carries 28 blockers; these are
+deliverable claims on unrelated pages.
 **Owner: needs a ticket. Recorded without one deliberately, per the
 out-of-scope rule.**
 
@@ -3282,7 +3312,7 @@ table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
 | BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **On `bk51-gated`, NOT on `main` — ~~TWO gates~~ ONE GATE. CORRECTED 2026-09-05:** this row was not rewritten when the invite-guard question was resolved on 2026-09-03, and it contradicted the top-of-file block for two days — **the rule-rewrite trap, firing on this file's own table.** The invite guard **does not block the push** (`paid_at` IS cleared at `review.ts:404`, `:616`, `:754`, so the predicate is precise, not stale; what degrades is volume, not kind). **GATE 1 — BK-53, the prices-off copy ticket — is the only blocker.** The invite-guard replacement is real, unowned and still unticketed, but it is not a gate |
-| BK-53 | **GATE 1 — prices off every surface**, plus the weekend 1.5× removal, the resend/terms-snapshot fix, **and W22's travel-fee disclosure** (see below). Site, terms box, `/llms.txt`, and **every confirmation email**. ⚠ **SEQUENCING CORRECTED 2026-09-05: "blocks BK-51's push" does NOT mean BK-53 ships first.** Built **ON `bk51-gated`**; **BK-51 + BK-53 ship in ONE push, never separately** — alone on `main` BK-53 gives a priceless site while `[id].astro:505-512` still pre-fills $418.95 and mints Checkout Sessions, which is the drain step's own worst case applied to every new booking | **Reviewed** + adversarial *(the "copy-only, plain Reviewed" claim was struck 2026-09-05 — it touches what the appointment insert's consent attests to, moves money claims on a live send path, and removes the live price display from the public form)* | 🔁 **revised 2026-09-05 — awaiting user sign-off on copy, then a second plan review.** Planned, then plan-reviewed by two fresh agents on separate lanes: **16 blockers**, including that **the build gate itself forbids the copy this ticket exists to ship** (four `free assessment` bans, one over every file in `dist/`). Revision 2 answers all 16 and replaces the bans with a **coupling pin** — the free claim and the travel-fee qualifier must co-occur or the gate is red. Decisions 17–19 recorded in the ticket |
+| BK-53 | **REVISION 3 WRITTEN 2026-09-05.** **GATE 1 — prices off every surface**, plus the weekend 1.5× removal, the resend/terms-snapshot fix, **and W22's travel-fee disclosure** (see below). Site, terms box, `/llms.txt`, and **every confirmation email**. ⚠ **SEQUENCING CORRECTED 2026-09-05: "blocks BK-51's push" does NOT mean BK-53 ships first.** Built **ON `bk51-gated`**; **BK-51 + BK-53 ship in ONE push, never separately** — alone on `main` BK-53 gives a priceless site while `[id].astro:505-512` still pre-fills $418.95 and mints Checkout Sessions, which is the drain step's own worst case applied to every new booking | **Reviewed** + adversarial *(the "copy-only, plain Reviewed" claim was struck 2026-09-05 — it touches what the appointment insert's consent attests to, moves money claims on a live send path, and removes the live price display from the public form)* | 🔁 **revised 2026-09-05 — awaiting user sign-off on copy, then a second plan review.** Planned, then plan-reviewed by two fresh agents on separate lanes: **16 blockers**, including that **the build gate itself forbids the copy this ticket exists to ship** (four `free assessment` bans, one over every file in `dist/`). Revision 2 answers all 16 and replaces the bans with a **coupling pin** — the free claim and the travel-fee qualifier must co-occur or the gate is red. Decisions 17–19 recorded in the ticket |
 | BK-52 | **Decision 15** — assessment type stays, becomes optional, stops gating approval; Approve renders for tier-less rows; the office's view of the type un-gated from the price block. **Does not unblock the push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02** with a full scoping pass — the plan's six-item table was missing its sharpest item (`appointmentMoney` hides the settled amount on tier-less rows) and 5 of 6 line numbers were stale |
 | BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **SHIPPED 2026-09-02 — LIVE** as part of the fast-forward `8b81fb0..73e21ce`. Verify with `git branch -r --contains 3770b66`, never from this line. |
 
