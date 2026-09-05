@@ -26,20 +26,54 @@
 >
 > | # | Item | Where |
 > | --- | --- | --- |
-> | 1 | ⏰ **`#36`'s `charge.refunded` resend** — cheap-repair window closes ~2026-09-04 | block above |
+> | 1 | ~~⏰ **`#36`'s `charge.refunded` resend**~~ — **DEPRIORITISED 2026-09-05 (user): "let it go for now, not an immediate priority."** The Dashboard window **HAS PASSED** — refunded 2026-08-20, 15 days ended **2026-09-04**, and 2026-09-05 is day 16. The CLI route (`stripe events resend`) is open until ~**2026-09-19**; after that it is a hand repair forever. **Neither window was ever verified against Stripe's own docs** — the presence or absence of the Dashboard's Resend button is the definitive answer | block above |
 > | 2 | ✅ **Brief the office** on the free model and their new qualifying role — **AGREED 2026-09-03** | Operational items |
 > | 3 | ✅ **Carrier's August call detail record** — **AGREED 2026-09-03**, wanted BEFORE the flip | `MEASURING-THE-FREE-CHANGEOVER.md` |
-> | 4 | **The Ads / T6 decision** — leave running (default), pause for budget, or re-point (avoid) | `BK-53.md` |
+> | 4 | ✅ **The Ads / T6 decision — ANSWERED 2026-09-05: LEAVE THE CAMPAIGN RUNNING.** Not paused, and **not** re-pointed to `/book/received/` | `BK-53.md` |
 > | 5 | **Confirm Vercel Preview env isolation** before `bk51-gated` is ever pushed to a remote | coupling block |
 > | 6 | **W9 GA4 re-auth** (`invalid_grant`) — blocks W5 | §7 of CONVERSION |
-> | 7 | **W20/W21 ordering** | below |
-> | 8 | **Sherwood Park / Fort Saskatchewan** — do they owe the $150? Shapes BK-53's copy | `BK-51.md` |
+> | 7 | **W20/W21 ordering** — still open, and now load-bearing: see the conversion-work constraint recorded 2026-09-05 below | below |
+> | 8 | ~~**Sherwood Park / Fort Saskatchewan** — do they owe the $150?~~ **STRUCK 2026-09-05 — THIS WAS NEVER OPEN.** Decision 8 already settled it and the user re-confirmed it verbatim: *the client decides whether to apply the travel fee when he confirms the booking; the system does not have to worry about it today.* `PREPAY-PLAN-2026-09-01.md`:259 — *"the $150 stays out of the codebase entirely. No column, no email block, no charge path."* This row plus three passages in `BK-51.md` presented a settled decision as a live user question, and it was asked of the user again on 2026-09-05 — **the answered-question-still-open trap, fourth instance** | `BK-51.md` |
 > | 9 | **Client questions** #6 insurance credit, #7 founding year + BBB/IICRC/Licensed, #8 "Open 24 hours" vs 30 slots | Open questions |
-> | 10 | **Three measurement moves that must happen BEFORE the flip** — write today's numbers, pick success/failure numbers, pick the review date | `MEASURING-THE-FREE-CHANGEOVER.md` |
+> | 10 | ✅ **The three measurement moves — ANSWERED 2026-09-05. There will be NO success/failure targets and NO fixed review date.** Move 1 was already discharged: the "before" column in `MEASURING-THE-FREE-CHANGEOVER.md` **is** that artifact and it stands. Moves 2 and 3 are **withdrawn by the user** in favour of asking the client directly **at the end of September**. ⚠️ **That answer is QUALITATIVE and must be reported as such.** At ~1 web booking per fortnight, two weeks of post-flip data sits below the threshold the same document computes as readable — *"you can see a doubling. You cannot see a 30% change."* *"Did the phone feel busier"* is honest at this volume; *"the numbers show"* is not | `MEASURING-THE-FREE-CHANGEOVER.md` |
 >
 > **📏 The measurement plan is `docs/booking/MEASURING-THE-FREE-CHANGEOVER.md`** —
-> one page, deliberately. It contains three things that must happen **before**
-> BK-53 ships, and BK-53 is the next thing to ship.
+> one page, deliberately. ~~It contains three things that must happen **before**
+> BK-53 ships~~ — **CORRECTED 2026-09-05: it no longer gates BK-53.** Move 1 is
+> discharged (the "before" column stands); moves 2 and 3 were withdrawn by the
+> user, see index item 10. **The document's numbers and its detectability maths
+> remain in force** — what was dropped is the target-setting, not the baseline.
+> **BK-53 is the next thing to ship, and nothing in that file now blocks it.**
+
+> ## ⚑ THE CONVERSION-WORK CONSTRAINT — recorded 2026-09-05, and it binds
+>
+> **The user's direction:** *"let's do whatever we can do in the website, google
+> ads, google business profile etc that can result in more conversions."*
+> **Agreed — with one sequencing constraint that is not negotiable, because the
+> project has already paid for it once.**
+>
+> **Ship no more than ONE funnel-affecting change per week.** August's collapse
+> is permanently unattributable — four changes landed in five days at ~19
+> clicks/day and the candidate causes are collinear or in the same commit
+> (`CONVERSION-2026-08-31.md` §3). Fanning out across site + Ads + GBP at once
+> reproduces that exact condition and buys another unreadable month. The
+> existing rules this constraint subsumes, all still live:
+>
+> - **W20 + W21 ship the SAME DAY, atomically** — the mechanism is the *gap*
+>   between the ad and the page, so neither half means anything alone.
+> - **Nothing touching the call channel or the conversion counts may share
+>   W20/W21's window.** That bars W13 **and W7**.
+> - **W3 (read-only Ads policy check) precedes W21** — editing an asset can
+>   clear or change its policy state, destroying the evidence.
+> - ⚠️ **GBP IS NOT A FREE SURFACE.** W2 was deliberately read-only because
+>   **editing a service-area profile frequently triggers suspension** (§3E).
+>   The real upside there is genuine — the site carries no GBP link, no
+>   `sameAs`, no `aggregateRating` (`seo.ts:132-134`, `Footer.astro:54`,
+>   `TestimonialsSection.astro:2-5`) — but it is a deliberate, reviewed change,
+>   never a quick win, and **W2's read-only answer must not be re-derived by
+>   re-entering that surface.**
+> - **Cost every item assuming reversal** (decision 16 — third pricing model in
+>   three weeks, a fourth possible).
 
 > ## ✅ RESOLVED 2026-09-02 — the deploy coupling is GONE, and here is the shape
 >
@@ -3212,7 +3246,7 @@ table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
 
 | Ticket | Scope | Tier | Status |
 | --- | --- | --- | --- |
-| BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **On `bk51-gated`, NOT on `main` — TWO gates:** the prices-off copy ticket **and** a replacement protection for the invite-holding set (see Known traps) |
+| BK-51 | **The phantom price** — an empty `assessment_amount` fell back to the tier ladder (`review.ts:227`), the panel pre-filled it (`[id].astro:1776`), and the travel input could route a free assessment down the paid path (`[id].astro:1784-1806`). All three default to 0 / are deleted; the route now **refuses** a non-zero travel fee, closing the confirm step's query-string door. **Owns the approval money path, not the tier gates** (decision 15 keeps those) | **Reviewed** | ✅ **reviewed 2026-09-02 — five fresh agents over two rounds.** Plan review: 6 blockers. Implementation review: 4 blockers **and an adversarial pass that ran 11 breaks of which ALL 11 STAYED GREEN** — worse than BK-50's six of seven, four of them charging a real customer. All resolved in `3e1f5bc`; all 12 breaks now fire. typecheck 0, build clean, six suites green, `verify:booking:admin:db` **1540 checks** (was 1509). **On `bk51-gated`, NOT on `main` — ~~TWO gates~~ ONE GATE. CORRECTED 2026-09-05:** this row was not rewritten when the invite-guard question was resolved on 2026-09-03, and it contradicted the top-of-file block for two days — **the rule-rewrite trap, firing on this file's own table.** The invite guard **does not block the push** (`paid_at` IS cleared at `review.ts:404`, `:616`, `:754`, so the predicate is precise, not stale; what degrades is volume, not kind). **GATE 1 — BK-53, the prices-off copy ticket — is the only blocker.** The invite-guard replacement is real, unowned and still unticketed, but it is not a gate |
 | BK-53 | **GATE 1 — prices off every surface**, plus the weekend 1.5× removal. Site, terms box, `/llms.txt`, and **every confirmation email**, which still prices and refunds an assessment nobody is charged for. **Blocks BK-51's push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02**, not started |
 | BK-52 | **Decision 15** — assessment type stays, becomes optional, stops gating approval; Approve renders for tier-less rows; the office's view of the type un-gated from the price block. **Does not unblock the push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02** with a full scoping pass — the plan's six-item table was missing its sharpest item (`appointmentMoney` hides the settled amount on tier-less rows) and 5 of 6 line numbers were stale |
 | BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **SHIPPED 2026-09-02 — LIVE** as part of the fast-forward `8b81fb0..73e21ce`. Verify with `git branch -r --contains 3770b66`, never from this line. |
