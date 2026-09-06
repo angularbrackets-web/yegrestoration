@@ -533,6 +533,36 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+### 🆕 The blog is a client-authored copy surface with NO gate at all
+
+**Severity: MEDIUM. Latent, not live — verified clean 2026-09-06.**
+**Owner: NEEDS A TICKET. Explicitly NOT BK-53's** — see that ticket's R9-6 S10
+and assumption A-R9-6.
+
+BK-53 builds three corpora that between them cover every surface where a price
+or a "free" claim can reach a customer: the `booking-copy.ts` values, six source
+templates, and eleven built pages plus the terms JS chunk. **Eight built pages
+are outside all three**: `about/`, `insurance-claims/`, `404.html`, and
+`blog/` plus its three posts.
+
+`insurance-claims/` is excluded **deliberately and with a reason** (A-R8-2: its
+`$500`–`$2,500` is what an insurance claim commonly costs, not what we charge).
+`about/` and `404.html` are static and reviewed. **The blog is the real gap: it
+is a content collection the client adds to, so the surface GROWS with no gate
+on it**, and a future post saying *"our free assessment"* or naming a tier price
+would be invisible to every pin BK-53 builds.
+
+**Why it is not BK-53's:** gating it means putting a copy gate on every future
+post, which is a policy decision about how the client writes, not a defect in
+the pricing changeover. **Deciding that is the ticket.**
+
+⚠️ **Measured three times, by three independent agents, and clean each time:** no
+built page outside BK-53's scope carries an unqualified free claim today. **The
+three claims that DO exist are on `/` and `/book/` (*"Nothing is charged when you
+send your request."*) and the four service pages (*"About 30 minutes, no
+obligation."*), all in scope and all closed by BK-53's own copy.**
+
+
 ### 🔴 THREE LIVE SURFACES SAY THE ASSESSMENT PRODUCES A WRITTEN DOCUMENT. IT DOES NOT. — found 2026-09-05
 
 ⚠️ **ESCALATED THE SAME DAY IT WAS WRITTEN.** This entry was first recorded as
