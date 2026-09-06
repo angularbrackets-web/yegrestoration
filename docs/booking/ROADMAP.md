@@ -20,13 +20,18 @@
 > — the same rule this file applies to deploy status.
 >
 
-> ## 📌 START HERE — `docs/booking/HANDOFF-2026-09-05.md`
-> The session-close handoff for 2026-09-05. **It carries two instructions that
-> exist nowhere else: do NOT write BK-53's revision 5 until the user answers an
-> open recommendation to SPLIT that ticket, and do NOT push `bk51-gated` to any
-> remote (index item 5 below gates that on Vercel Preview env isolation — a
-> preview build against the production Neon DB would allow a real free
-> approval). To protect that branch use `git bundle`, never a push.**
+> ## 📌 START HERE — `docs/booking/HANDOFF-2026-09-05.md`, and read its §9
+> The session-close handoff for 2026-09-05, **plus §9, added later the same day
+> by the session that acted on it.**
+> ~~do NOT write BK-53's revision 5 until the user answers…~~ **DISCHARGED — the
+> user answered SPLIT (decision 24), and revision 5 is WRITTEN, validated by a
+> traceability audit and an adversarial pre-read, and awaiting plan review.**
+> 🛑 **The instruction that still stands, and it is absolute: do NOT push
+> `bk51-gated` to any remote, including as a backup.** Index item 5 gates that
+> on Vercel Preview env isolation — a preview build against the production Neon
+> DB would allow a real free approval. **Use `git bundle`, never a push.**
+> ⚠️ **`git ls-remote --heads origin` must return EXACTLY 3 refs. Count them;
+> a `| grep bk51` that finds nothing looks identical to one that never ran.**
 
 > ## 🙋 EVERYTHING BLOCKED ON THE HUMAN — the one index, 2026-09-03
 > *(Assembled from five files. `### Operational items only the user can do` further
@@ -53,6 +58,7 @@ again later the same day; re-test rather than inherit this line.** Playwright ca
 > | 8 | ~~**Sherwood Park / Fort Saskatchewan** — do they owe the $150?~~ **STRUCK 2026-09-05 — THIS WAS NEVER OPEN.** Decision 8 already settled it and the user re-confirmed it verbatim: *the client decides whether to apply the travel fee when he confirms the booking; the system does not have to worry about it today.* `PREPAY-PLAN-2026-09-01.md`:259 — *"the $150 stays out of the codebase entirely. No column, no email block, no charge path."* This row plus three passages in `BK-51.md` presented a settled decision as a live user question, and it was asked of the user again on 2026-09-05 — **the answered-question-still-open trap, fourth instance** | `BK-51.md` |
 > | 9 | **Client questions** #6 insurance credit, #7 founding year + BBB/IICRC/Licensed, #8 "Open 24 hours" vs 30 slots | Open questions |
 > | 10 | ✅ **The three measurement moves — ANSWERED 2026-09-05. There will be NO success/failure targets and NO fixed review date.** Move 1 was already discharged: the "before" column in `MEASURING-THE-FREE-CHANGEOVER.md` **is** that artifact and it stands. Moves 2 and 3 are **withdrawn by the user** in favour of asking the client directly **at the end of September**. ⚠️ **That answer is QUALITATIVE and must be reported as such.** At ~1 web booking per fortnight, two weeks of post-flip data sits below the threshold the same document computes as readable — *"you can see a doubling. You cannot see a 30% change."* *"Did the phone feel busier"* is honest at this volume; *"the numbers show"* is not | `MEASURING-THE-FREE-CHANGEOVER.md` |
+> | 11 | 🆕 **THE CANCELLATION-NOTICE EXPECTATION — OPENED 2026-09-05, and it is the ONLY thing blocked on the user.** BK-53 deletes `FEE_TERMS_REFUND`, which was **the only place the site said how much notice we expect** for a cancellation. `CANCEL_LINE` survives and says **how** to cancel — a phone number — and nothing says **when**. Does the client want a stated expectation (*"let us know at least 24 hours before"*), or is silence deliberate now that no money changes hands? ⚠️ **Policy, not judgment, so it does not get an Assumptions-log entry.** Raised in BK-53's plan review round 3, **dropped by every revision since**, and recovered 2026-09-05 by the traceability audit. **It blocks SHIPPING the terms box, not writing the spec** — the box is where the answer lives | `BK-53.md` R5-10, last row |
 >
 > **📏 The measurement plan is `docs/booking/MEASURING-THE-FREE-CHANGEOVER.md`** —
 > one page, deliberately. ~~It contains three things that must happen **before**
