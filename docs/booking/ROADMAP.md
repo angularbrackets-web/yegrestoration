@@ -533,6 +533,28 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 
 ## Known traps
 
+### 🆕 A non-prerendered public page appears in no scope accounting at all
+
+**Severity: MEDIUM. Latent, not live — no claim vocabulary today (verified
+2026-09-06). Owner: NEEDS A TICKET, with the blog entry above.**
+
+`src/pages/upload/index.astro` (`export const prerender = false`) plus
+`AppointmentUpload.svelte` is a **public customer surface**. It is in none of
+BK-53's three corpora: not a `booking-copy` constant, not one of
+`TEMPLATE_PROSE`'s six template files, and — because it is SSR —
+**`dist/client/upload` does not exist**, so `DIST_TEXT` cannot see it.
+
+🔴 **The general form is the point.** BK-53's out-of-scope accounting (its R9-6
+S10) enumerates eight **built** pages, because the accounting was derived from
+what `dist/` contains. **A page that never lands in `dist/client` is invisible to
+the count as well as to the gate** — which is the same reasoning R6-3d used to
+conclude `$150` could not reach a customer, correct there and load-bearing here.
+Same class: `ContactForm.svelte` and `NextOpening.svelte` are `client:visible`
+islands whose prose is confirmed absent from both built pages.
+
+**Whatever ticket takes the blog gap should take this with it: the question is
+"what is the list of public copy surfaces", and `dist/` is not the answer.**
+
 ### 🆕 The blog is a client-authored copy surface with NO gate at all
 
 **Severity: MEDIUM. Latent, not live — verified clean 2026-09-06.**
