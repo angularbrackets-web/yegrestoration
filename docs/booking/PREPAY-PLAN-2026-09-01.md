@@ -4,7 +4,13 @@
 
 > ⚠️ **"Nothing here is built" WAS TRUE ON 2026-09-01 AND IS FALSE NOW.**
 > **BK-50** (the unreviewed-request safety net) and **BK-51** (T1's money half —
-> the phantom-price fix) are **built, reviewed and committed, NOT pushed.** This
+> the phantom-price fix) are ~~built, reviewed and committed, NOT pushed~~
+> ⚠️ **CORRECTED 2026-09-05 — THEY ARE IN DIFFERENT STATES AND THIS BOX WAS
+> WRONG ABOUT ONE OF THEM. `BK-50` IS LIVE** (`3770b66`, pushed 2026-09-02;
+> check `git branch -r --contains 3770b66`). **`BK-51` is NOT** — it is on the
+> local-only branch `bk51-gated`, gated on BK-53. This is the plan of record and
+> `MEMORY.md` sends readers straight here, so the stale half was the most
+> load-bearing surviving instance of the "not pushed" defect. This
 > document does not mention BK-51 anywhere else, and its decision-15 table below
 > cites line numbers BK-51 moved. **Read `docs/booking/tickets/BK-51.md` and
 > `ROADMAP.md`'s P12 table before treating anything here as unbuilt.** Read `ROADMAP.md`'s READ FIRST and `CONVERSION-2026-08-31.md`'s START

@@ -20,6 +20,14 @@
 > — the same rule this file applies to deploy status.
 >
 
+> ## 📌 START HERE — `docs/booking/HANDOFF-2026-09-05.md`
+> The session-close handoff for 2026-09-05. **It carries two instructions that
+> exist nowhere else: do NOT write BK-53's revision 5 until the user answers an
+> open recommendation to SPLIT that ticket, and do NOT push `bk51-gated` to any
+> remote (index item 5 below gates that on Vercel Preview env isolation — a
+> preview build against the production Neon DB would allow a real free
+> approval). To protect that branch use `git bundle`, never a push.**
+
 > ## 🙋 EVERYTHING BLOCKED ON THE HUMAN — the one index, 2026-09-03
 > *(Assembled from five files. `### Operational items only the user can do` further
 > down is a 2026-08-22 list and is HISTORICAL — do not read it as current.)*
@@ -32,7 +40,8 @@
 > | 4 | ✅ **The Ads / T6 decision — ANSWERED 2026-09-05: LEAVE THE CAMPAIGN RUNNING.** Not paused, and **not** re-pointed to `/book/received/` | `BK-53.md` |
 > | 5 | **Confirm Vercel Preview env isolation** before `bk51-gated` is ever pushed to a remote | coupling block |
 > | 6 | ⬆️ **W9 GA4 re-auth** (`invalid_grant`) — **PRIORITY RAISED 2026-09-05: it now blocks W5 AND the BK-53 service-page decision.** Re-confirmed dead today: `get_account_summaries` → `503 … invalid_grant: Bad Request`. **GA4 is the BETTER instrument for the open question** — it reports where paid traffic *actually landed*, whereas an asset-group final URL only reports where it was *configured* to land, and a PMax campaign expands beyond its configured URLs | §7 of CONVERSION |
-> | 6b | 🆕 **Read the Ads landing pages** — the one fact BK-53's last open item turns on. **ATTEMPTED 2026-09-05 AND BLOCKED BOTH WAYS:** GA4 MCP is `invalid_grant` (item 6), and the Chrome extension reports *"Browser extension is not connected"*. Playwright cannot substitute — it launches a clean browser with no Google session. **Needs the user: re-auth GA4, connect the extension, or read it manually** (Google Ads → the campaign → **Landing pages**, which lists real URLs with clicks) | `BK-53.md` §7 |
+> | 6b | 🆕 **Read the Ads landing pages** — the one fact BK-53's last open item turns on. **ATTEMPTED 2026-09-05 AND BLOCKED BOTH WAYS:** GA4 MCP is `invalid_grant` (item 6), and the Chrome extension reported *"not connected"* — ⚠️ **but it WAS connected
+again later the same day; re-test rather than inherit this line.** Playwright cannot substitute — it launches a clean browser with no Google session. ⚠️ **RETRIED 2026-09-05 VIA THE BROWSER — and the manual path recorded here was WRONG.** The extension works and Ads is logged in (account **673-094-6254**), but **this account has NO "Landing pages" report** — *Insights and reports* lists Insights, Brand report, Auction insights, Search terms, When and where ads showed, Channel performance, Stores, Report editor, Dashboards, and nothing else. **PMax has asset groups, not ad groups.** `/aw/landingpages` redirects to Overview and `/aw/assetgroups` 404s; the campaigns table is not in the accessibility tree and the UI hangs on its spinner. **Remaining route: screenshot-and-click into the campaign → Asset groups. But re-authing GA4 (W9) is better AND cheaper** — it reports where traffic *went* rather than where it was *configured* to go, and PMax expands beyond its configured URLs | `BK-53.md` §7 |
 > | 7 | **W20/W21 ordering** — still open, and now load-bearing: see the conversion-work constraint recorded 2026-09-05 below | below |
 > | 8 | ~~**Sherwood Park / Fort Saskatchewan** — do they owe the $150?~~ **STRUCK 2026-09-05 — THIS WAS NEVER OPEN.** Decision 8 already settled it and the user re-confirmed it verbatim: *the client decides whether to apply the travel fee when he confirms the booking; the system does not have to worry about it today.* `PREPAY-PLAN-2026-09-01.md`:259 — *"the $150 stays out of the codebase entirely. No column, no email block, no charge path."* This row plus three passages in `BK-51.md` presented a settled decision as a live user question, and it was asked of the user again on 2026-09-05 — **the answered-question-still-open trap, fourth instance** | `BK-51.md` |
 > | 9 | **Client questions** #6 insurance credit, #7 founding year + BBB/IICRC/Licensed, #8 "Open 24 hours" vs 30 slots | Open questions |
@@ -854,7 +863,13 @@ widen a ticket already carrying 28 blockers.
 
 - **Five statements go false the day cron sweep 2 is deleted, and they are
   spread across four files.** BK-50 **implements** the safety net for the client's
-  2026-09-01 decision — **reviewed 2026-09-01, committed, NOT pushed, so NOT
+  2026-09-01 decision — ~~reviewed 2026-09-01, committed, NOT pushed, so NOT~~
+  ⚠️ **CORRECTED 2026-09-05: BK-50 IS LIVE.** Pushed `3770b66` on 2026-09-02 in
+  the fast-forward `8b81fb0..73e21ce`. Verify with
+  `git branch -r --contains 3770b66`, never from this line. **This is the
+  stale-"not pushed" defect recurring for the FOURTH time** — W16 swept a dozen
+  sites, BK-49's row was corrected 2026-09-02, six ticket `Status:` lines were
+  corrected 2026-09-05, and this prose survived all three. ~~NOT
   live** — (an unreviewed request's slot is simply lost — no
   auto-cancellation, no email) but deliberately did **not** rewrite the prose
   that the *later* deletion falsifies, because every one of those statements is
