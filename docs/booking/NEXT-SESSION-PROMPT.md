@@ -18,10 +18,10 @@ backup. It is local-only and holds BK-51's production code. Use git bundle.
 grep for absence.
 
 State: BK-51 is reviewed and gated on GATE 1 only (GATE 2 was discharged
-2026-09-03). GATE 1 is now two tickets — BK-53 revision 7 (web) and BK-55
-revision 3 (email). Both are NOT APPROVED and revision 7 / revision 3 are
-NOT YET VALIDATED. All three ship in ONE push on bk51-gated, BK-55's commits
-first.
+2026-09-03). GATE 1 is two tickets — BK-53 revision 7 (web) and BK-55
+revision 3 (email). Both were VALIDATED on 2026-09-06 and both are NOT
+APPROVED: revision 8 and revision 4 are owed. All three ship in ONE push on
+bk51-gated, BK-55's commits first.
 
 Do this, in order:
 
