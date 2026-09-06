@@ -52,9 +52,12 @@ Do this, in order:
 2. WHILE THAT RUNS — BK-55 is the ready one and its SPEC is not blocked. Take
    revision 4 to plan review: one fresh agent, briefed per its §F, which now
    carries the review.ts correction. It has been validated twice and its repair
-   RUN end-to-end twice. Only plan review is owed. Note its §F sequencing
-   section IS affected if a new ticket joins the branch — so approve the spec
-   and flag §F as pending the decision.
+   RUN end-to-end twice, so only plan review is owed — but that is a reason to
+   expect it clean, NOT a reason to treat it as approved. Report what the review
+   actually says. If it comes back clean, mark it approved and tell me; if it
+   does not, write the revision. Either way, flag its §F sequencing section as
+   pending my answer on the gate — a new ticket on the branch changes the union
+   and the push.
 
 3. THEN, once I have answered:
    - If the gate changes: write BK-53 revision 11 (and open BK-57 if a ticket is
