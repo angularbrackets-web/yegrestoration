@@ -550,6 +550,28 @@ stays **TRUE** under decision 20, because the quote precedes the work:
 words, and `verify-cutover.ts`'s five-file `CLAIM_SURFACES` sees none of them.
 **CLAUDE.md's copy-inventory trap, third instance inside this one ticket.**
 
+### 🆕 A FOURTH, and it is the same trap in the ADMIN panel — recorded 2026-09-05
+
+**`src/pages/admin/appointments/new.astro:192-194`**, the hint under the Email
+field on the office's manual-entry form:
+
+> *"**Payment comes before dispatch — client policy, 2026-08-16** — and the
+> payment link is emailed. Without an address there is no way to send them one,
+> and no written terms either. Take an email if you can."*
+
+🔴 **Decision 17 reverses that policy** — the visit is free, and BK-51 makes a
+free confirmed booking the default outcome of every approval. The sentence
+states a *superseded client policy, by date*, to the one audience that acts on
+it, and it will read as current long after the customer-facing copy has flipped.
+
+**Severity: MEDIUM** — office-facing, not customer-facing, so it misleads the
+person taking the booking rather than the person making it. **Owner: NEEDS A
+TICKET.** Named by BK-53 revision 4 as *"to ROADMAP Known traps, unowned"*;
+**that entry was never actually written, and this is it** — the handoff-to-a-
+label defect the out-of-scope rule exists to prevent. ⚠️ **Do NOT fix it inline
+in BK-53 or BK-55**: it is an admin surface on a branch that is one command from
+a production deploy, and neither ticket's gate covers `new.astro`.
+
 **Owner: NEEDS A TICKET. Do not fix inline in BK-53** — that ticket owns the
 booking funnel's price claims and already carries 28 blockers; these are
 deliverable claims on unrelated pages.
