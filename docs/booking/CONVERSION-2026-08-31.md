@@ -1233,7 +1233,35 @@ re-run it:** editing a service-area GBP is a suspension trigger.)*
 ## 4. FINDINGS NOBODY WAS LOOKING FOR
 
 - **`src/pages/[service].astro:79` says "About 30 minutes, no obligation"** — live
-  on all ~~six~~ **FOUR** service pages ⚠ **(count corrected 2026-09-05 — verified
+  on all ~~six~~ **FOUR** service pages 🔴 **— AND THEY ARE NOT THE ADS LANDING
+  PAGES. MEASURED 2026-09-05, GA4 property 543677881, paid sessions
+  2026-07-01→09-05:**
+
+  | Landing page | Paid sessions | Share |
+  | --- | --- | --- |
+  | **`/` (homepage)** | **1,097** | **~92%** |
+  | `(not set)` | 33 | 2.7% |
+  | `/contact` | 32 | 2.7% |
+  | `/mold-removal` | 18 | 1.5% |
+  | `/book` | 6 | 0.5% |
+  | `/blog/…flooding-preparation` | 6 | 0.5% |
+  | `/water-damage-restoration` | 3 | 0.2% |
+  | `/sewage-cleanup` | 2 | 0.2% |
+  | `/fire-smoke-damage` | **0** | — |
+
+  **The four service pages take 23 of ~1,204 paid sessions — 1.9% — and one of
+  them has never received a paid click. The HOMEPAGE is the ad entry point.**
+  This sentence's *"which are the Google Ads landing pages"* was asserted once,
+  never sourced, and is now **measured false**. It shaped W20's scope and was
+  raised three times inside BK-53. **Do not reinstate it.**
+  ✅ **And the homepage is already in scope:** `index.astro:66` renders
+  `<ContactSection showForm={false} />` — the CTA arm that
+  `verify-cutover.ts:440-453` pins the terms box into. `HeroSection.astro`
+  carries no price, free, or obligation claim (checked).
+  *(Method note: GA4 answers "where did traffic GO"; the asset-group final URL
+  would only have said where it was CONFIGURED to go, and PMax expands beyond
+  its configured URLs. The instrument mattered.)*
+  ⚠ **(count corrected 2026-09-05 — verified
   three ways: `services.ts` has four `page:` blocks, four slugs, and `dist/`
   builds four directories: water-damage-restoration, fire-smoke-damage,
   mold-removal, sewage-cleanup. Storm is deliberately page-less,
