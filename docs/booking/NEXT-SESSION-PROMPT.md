@@ -1,122 +1,166 @@
 Continuing yeg-restoration-v4, booking area.
 
-⛔ 🔴 **THIS WHOLE FILE IS SUPERSEDED — 2026-09-06 (later session). DO NOT
-EXECUTE ITS STEPS.** Every gate it names has been run and its state is stale in
-at least four ways:
+*(Written 2026-09-07 at session close. The previous prompt is replaced entirely —
+it had gone stale in four ways and told a session to act on a decision that had
+since been reversed.)*
 
-- **Step 1's R10-8 question is ANSWERED, then RE-ANSWERED.** The user first
-  chose the block unit, and it was **withdrawn after measurement**. The standing
-  answer is **KEEP REVISION 10's SENTENCE UNIT**, restore `MAX_UNIT` /
-  `MIN_UNITS` / the residue rule, and keep BOTH bans. See `BK-53.md` **R12**.
-- **Step 2 is DONE.** Revision 4 went to plan review → **7 blockers**; revision 5
-  was written, validated, and is now superseded by **revision 6**.
-- 🔴 **Its line 55 — *"its repair RUN end-to-end twice, so only plan review is
-  owed"* — IS FALSE and was the day's headline defect.** Those runs measured
-  §B-2's deletion alone. *(And the retraction of it over-corrected: commit (b)
-  actually reaches **`✓ 397 checks, 0 failed`** — see `BK-55.md` §L-1.)*
-- **Step 3's "open BK-57 if a ticket is split out" did not happen. BK-57 is
-  unopened**; the union and the single push are unchanged.
+---
 
-**→ Read `docs/booking/HANDOFF-2026-09-05.md` §11 onward, then `head -20` both
-tickets. Nothing below this banner is current.**
+## 0 · RUN THESE THREE BEFORE TRUSTING ANY LINE BELOW
 
-Read docs/booking/HANDOFF-2026-09-05.md — its LAST section, §11, first, then
-work backwards BY FILE POSITION (the numbering below §10 is out of order: 9, 7,
-8, 10). Run §0's three checks before trusting any line in it.
+```sh
+git log --oneline -1                    # expect 959110f or later
+git log --oneline main..bk51-gated      # expect 10
+git ls-remote --heads origin            # MUST list exactly 3: main,
+                                        # booking/p1-foundation, deploy-2-prepay
+```
 
-Do not read a revision number from ROADMAP.md. Run
-`head -20 docs/booking/tickets/BK-53.md` and `head -20 docs/booking/tickets/BK-55.md`.
-BK-53 is ~6,700 lines and has ten revisions — do NOT read it from the top. Use
-its reading-order table near the top: revision 10 is the spec, and revisions 9,
-8 and 7 are each marked "NOT the spec" while still being current for named
-sections.
+⚠️ **COUNT the refs. Do not `| grep bk51`.** A grep that finds nothing looks
+identical to a grep that never ran and reads as *"safe, not pushed."* That is
+CLAUDE.md's BK-33 trap.
 
-Standing rules, absolute:
-- NEVER push bk51-gated to any remote, including as a backup. It is local-only
-  and holds BK-51's production code. Use git bundle.
-- `git ls-remote --heads origin` must return exactly 3 refs — count them, never
-  grep for absence.
-- `git push origin main` IS the deploy. Docs pushes are safe; code pushes go
-  live. BK-51 + BK-55 + BK-53 are BUILT on bk51-gated and SHIPPED by one push to
-  main — never by pushing bk51-gated.
-- Six NON-DOCS files differ between main and bk51-gated. `git diff --name-only`
-  lists sixteen, because main has advanced; ten are docs.
-- The tickets are not usable on bk51-gated — BK-53 is a 212-line draft there and
-  BK-55 does not exist. Read them from main.
+🛑 **`bk51-gated` exists on this machine and nowhere else.** It carries BK-51's
+production code. **NEVER push it anywhere, including as a backup** — use
+`git bundle create ../bk51-gated.bundle bk51-gated`.
+⚠️ **`git push origin main` IS the deploy.** Docs pushes are safe. **Right now
+`main` is 29 commits ahead of `origin/main` and all 29 are docs-only** — verify
+with `git diff --name-only origin/main..main | grep -v '^docs/'` before believing
+that.
 
-State: GATE 1 is TWO tickets — BK-53 revision 10 (web) and BK-55 revision 4
-(email). Both NOT APPROVED. BK-51 is reviewed and waits on both.
+---
 
-🙋 ONE THING IS BLOCKED ON ME. Do not treat it as decided; do not decide it
-yourself. It is NOT decision 24's split, which is answered and shipped.
+## 1 · READ, IN THIS ORDER — and nothing else to start
 
-Last session recommended replacing BK-53's dist/ extractor machinery. The agent
-sent to attack that recommendation refuted its load-bearing claim — reverting
-R6-3c's ban would go RED on three of the ticket's own approved sentences. The
-corrected version is three separate calls and lives in BK-53's R10-8. Its first
-draft was wrong by thirteen and is corrected in place.
+1. **`docs/booking/HANDOFF-2026-09-05.md` §12** — the last section. It carries
+   this session's state, the three decisions, the measured constants and the five
+   new traps.
+2. **`head -30 docs/booking/tickets/BK-53.md`** and
+   **`head -30 docs/booking/tickets/BK-55.md`**. 🔴 **Never read a revision number
+   from `ROADMAP.md`.**
+3. ⭐ **`BK-53.md`'s `## THE SPEC` section (S1–S8).** **To implement, read ONLY
+   that.** BK-53 is ~7,550 lines with twelve revisions; the spec is the merged
+   current state and **where it and a revision disagree, the spec wins.**
+4. **`BK-55.md`'s `§M`** (revision 7) and **`§L-9`**.
 
-Do this, in order:
+⚠️ **BK-53 and BK-55 do NOT exist in usable form on `bk51-gated`** — BK-53 is a
+212-line draft there and BK-55 is absent. **Read them from `main`.**
 
-1. Put R10-8's three calls to me — but earn it first. Spawn a fresh agent to
-   attack the CORRECTED recommendation, briefed that the target branch is
-   bk51-gated, that six NON-DOCS files differ, and that the tickets' bare
-   `review.ts:246` means src/pages/api/admin/appointments/review.ts and NOT
-   src/lib/booking-review.ts, which has no line 246. The claim to attack hardest
-   is R10-8d's replacement: that a threshold-free FILE-LEVEL coupling assertion
-   on the built pages — every built file matching a free shape must also contain
-   TRAVEL_QUALIFIER — does the job the extractor was built for. Check it is not
-   red on arrival against the approved copy, which is how the last proposal died.
-   Give me the verdict, then ask.
+---
 
-2. WHILE THAT RUNS — BK-55 is the ready one and its SPEC is not blocked. Take
-   revision 4 to plan review: one fresh agent, briefed per its §F, which now
-   carries the review.ts correction. It has been validated twice and its repair
-   RUN end-to-end twice, so only plan review is owed — but that is a reason to
-   expect it clean, NOT a reason to treat it as approved. Report what the review
-   actually says. If it comes back clean, mark it approved and tell me; if it
-   does not, write the revision. Either way, flag its §F sequencing section as
-   pending my answer on the gate — a new ticket on the branch changes the union
-   and the push.
+## 2 · WHAT IS DECIDED — do not re-open any of these
 
-3. THEN, once I have answered:
-   - If the gate changes: write BK-53 revision 11 (and open BK-57 if a ticket is
-     split out — it is the next free number), then one validation round
-     (traceability + adversarial, separate fresh agents, adversary RUNS the
-     breaks in a sandbox), then plan review.
-   - If not: validation round on revision 10, same two agents, then plan review.
-   Either way, R8-8 + R9-8 + R10-7 are ONE red-first table and a scope change is
-   a rule rewrite — re-derive every row against the new scope and say which
-   verdicts changed.
+| | |
+| --- | --- |
+| **The coupling unit** | 🔴 **KEEP THE SENTENCE UNIT** with the three-tier same-or-next adjacency. **Answered TWICE** — the user chose a BLOCK unit and withdrew it the same day after measurement. `MAX_UNIT`, `MIN_UNITS`, the residue rule and `A-R10-4` are all **restored**. **Both bans kept.** *Two proposals to change the unit have failed; a third needs new EVIDENCE, not new argument* |
+| **BK-55's `termsEra` guard** | ✅ **Route (e): the sentence changes so no guard is needed.** `TERMS_PRIOR_LINE`. **No new field, no fifth arm, `termsEra` stays four-valued** |
+| **BK-53's shape** | ✅ **`THE SPEC` at the top; delete nothing.** A re-baseline was rejected — rewrites are how this project loses rows |
+| **The split** | ✅ Decision 24: BK-53 = web, BK-55 = email. **BK-57 is UNOPENED and stays that way** |
 
-4. Only then implement, on bk51-gated. BK-55's two commits (the assertion
-   counter first), then BK-53's. Gates before implementation review: npm run
-   typecheck, npm run build, and the ticket's own verify scripts, with red-first
-   evidence scored on (exit code, summary line) — never on a ✗ count. Note that
-   THREE scripts crash without a summary line — verify-booking-pricing prints 1
-   ✗, verify-booking-email prints 5, verify-booking-ics prints 0 — so a ✗ count
-   is not just unreliable, it varies by script. Run `npm run build` before
-   re-measuring anything against dist/: the current build is from 2026-09-05 and
-   is not committed.
+---
 
-Rules this project paid for and I want honoured:
-- A refutation is a measurement. Enumerate the readings before concluding none
-  works. Last session a wrong refutation retired a true finding, and a second
-  one nearly sent a whole session down the wrong path — caught only because an
-  agent was sent to attack the argument itself.
-- After writing a disposition that names a section, grep for that section's
-  heading. R9-10 was cited nineteen times before it existed.
-- An order issued in prose is not performed. Execute a revision's instructions
-  to itself in the same commit, and write the strike where the text lives.
-- Check the reviewer brief itself before reusing it.
+## 3 · DO THIS, IN ORDER
 
-Expect each round to find real defects and about half of them to be in the fix
-for the previous round. That has held for six rounds. But rounds 2 and 3 were
-the same class at finer granularity, which is what the open question is about —
-so if you find yourself writing revision 12, say so plainly rather than writing
-it.
+**1 · One validation round on EACH ticket — four fresh agents, in parallel.**
 
-Spawn opus and sonnet agents as you see fit. This project's measured failure
-mode is under-gating, not over-gating — BK-51 ran eleven adversarial breaks and
-all eleven stayed green — so brief adversarial agents to RUN the break, not read
-for it.
+Per ticket: a **traceability audit** (*"what is in a review or a prior revision
+and absent from the current one with no stated reason?"*) and an **adversarial
+pre-read** (*"assuming this ships as written, what still ships GREEN?"*).
+
+🔴 **Brief every agent with all of this:**
+- **Target branch is `bk51-gated`, not `main`.** **NEVER push. Do not check out
+  the branch** — read it with `git show bk51-gated:<path>`.
+- **SIX NON-DOCS files differ** between `main` and `bk51-gated`:
+  `scripts/verify-booking-admin-db.ts`, `scripts/verify-booking-review.ts`,
+  `src/lib/booking-payment.ts`, `src/lib/booking-review.ts`,
+  `src/pages/admin/appointments/[id].astro`,
+  `src/pages/api/admin/appointments/review.ts`.
+  `git diff --name-only` lists **sixteen**; ten are docs.
+- 🔴 **A bare `review.ts:246` means `src/pages/api/admin/appointments/review.ts`**
+  (905 lines on the branch), **NOT `src/lib/booking-review.ts`** (171 on `main`,
+  209 on the branch, **no line 246**). *Four consecutive briefings got this wrong.*
+- 🔴 **A bare `resend.ts` means `src/pages/api/admin/appointments/resend.ts`.
+  There is no `src/lib/resend.ts`.** *A briefing invented it.*
+- **`booking-email.ts`, `resend.ts` and `verify-booking-email.ts` are NOT
+  divergent**, so their line numbers are valid on either branch.
+  **`booking-payment.ts` IS** — `:1597` on the branch is `:1567` on `main`.
+- **The copy is approved (decision 26)** — challenge on truth and on whether a
+  pin matches, never on taste. ⚠️ **EXCEPT `TERMS_PRIOR_LINE`, which is new and
+  awaits the client.**
+- **Give the adversary a worktree** *(`isolation: "worktree"`)* **and tell it to
+  RUN the breaks.** This project's measured failure mode is UNDER-gating: BK-51
+  ran eleven breaks and eleven stayed green.
+- 🔴 **Score on (exit code, summary line), NEVER a `✗` count.** Three scripts
+  crash without a summary line — `verify-booking-pricing` prints 1 `✗`,
+  `verify-booking-email` 5, `verify-booking-ics` 0.
+- 🔴 **Assert the break LANDED before scoring it. Restore from a FILE BACKUP
+  (`cp`), never `git checkout --`** — it reverts to HEAD and eats uncommitted work.
+- **If a claim in the brief is false, that is a finding.** Briefs here have been
+  wrong at least six times.
+
+**2 · Then plan review on each, also fresh agents.**
+
+**3 · Only then implement, on `bk51-gated`:** BK-55's two commits (the assertion
+counter first), then BK-53's, then **one adversarial pass at the TIP over the
+union**, then gates, then implementation review, then **one push**.
+
+---
+
+## 4 · KNOWN OPEN ITEMS — expect the round to find these; they are not news
+
+- **BK-53:** `WEB_AMOUNT_BAN` misses **nine of the thirteen** spellings tested —
+  *"The travel fee is 150."* ships green. **The shapes must widen.** And
+  **`head:title` and `attr` have no red-first row.**
+- **BK-53:** **`MAX_UNIT` must be measured over OWNED pages only** — the global
+  max (273) is set by a **client-authored blog post**; owned max is **222**.
+- **BK-55:** 🔴 **At commit (b) NOTHING pins the request email** — all three money
+  regexes are on **confirmed**-arm fixtures. **Six planted defects shipped
+  green.** G1's row ordered *"BOTH message types"* and nothing performed it.
+- **BK-55:** the `397 / 417` check counts come from **one agent's run**; this
+  session reproduced the `✗ 10` and the baseline, **not those.** Re-measure.
+- **Client:** `TERMS_PRIOR_LINE` needs sign-off.
+
+---
+
+## 5 · RULES THIS PROJECT PAID FOR — honour them
+
+- 🔴 **A CONSTANT WITH NO RED-FIRST ROW IS UNTESTED, NOT WORTHLESS.** Before
+  deleting any assertion for an empty catch record, **write the row that would
+  catch its failure and RUN it.** Two constants were deleted on that reasoning
+  and each was the only detector of a real failure.
+- 🔴 **GREP THE DESTINATION AFTER ANY SCRIPTED EDIT.** A batch that raises later
+  **discards earlier edits while their `OK` lines stay on screen.** Happened
+  twice last session.
+- 🔴 **A DISPOSITION TABLE IS A PROMISSORY NOTE.** *"✅ applied in place"* is the
+  same act as *"→ PERFORMED"*. An audit found **6 of 11** and **10 of 14** claimed
+  corrections untouched, and three destinations that did not exist.
+- 🔴 **SANDBOX THE COMMIT, NOT THE FINDING.** Diff the sandbox against the
+  sequencing section's contents and say which items were in it.
+- 🔴 **A REFUTATION IS A MEASUREMENT.** Enumerate the readings before concluding
+  none works. A wrong refutation retires a TRUE finding.
+- 🔴 **READ THE LIST BESIDE THE NUMBER.** *"14 of 19"* and *"53 rows"* were both
+  wrong and both propagated.
+- **After writing a disposition that names a section, `grep` for its heading.**
+- **`npm run build` before measuring anything against `dist/`** — and note
+  `verify-cutover.ts` alone leaves a **sentinel build** behind.
+
+---
+
+## 6 · 🙋 BLOCKED ON THE USER
+
+1. **`TERMS_PRIOR_LINE` needs the client's sign-off** — new customer-facing copy,
+   not covered by decision 26.
+2. **The three decision-20 pages are still unowned** —
+   `insurance-claims.astro:70`, `services.ts:389`, `services.ts:291` say the
+   assessment produces a written document, which decision 20 makes false.
+   **HIGH, customer-facing, wrong today, belongs to no ticket.** *Worth asking
+   whether this should jump the queue ahead of GATE 1.*
+3. `ROADMAP` human-blocked index items **5** (Vercel Preview isolation), **7**
+   (W20/W21 ordering), **9a/9b** (client questions) — unchanged.
+
+---
+
+⚠️ **Expect each round to find real defects, and about half of them to be in the
+fix for the previous round. That has held for seven rounds.** The findings do get
+narrower. **If you find yourself writing revision 13 of BK-53, say so plainly
+rather than writing it** — and consider whether the finding belongs in `THE SPEC`
+instead of in a new revision layer.
