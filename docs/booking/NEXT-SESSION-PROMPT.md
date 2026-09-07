@@ -101,7 +101,10 @@ pre-read** (*"assuming this ships as written, what still ships GREEN?"*).
   ran eleven breaks and eleven stayed green.
 - 🔴 **Score on (exit code, summary line), NEVER a `✗` count.** Three scripts
   crash without a summary line — `verify-booking-pricing` prints 1 `✗`,
-  `verify-booking-email` 5, `verify-booking-ics` 0.
+  `verify-booking-email` 5, `verify-booking-ics` 0. ⚠️ **Those three counts were
+  measured under ONE specific break (`FEE_TERMS_ITEMS = []`, R6-1's table) and are
+  not general crash behaviour** — the point stands regardless: **a crashed script
+  prints no summary line, and its `✗` count varies by script and by break.**
 - 🔴 **Assert the break LANDED before scoring it. Restore from a FILE BACKUP
   (`cp`), never `git checkout --`** — it reverts to HEAD and eats uncommitted work.
 - **If a claim in the brief is false, that is a finding.** Briefs here have been
