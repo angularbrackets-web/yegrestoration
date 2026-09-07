@@ -1,5 +1,25 @@
 Continuing yeg-restoration-v4, booking area.
 
+⛔ 🔴 **THIS WHOLE FILE IS SUPERSEDED — 2026-09-06 (later session). DO NOT
+EXECUTE ITS STEPS.** Every gate it names has been run and its state is stale in
+at least four ways:
+
+- **Step 1's R10-8 question is ANSWERED, then RE-ANSWERED.** The user first
+  chose the block unit, and it was **withdrawn after measurement**. The standing
+  answer is **KEEP REVISION 10's SENTENCE UNIT**, restore `MAX_UNIT` /
+  `MIN_UNITS` / the residue rule, and keep BOTH bans. See `BK-53.md` **R12**.
+- **Step 2 is DONE.** Revision 4 went to plan review → **7 blockers**; revision 5
+  was written, validated, and is now superseded by **revision 6**.
+- 🔴 **Its line 55 — *"its repair RUN end-to-end twice, so only plan review is
+  owed"* — IS FALSE and was the day's headline defect.** Those runs measured
+  §B-2's deletion alone. *(And the retraction of it over-corrected: commit (b)
+  actually reaches **`✓ 397 checks, 0 failed`** — see `BK-55.md` §L-1.)*
+- **Step 3's "open BK-57 if a ticket is split out" did not happen. BK-57 is
+  unopened**; the union and the single push are unchanged.
+
+**→ Read `docs/booking/HANDOFF-2026-09-05.md` §11 onward, then `head -20` both
+tickets. Nothing below this banner is current.**
+
 Read docs/booking/HANDOFF-2026-09-05.md — its LAST section, §11, first, then
 work backwards BY FILE POSITION (the numbering below §10 is out of order: 9, 7,
 8, 10). Run §0's three checks before trusting any line in it.
