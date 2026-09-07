@@ -22,25 +22,35 @@ CLAUDE.md's BK-33 trap.
 🛑 **`bk51-gated` exists on this machine and nowhere else.** It carries BK-51's
 production code. **NEVER push it anywhere, including as a backup** — use
 `git bundle create ../bk51-gated.bundle bk51-gated`.
-⚠️ **`git push origin main` IS the deploy.** Docs pushes are safe. **Right now
-`main` is 29 commits ahead of `origin/main` and all 29 are docs-only** — verify
-with `git diff --name-only origin/main..main | grep -v '^docs/'` before believing
-that.
+⚠️ **`git push origin main` IS the deploy.** Docs pushes are safe. **`main` is some tens of commits ahead of `origin/main`, and the count is NOT the
+thing to check — it changes with every commit and was already stale in the document
+that asserted it.** 🔴 **CHECK THE INVARIANT INSTEAD:**
+```sh
+git diff --name-only origin/main..main | grep -v '^docs/'   # MUST be empty
+```
+**Empty means a push would ship no production change.** *Do not treat a differing
+count as evidence of a problem.*
 
 ---
 
 ## 1 · READ, IN THIS ORDER — and nothing else to start
 
-1. **`docs/booking/HANDOFF-2026-09-05.md` §12** — the last section. It carries
-   this session's state, the three decisions, the measured constants and the five
-   new traps.
+1. **`docs/booking/HANDOFF-2026-09-05.md`, its LAST section** — headed
+   **`# 12 · SESSION 4`** *(an H1, not `##` — find it with
+   `grep -n '^# 12 ·' docs/booking/HANDOFF-2026-09-05.md`)*. It carries this
+   session's state, the three decisions, the measured constants and the five new
+   traps. ⚠️ **Read it FIRST and work backwards only if you need provenance;
+   §§2–11 contain answered questions kept for history.**
 2. **`head -30 docs/booking/tickets/BK-53.md`** and
    **`head -30 docs/booking/tickets/BK-55.md`**. 🔴 **Never read a revision number
    from `ROADMAP.md`.**
 3. ⭐ **`BK-53.md`'s `## THE SPEC` section (S1–S8).** **To implement, read ONLY
    that.** BK-53 is ~7,550 lines with twelve revisions; the spec is the merged
    current state and **where it and a revision disagree, the spec wins.**
-4. **`BK-55.md`'s `§M`** (revision 7) and **`§L-9`**.
+4. **`BK-55.md`'s `§M-0` THROUGH `§M-4`** — 🔴 **five subsections, not one; `§M-3`
+   carries the assertions still owed and `§M-4` the assumptions** — and **`§L-9`**.
+   ⚠️ **In `§L-9` and `R12-9`, the LEFT column is the current state; the last
+   column is `⛔ WAS:`, the defect as found.**
 
 ⚠️ **BK-53 and BK-55 do NOT exist in usable form on `bk51-gated`** — BK-53 is a
 212-line draft there and BK-55 is absent. **Read them from `main`.**
