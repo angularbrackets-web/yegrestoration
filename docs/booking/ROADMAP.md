@@ -485,6 +485,31 @@ above), so the only test is a live one.
 
 ## Locked — do not relitigate
 
+### 🆕 Decisions 30 and 31 — the free-changeover terms, 2026-09-09
+
+⚠️ **Recorded here 2026-09-09 because a cold read found this file — *"the
+canonical record"* — had ZERO mention of either, while both were treated as
+settled everywhere else.**
+
+- **Decision 30 — the paid-era branch COLLAPSES.** User: *"we dont have to worry
+  about existing bookings made on current terms which we are about to change."*
+  Three readings were offered; the user chose **collapse**. Bookings made under
+  the old paid terms render the ordinary current terms. **Deletes
+  `TERMS_PRIOR_LINE`, `TERMS_ERA_CUTOFF`, `G4a`/`G4b`/`G4c` and red-first rows
+  18–20; `G4` drops to three arms.** → `BK-55.md` `§P`.
+- **Decision 31 — the refund-entitlement question is set aside.** User:
+  *"ignore refund entitlement question as no such bookings exist."*
+  🔴 **ITS PREMISE IS FALSE AND THE DECISION IS THEREFORE RE-OPENED.** `#37` was
+  booked through the web **2026-08-23**, a week after the terms column reached
+  production on **2026-08-16**; the public door cannot submit without ticking
+  terms and ticking stamps the column. **`#37` is a real customer, job completed,
+  paid twice.** → `BK-55.md` `§Q-1`. **Blocked on the user.**
+
+⚠️ **The decision is the user's and stands until they revisit it. The PREMISE is
+checkable and was checked.** *A user is authoritative on policy, not on what is
+in the database.*
+
+
 Reviewers and planners: treat this section as settled. Raise it only if a ticket
 cannot be built without changing it.
 

@@ -32,13 +32,20 @@ UNPUSHED PRODUCTION CHANGE. Know what it is before you push.**
 ## 1 · 🔴 THE ONE-LINE STATE
 
 **Both gate tickets FAILED plan review on 2026-09-09. Nothing is approved.
-Nothing is implemented. There are TWENTY-FIVE blockers, and FOUR of them are
-blocked on the user.** *The next job is to work the blockers, not to build.*
+Nothing is implemented. There are TWENTY-THREE blockers, and THREE of them are
+blocked on the user** *(plus four carried-forward `ROADMAP` items that are a
+different thing — §3)*. *The next job is to work the blockers, not to build.*
+
+⚠️ **Every count on this page was RE-DERIVED from its enumeration on 2026-09-09,
+after a cold read caught a wrong one.** ⛔ ~~twenty-five~~ ~~fourteen~~ — *the
+error was written from a number rather than a list and reached four documents.*
+🔴 **Re-count anything you are about to act on. This project's own rule, and it
+was broken by the document that states it.**
 
 | | |
 | --- | --- |
-| **BK-53** | ⛔ **NOT APPROVED.** 11 blockers *(6 gate + 5 copy)*. Owed list: **`§U-4`** |
-| **BK-55** | ⛔ **NOT APPROVED.** 14 blockers *(6 rule-rewrite + 8 gate)*. Owed list: **`§Q-6`** |
+| **BK-53** | ⛔ **NOT APPROVED.** **11** blockers — `GB1`–`GB6` *(gate)* + `CB1`–`CB5` *(copy)*. Owed list: **`§U-4`** |
+| **BK-55** | ⛔ **NOT APPROVED.** **12** blockers — `QB1`–`QB5` *(rule-rewrite)* + `QG1`–`QG7` *(gate)*. Owed list: **`§Q-6`** |
 | **BK-57** | ✅ **DEPLOYED AND VERIFIED 2026-09-09** (`699b099`). Closed |
 | **BK-51** | unchanged — reviewed, `bk51-gated` only, never pushed |
 
@@ -63,7 +70,11 @@ blocked on the user.** *The next job is to work the blockers, not to build.*
 
 ---
 
-## 3 · 🙋 BLOCKED ON THE USER — four things, and they gate real work
+## 3 · 🙋 BLOCKED ON THE USER — **THREE fresh, plus a carried-forward bundle**
+
+⚠️ **Rows 1–3 are this round's blockers and gate real work. Row 4 is four
+pre-existing `ROADMAP` items and is a DIFFERENT class** — counting them together
+is what produced the wrong total above.
 
 | # | Item | Where |
 | --- | --- | --- |
