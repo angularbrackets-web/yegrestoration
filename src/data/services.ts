@@ -288,7 +288,7 @@ export const services: Service[] = [
         {
           question: 'How much does mold removal cost in Edmonton?',
           answer:
-            'It depends on how far the growth extends and what has to be removed — which is exactly why we start with an assessment and a written scope, so you know the cost before any work begins. If the mold was caused by a sudden covered water loss, your insurance may cover remediation, and we bill the insurer directly.',
+            'It depends on how far the growth extends and what has to be removed — which is exactly why we start with an on-site assessment. If you decide to go ahead, your quote spells out the cost before any work begins. If the mold was caused by a sudden covered water loss, your insurance may cover remediation, and we bill the insurer directly.',
         },
         {
           question: 'Will the mold come back after removal?',
@@ -386,7 +386,7 @@ export const services: Service[] = [
         {
           question: 'Can I clean up a small sewage spill myself?',
           answer:
-            'We don’t recommend it. Even a small backup contaminates porous materials — carpet, drywall, insulation — that look fine after wiping but hold bacteria inside. Proper cleanup means removing those materials and disinfecting with the right agents and protective equipment. The assessment gives you a written scope, so you know exactly what the spill actually touched.',
+            'We don’t recommend it. Even a small backup contaminates porous materials — carpet, drywall, insulation — that look fine after wiping but hold bacteria inside. Proper cleanup means removing those materials and disinfecting with the right agents and protective equipment. An on-site assessment tells you exactly what the spill actually touched, and your quote follows if you want us to handle it.',
         },
         {
           question: 'How fast can you get here?',
