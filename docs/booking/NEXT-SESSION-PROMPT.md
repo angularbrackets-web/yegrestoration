@@ -180,7 +180,7 @@ gates, then implementation review, then **one push**.
 
 ## 6 · 🙋 BLOCKED ON THE USER
 
-1. 🆕 🔴 **Decision 30 has a consequence they should see — `BK-55.md` `§P-4`.**
+1. ✅ **CLOSED 2026-09-09 by DECISION 31 — nothing owed here.** ~~Decision 30 has a consequence they should see — `BK-55.md` `§P-4`.~~
    A customer who accepted the **paid** terms is shown the **free** terms block
    on a resend, and **their refund entitlement is stated only in that block.**
    **It is not a new defect class — it ENLARGES `§H-4`'s population** from
@@ -188,11 +188,22 @@ gates, then implementation review, then **one push**.
    that population has never been measured** — §G's *"NOT KNOWN"* item 2 has
    wanted a production `SELECT` since revision 4. **Decision 30 removes this
    ticket's NEED for it; it does not answer it.**
+   ⇄ ✅ **THE USER ANSWERED IT INSTEAD:** *"ignore refund entitlement question as
+   no such bookings exist."* **The paid-era population is EMPTY, so decision 30
+   enlarges §H-4 by ZERO.** ⚠️ **ASSERTED BY THE OWNER, NOT MEASURED —
+   `A-R8-5`.** ⚠️ **§H-4's ORIGINAL population (post-flip hand-charged rows) is
+   UNTOUCHED and still open.**
 2. `ROADMAP` human-blocked index items **5** (Vercel Preview isolation), **7**
    (W20/W21 ordering), **9a/9b** (client questions) — unchanged.
 
 ✅ **RESOLVED THIS SESSION:** `TERMS_PRIOR_LINE`'s sign-off *(moot — decision 30
-deletes it)* and the three decision-20 pages *(BK-57, deployed and verified)*.
+deletes it)*, the three decision-20 pages *(BK-57, deployed and verified)*, and
+the refund-entitlement question *(decision 31 — the population is empty)*.
+
+🛑 **NOTHING IS PENDING A PUSH.** `main` and `origin/main` are in sync and the
+tree is clean. **The next push is the BIG one** — BK-51 + BK-53 + BK-55 together,
+and it cannot happen until BK-53 and BK-55 are **implemented and
+implementation-reviewed**, which they are not. **Plan review has not run.**
 
 ---
 
