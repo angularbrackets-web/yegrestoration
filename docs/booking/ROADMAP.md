@@ -189,7 +189,7 @@ again later the same day; re-test rather than inherit this line.** Playwright ca
 > ## 🔢 THE NUMBERING, because there are eight schemes and none is self-explaining
 > | Scheme | What it is | Files? |
 > | --- | --- | --- |
-> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-56**; **next free is BK-57.** *(BK-52/53 drafted 2026-09-02; **BK-54, BK-55 and BK-56 opened 2026-09-05** by decision 24's split and decision 25.)* | ✅ |
+> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-57**; **next free is BK-58.** ⚠️ **BK-57 opened 2026-09-09 for the decision-20 copy defect and is NOT a gate ticket — decision 24's "no third gate ticket" is unchanged.** *(BK-52/53 drafted 2026-09-02; **BK-54, BK-55 and BK-56 opened 2026-09-05** by decision 24's split and decision 25.)* | ✅ |
 > | **T1–T11** | Plan-internal ticket *ideas* in `PREPAY-PLAN`. Prose bullets nobody is obliged to update. **T2 and T10 are STRUCK. T13 never existed.** | ❌ |
 > | **W0–W27** | A separate work list in `CONVERSION` §7. | ❌ |
 > | **Task 1–7** | Subtasks *inside* BK-23 only. | ❌ |
@@ -532,6 +532,40 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 - `blackout_dates` PK column is `day`, not `date`.
 
 ## Known traps
+
+### 🆕 `verify-cutover.ts` run ALONE leaves a SENTINEL build in `dist/`
+
+**Severity: MEDIUM. Live, and it silently corrupts any `dist/` measurement.
+Owner: none needed — this is a method trap, not a code defect.**
+
+`npm run verify:cutover` is `tsx verify-cutover.ts && npm run build`. 🔴 **The
+SCRIPT ALONE leaves `dist/` holding a sentinel build**, and it says so on exit:
+*"NOTE: `dist/` now holds a SENTINEL build. Re-run `npm run build` before
+inspecting it."*
+
+🔴 **Any `dist/` measurement taken after a bare `tsx scripts/verify-cutover.ts`
+measures the SENTINEL, not the site.** Hit by an agent on 2026-09-07 and by
+BK-53's own row-57 run. **→ `npm run build` before measuring anything against
+`dist/`, every time.**
+
+*Recorded 2026-09-09. It was dispositioned "→ ROADMAP Known traps" by BK-53's
+`A11-14` and marked ✅ ACCEPTED, and it had never been written here — found by
+BK-53's `§T-6` finding 5, which is the promissory-note trap. BK-57 hit the
+sentinel for real during its gate run and rebuilt past it.*
+
+### 🆕 The FAQ corpus lives in a JavaScript bundle, and an HTML-only gate cannot see it
+
+**Severity: HIGH for BK-53's gate design. Owner: BK-53 (`§T-1a`).**
+
+`src/data/services.ts` is imported by an island, so **every FAQ answer on the
+site compiles into `dist/client/_astro/services.*.js`** as well as into HTML.
+Same for `booking-copy.ts` → `booking-handoff.*.js`, and for
+`BookingForm.svelte`'s own strings.
+
+🔴 **BK-53's specced corpus is `dist/client`'s HTML, so it would miss the largest
+body of prose the site has.** `verify-cutover.ts:1029-1030` already scans
+`.html || .js` for exactly this reason. **Three independent instances were found
+on 2026-09-09, none of them planted.**
 
 ### 🆕 A non-prerendered public page appears in no scope accounting at all
 
@@ -3424,6 +3458,7 @@ table AND "DECISIONS ADDED 2026-09-02". **T2 is struck (Stripe stays).**
 | BK-53 | 🔴 **DO NOT READ A REVISION NUMBER FROM THIS TABLE — it has been two revisions stale twice. Run `head -20 docs/booking/tickets/BK-53.md`.** **GATE 1, WEB HALF** (decision 24 split the email half to **BK-55**): prices off every web surface, the terms box, the tier picker, `/llms.txt`, `[service].astro`'s qualifier, plus the coupling pin, the amount ban and the money-promise ban. Built **ON `bk51-gated`**; **BK-51 + BK-55 + BK-53 ship in ONE push, never separately** — alone on `main` BK-53 gives a priceless site while `[id].astro` still mints Checkout Sessions | **Reviewed** *(the adversarial pass runs ONCE at the branch tip over the union — see the ticket's seam rule)* | ⛔ **NOT APPROVED.** As of 2026-09-06: **revision 10**, written against 2 plan reviews and **10 validation agents over three rounds**. 🔴 **Read `R10-8` before plan review — it carries a scope question that is the reviewer's and the user's, not the implementer's.** Each round has found real defects and about half of each round's findings were in the fix for the previous round — **budget a validation cycle; do not assume it is clean** |
 | BK-55 | 🔴 **DO NOT READ A REVISION NUMBER FROM THIS TABLE. Run `head -20 docs/booking/tickets/BK-55.md`.** **GATE 1, EMAIL HALF** (decision 24's split, 2026-09-05): the request email's computed prices, `FEE_TERMS_PAYMENT` leaving the email, `APPROVED_*`'s charged-path terms, `CANCEL_LINE`'s renders, **and the resend defect** (moved here from BK-53). **Commits BEFORE BK-53** — BK-53 cannot delete an export this file still imports. **Two commits: (a) the assertion counter, (b) the rest** | **Reviewed** *(the adversarial pass runs ONCE at the branch tip over the union, with BK-53 — one seam, one pass)* | ⛔ **NOT APPROVED.** As of 2026-09-06: **revision 4**. 🔴 Sandboxed: commit (b)'s specced deletion alone was **exit 1, `✗ 20 checks failed`**, in arms the seam assigns to BK-53 — resolved by **seam clause 6**, which is the thing to attack first |
 | BK-54 | **Snapshot the terms at insert, and render the resend from the snapshot** — decision 16's structural fix, and R4-3's option (a). **NOT a gate on BK-53 or BK-55**, both of which ship option (b), suppression, as the interim | ⚠️ **Reviewed + FULL ADVERSARIAL PASS** — CLAUDE.md's trigger is met outright: it **touches the appointment insert** | 🆕 **OPENED 2026-09-05, not planned, not started.** Depends on BK-55 shipping option (b) first. Blocks nothing |
+| BK-57 | **Three live pages promised a written document the free assessment does not produce** — the decision-20 defect BK-53 `S8` flagged as unowned. `/insurance-claims/`, `/mold-removal/`, `/sewage-cleanup/`. Light tier, copy only, **no adversarial pass** (CLAUDE.md excludes copy-only). | Light | ✅ **DEPLOYED 2026-09-09** (`699b099`) — gates green, both red-first rows observed, **verified against the live artifact on all three pages plus a positive control**. 🛑 **NOT a gate ticket; decision 24 is unchanged** |
 | BK-56 | **Let the owner add a line to the customer's confirmation email** — the second channel **decision 25 requires and the software does not have**: the travel-fee amount reaches the customer only by phone or by an owner-triggered confirmation email. **NOT a gate on BK-53 or BK-55** — the phone channel works today | ⚠️ **Reviewed** — a **customer-facing write path**, which is what makes it more than a text field | 🆕 **OPENED 2026-09-05, not planned, not started.** Depends on nothing. Blocks nothing |
 | BK-52 | **Decision 15** — assessment type stays, becomes optional, stops gating approval; Approve renders for tier-less rows; the office's view of the type un-gated from the price block. **Does not unblock the push.** | **Reviewed** + adversarial | 📋 **drafted 2026-09-02** with a full scoping pass — the plan's six-item table was missing its sharpest item (`appointmentMoney` hides the settled amount on tier-less rows) and 5 of 6 line numbers were stale |
 | BK-50 | The unreviewed-request safety net — Status column and unreviewed count on the admin Upcoming table, `RECEIVED_TIMING_LINE` on `BookingForm.svelte`'s fallback card. **Precondition for deleting cron sweep 2** (client decision 4: an unreviewed request's slot is simply lost, no auto-cancellation, no email) | **Reviewed** | ✅ **reviewed 2026-09-01 — three rounds, six fresh agents, 12 blockers, all resolved.** 22 red rows; typecheck 0, build clean, `verify:booking:admin` and `verify:cutover` green; **render artifact produced** against the dev branch. **SHIPPED 2026-09-02 — LIVE** as part of the fast-forward `8b81fb0..73e21ce`. Verify with `git branch -r --contains 3770b66`, never from this line. |
