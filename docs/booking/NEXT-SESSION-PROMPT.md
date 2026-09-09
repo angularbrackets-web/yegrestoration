@@ -175,3 +175,15 @@ those sentences live for weeks.
 - 🔴 **HALF OF EACH ROUND'S FINDINGS ARE IN THE PREVIOUS ROUND'S FIX.** Three of
   BK-53's six gate blockers are defects in corrections landed the same morning.
   **Expect this. It is not a reason to stop reviewing.**
+- 🔴 🆕 **A SECTION THAT QUOTES LINE NUMBERS BECOMES SELF-FALSIFYING THE MOMENT
+  IT IS INSERTED ABOVE THEM.** Writing `§U` and `§Q` pushed everything they cite
+  down by **~400 lines**, so **every intra-ticket line number in both is stale by
+  construction** — true when measured, false as shipped. **Both carry a banner
+  saying so. GREP THE QUOTED STRING; never go to the line.** *(`src/` and
+  `scripts/` citations are unaffected and were verified exact.)* **When you cite
+  a position inside a document you are also editing, cite a STRING.**
+- ⚠️ 🆕 **The strikethrough scan must use `FNR`, not `NR`.** Across multiple
+  files `NR` is cumulative and reports line numbers that do not exist:
+  `awk '{n=gsub(/~~/,"~~"); if(n%2==1) print FILENAME": "FNR}' docs/booking/tickets/*.md`.
+  **`BK-53.md`'s twelve hits are all legitimate multi-line blocks** — verified
+  pair by pair. **`BK-55.md` and `BK-57.md` must be ZERO.**
