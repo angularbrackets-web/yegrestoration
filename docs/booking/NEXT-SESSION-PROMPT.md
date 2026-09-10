@@ -115,15 +115,43 @@ touched the file this session.)*
 
 ---
 
-## 6 · 🛑 `bk51-gated` IS STALE RELATIVE TO PRODUCTION
+## 6 · 🛑 `bk51-gated` IS STALE RELATIVE TO PRODUCTION — **SEVENTEEN, AND THE NUMBER MOVES EVERY TIME `main` SHIPS**
 
-**EIGHT non-docs files differ. SIX are BK-51's own work; TWO are files the branch
-is merely BEHIND on** — `src/data/services.ts`, `src/pages/insurance-claims.astro`.
-Check with `git diff --quiet $(git merge-base main bk51-gated)..bk51-gated -- <file>`.
+🔴 **RE-MEASURED 2026-09-10: SEVENTEEN non-docs files differ.**
+⛔ ~~SIX~~ ⛔ ~~EIGHT~~ — ***this figure has now been wrong in every brief that
+stated it, including one written the same morning it changed.***
 
-⚠️ **So `bk51-gated` still carries the three sentences BK-57 REMOVED from the live
-site. Merging without rebasing would REVERT a shipped customer-facing fix, and NO
-GATE WOULD NOTICE.**
+**Re-derive it, never inherit it:**
+
+```sh
+git diff --name-only main..bk51-gated | grep -vc '^docs/'          # 17 today
+MB=$(git merge-base main bk51-gated)
+for f in $(git diff --name-only main..bk51-gated | grep -v '^docs/'); do
+  git diff --quiet $MB..bk51-gated -- "$f" && echo "BEHIND: $f" || echo "branch:  $f"
+done
+```
+
+| | Count | What |
+| --- | --- | --- |
+| **branch work** | **6** — *stable* | `verify-booking-admin-db.ts` · `verify-booking-review.ts` · `booking-payment.ts` · `booking-review.ts` · `admin/appointments/[id].astro` · `api/admin/appointments/review.ts` |
+| 🔴 **merely BEHIND** | **11** — ⛔ ~~2~~ | BK-57's + **BK-58's** production copy, plus `package.json` and **`scripts/verify-trust-claims.ts`, which does not exist on the branch at all** |
+
+⚠️ **WHY IT JUMPED: `main` SHIPPED BK-58 ON 2026-09-10.** *The branch did not
+change. Divergence is a two-ended measurement and only one end is under this
+ticket's control.*
+
+🔴 **THE OLD WARNING WAS OVERSTATED AND IS CORRECTED HERE.** It read
+*"merging without rebasing would REVERT a shipped customer-facing fix."*
+⛔ **An ordinary `git merge bk51-gated` would NOT** — git keeps `main`'s side for
+the eleven files the branch never touched. **The real hazards are narrower and
+worth naming exactly:** a **hard reset** of `main` to the branch · a
+**cherry-pick of a whole tree** · or **reading the branch as if it were current**
+when briefing an agent or measuring copy.
+
+✅ **AND THERE IS NOW A GATE WHERE THERE WAS NONE.** `npm run verify:trust` pins
+BK-58's removals over `dist/`. **It does not exist on `bk51-gated`** — so it
+cannot protect the branch until the rebase brings it, **and after the rebase it
+protects both halves.** *That is a reason to rebase EARLY rather than at the end.*
 
 ---
 
