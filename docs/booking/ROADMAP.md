@@ -587,7 +587,26 @@ in the database.*
   `bk51-gated`; the exposure belongs to **ANY branch pushed to the remote**, and
   **two stale branches are already there** (`booking/p1-foundation`,
   `deploy-2-prepay`). User: *"Turn Preview deploys off."*
-  ☐ **OPERATIONAL, USER-OWNED, NOT YET DONE.** 🔴 **CORRECTED 2026-09-10 AGAINST
+  ⇄ 🆕 **THE USER REPORTS IT DONE, 2026-09-10 — AND IT IS *PENDING AN
+  ARTIFACT*, NOT CLOSED.** 🔴 **`CLAUDE.md`/BK-48: *"A configuration change is not
+  evidence of its own effect… an item whose effect lands on an artifact nobody has
+  looked at is not closed."*** **The GST number was marked CLOSED the same morning
+  by an entry whose own text said the only proof was a real receipt.** ⚠️ **This is
+  that shape exactly, and it must not be repeated.**
+  ⛔ **NOT VERIFIABLE FROM HERE:** `vercel pull` writes only
+  `buildCommand · createdAt · devCommand · directoryListing · framework ·
+  installCommand · nodeVersion · outputDirectory · rootDirectory`. **`ignoreCommand`
+  is NOT among them**, so the CLI cannot read the setting back. *Checked.*
+  ☑️ **THE PROBE THAT PRODUCES THE ARTIFACT — and it carries the very risk it
+  tests, so it is the NEXT session's call, not a background task:** push a
+  throwaway branch to `origin` and confirm its deployment reads **`Canceled`**,
+  then delete the branch. **If the setting took, nothing is built. If it did not,
+  ONE preview deploy runs with production credentials** — which is the exposure
+  itself. 🛑 **NEVER use `bk51-gated` for this.**
+  ⚠️ **AND EVEN A GREEN PROBE CLOSES ONLY HALF.** The variables are still scoped to
+  Preview at production values; the setting suppresses the BUILD, it does not
+  unscope anything. **Flip it back and the exposure returns unchanged.**
+  ⛔ ~~OPERATIONAL, USER-OWNED, NOT YET DONE.~~ 🔴 **CORRECTED 2026-09-10 AGAINST
   THE DOCS — ⛔ ~~Settings → Git → disable Preview Deployments~~ IS WRONG ON BOTH
   COUNTS: wrong page, and NO SUCH TOGGLE EXISTS.** Vercel's own words: *"Vercel
   for GitHub will **deploy every push by default**."*
