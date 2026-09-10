@@ -592,6 +592,69 @@ in the database.*
   live.** *Turning previews off does not unscope the variables; if previews are
   ever re-enabled the exposure returns unchanged.*
 
+- 🆕 🔴 **Decision 40 — THE GUARD'S PREDICATE IS THE ACK TIMESTAMP, AND A MONEY
+  PROXY IS REJECTED WITH EVIDENCE.** User, 2026-09-09, after the money route was
+  recommended, measured, and **withdrawn by the orchestrator the same hour.**
+  **The predicate: `terms_acked_at IS NOT NULL AND terms_acked_at < <cutoff>`.**
+
+  ⚠️ **THE MONEY ROUTE WAS RECOMMENDED FIRST AND THE RECOMMENDATION WAS WRONG.
+  Recorded in full so it is not re-proposed** — it is attractive, it needs no
+  push-day constant, and it looked like it also closed `§H-4`/`G11`:
+
+  | Column | Durable? | Evidence |
+  | --- | --- | --- |
+  | **`terms_acked_at`** | ✅ **YES — written ONCE at insert, cleared or rewritten NOWHERE** | `booking-commit.ts:91` is its only writer; `git grep terms_acked_at -- src` returns the insert, two render sites and two comments |
+  | `paid_at` | ⛔ **NO** | `review.ts` sets it `NULL` at **approve**, **rollBack** and **approveFree** |
+  | `payment_method` | ⛔ **NO** | same three statements |
+  | `paid_amount_cents` | ⛔ **NO** | same three statements |
+  | `payment_reference` | ⛔ **NO** | same three — **and this is the only record of an INTERAC payment** |
+  | `payment_status` | ⛔ **NO** | reset to `'pending'` / `'not_required'` |
+
+  🔴 **RE-APPROVAL WIPES EVERY MONEY COLUMN IN ONE STATEMENT — DELIBERATELY,
+  as BK-33's invite-crossing fix, so a crew is never dispatched on a previous
+  cycle's money.** *(The clearing itself is right; `7b71780` established it after
+  the ROADMAP had claimed the opposite in four documents.)* **So a money predicate
+  is destroyed on exactly the path that produces the harm**, and for `#37` — who
+  **paid by Interac, not Stripe** — nothing at all survives, since
+  `stripe_payment_intent_id` is the one money column never cleared and it is
+  empty for an e-Transfer.
+
+  🔴 **AND THE DEEPER REASON, WHICH OUTLIVES THE COLUMN AUDIT: the question is
+  *"which TEXT did this customer agree to"*, and that is a fact about WHEN.
+  Money is a proxy for it. `terms_acked_at` is the thing itself.**
+
+  ☐ **THREE PROTECTIONS ARE PART OF THE DECISION, NOT OPTIONAL EXTRAS.** The
+  placeholder `new Date('2026-__-__T00:00:00Z')` evaluates to **`Invalid Date`**,
+  and **every relational comparison against `Invalid Date` is `false`** — so an
+  unfilled constant makes the guard a **silent no-op with `EXIT=0` and no `✗`.**
+  ⚠️ **Under the OLD render use the same placeholder failed BENIGN, which is why
+  it sat unfilled and unnoticed. The new use makes the identical value fail OPEN.**
+  1. **A gate assertion that the constant PARSES** — `!Number.isNaN(...getTime())`.
+  2. **A red-first row that sets it unparseable and requires the refusal arm to go RED**, scored on **(exit code, summary line)**.
+  3. **SET IT DELIBERATELY LATE, by a stated margin.** 🔴 **The error directions are
+     NOT symmetric.** Too **late** → a few free-era bookings lose Resend → the
+     office notices within a day → **loud and recoverable.** Too **early** → a
+     paid-era row slips through and the customer is emailed → **zero
+     detectability, no log, no flash.** *There is no safe direction to be sloppy
+     in, only a less catastrophic one.*
+
+  🔴 **RENAME IT.** What returns is **not** `TERMS_ERA_CUTOFF` — different
+  semantics, different consumer, different safety direction. Re-using the name
+  invites the deleted render meaning back. **`PAID_TERMS_GUARD_BEFORE` or
+  similar.** *`QS2`'s own discipline: verifying a rename by grepping the name you
+  are LEAVING is the BK-36 name-trap.*
+
+- 🆕 **Decision 41 — NO CUSTOMER FOLLOW-UP for the paid-era population, and no
+  `SELECT` for that purpose.** User, 2026-09-09. **The reasoning, recorded so it
+  is not re-litigated:** `#37`'s job was **COMPLETED** and they paid for work
+  **delivered**, so there is nothing to refund and no entitlement left to state.
+  ⚠️ **THIS DOES NOT MAKE THE GUARD UNNECESSARY** — the guard stops a **false
+  statement** being sent; decision 41 says no **true statement** is owed. **Two
+  different questions, and answering the second does not answer the first.**
+  ⚠️ **`O-5`'s production `SELECT` is NOT discharged by this** — it was owed for
+  the refund work generally *(`#36`'s unreconciled refund is a different row and
+  a different problem)*, and it remains **unowned with no ROADMAP entry**.
+
 - 🆕 **Decision 35 — the hours claim: 24-HOUR PHONE, BUSINESS-HOURS BOOKING.**
   User, 2026-09-09. The phone is answered any time for emergencies; **assessments
   are only bookable in the 30-slot grid** (11:30–15:30, Fridays closed).
