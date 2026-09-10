@@ -12,6 +12,7 @@
     "migrate:status": "tsx scripts/migrate.ts --status",
     "verify:env": "tsx scripts/verify-env.ts",
     "verify:contact": "tsx scripts/verify-contact.ts",
+    "verify:trust": "tsx scripts/verify-trust-claims.ts",
     "verify:cutover": "tsx scripts/verify-cutover.ts && npm run build",
     "verify:slots": "tsx scripts/verify-slots.ts",
     "verify:availability": "tsx scripts/verify-availability.ts",

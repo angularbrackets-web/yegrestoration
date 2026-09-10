@@ -22,12 +22,11 @@ export const BUSINESS = {
   url: 'https://yegrestoration.ca',
   city: 'Edmonton',
   region: 'AB',
-  foundingYear: 2008,
   // Canonical entity description. Reused verbatim in schema, meta tags, and
   // the about page so search engines and AI assistants see one consistent
   // description of who we are. Edit here, never inline.
   description:
-    'YEG Restoration is a 24/7 emergency property restoration company serving Edmonton and surrounding Alberta communities since 2008. IICRC-certified crews handle water damage, fire and smoke damage, mold removal, sewage cleanup, and storm damage repair — with written scopes, a written guarantee, and direct insurance billing.',
+    'YEG Restoration is a 24/7 emergency property restoration company serving Edmonton and surrounding Alberta communities. Our IICRC-certified crews have handled water damage, fire and smoke damage, mold removal, sewage cleanup, and storm damage repair since 2008 — with written scopes, a written guarantee, and direct insurance billing.',
 } as const;
 
 export interface ServiceFaq {

@@ -644,6 +644,19 @@ in the database.*
   similar.** *`QS2`'s own discipline: verifying a rename by grepping the name you
   are LEAVING is the BK-36 name-trap.*
 
+- 🆕 **Decision 42 — BK-58's COPY IS APPROVED, all three questions, as proposed.**
+  User, 2026-09-10, choosing from three stated readings on the first.
+  **(a) The years attach to the PEOPLE, never to the company** —
+  *"Crews With Experience Since 2008"*, and the stats bar's **`18 yrs`
+  SURVIVES and becomes TRUE** because its label now counts experience.
+  ⚠️ **A YEAR SWAP WAS REJECTED AS A ROUTE, not just as a value: the false
+  element is the SUBJECT.** `foundingDate` is **deleted**, not corrected.
+  **(b) `BBB Accredited` comes off all four sites**, including the spelled-out
+  *"Accredited by the Better Business Bureau."*
+  **(c) The `Hours` block splits in two** — *"Emergency line: 24/7, including
+  holidays"* and *"Assessments: 11:30am–4:00pm, closed Fridays."*
+  ✅ **The two substantiated badges STAY** — IICRC and Licensed & Insured.
+
 - 🆕 **Decision 41 — NO CUSTOMER FOLLOW-UP for the paid-era population, and no
   `SELECT` for that purpose.** User, 2026-09-09. **The reasoning, recorded so it
   is not re-litigated:** `#37`'s job was **COMPLETED** and they paid for work

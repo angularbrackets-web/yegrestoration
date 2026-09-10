@@ -8,9 +8,9 @@ import LocationsSection from '../sections/LocationsSection.astro';
 import { BUSINESS } from '../data/services';
 import { BUSINESS_ID, breadcrumbSchema } from '../lib/seo';
 
-const metaTitle = 'About YEG Restoration | Edmonton Restoration Since 2008';
+const metaTitle = 'About YEG Restoration | Edmonton Restoration Specialists';
 const metaDescription =
-  'Locally owned, IICRC-certified restoration serving Edmonton 24/7 since 2008. Written scopes, direct insurance billing. Call (780) 479-3285.';
+  'Locally owned, IICRC-certified restoration serving Edmonton 24/7, by crews doing this work since 2008. Direct insurance billing. Call (780) 479-3285.';
 
 const schemas = [
   {
@@ -47,10 +47,6 @@ const certifications = [
   {
     name: 'IICRC Certified Firm',
     note: 'Certified to the industry standard for water, fire, and mold restoration.',
-  },
-  {
-    name: 'BBB Accredited',
-    note: 'Accredited by the Better Business Bureau.',
   },
   {
     name: 'Licensed & Insured',
@@ -108,7 +104,7 @@ const certifications = [
 
           <!-- H1 -->
           <h1 class="font-display font-extrabold text-display-lg text-yeg-text mb-6">
-            Edmonton&rsquo;s Restoration Team Since 2008
+            Edmonton&rsquo;s Restoration Team
           </h1>
 
           <!-- Canonical entity description — must match BUSINESS.description verbatim -->
@@ -149,7 +145,7 @@ const certifications = [
           <!-- Trust Badges -->
           <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
             {
-              ['IICRC Certified', 'BBB Accredited', 'Licensed & Insured', 'Since 2008'].map(
+              ['IICRC Certified', 'Licensed & Insured', 'Experience Since 2008'].map(
                 (badge) => (
                   <span class="trust-badge">
                     <span class="w-1 h-1 rounded-full bg-yeg-amber/50 flex-shrink-0 inline-block" />
@@ -166,7 +162,7 @@ const certifications = [
     <!-- Story -->
     <section class="relative overflow-hidden bg-yeg-bg border-t border-black/[0.06] py-20 lg:py-28">
       <div class="absolute bg-word opacity-[0.05]" style="right: -4vw; top: 10vh;">
-        2008
+        EDMONTON
       </div>
       <div class="relative z-10 px-6 lg:px-[8vw]">
         <div class="max-w-3xl">
@@ -190,7 +186,8 @@ const certifications = [
               company directly, so a covered claim usually costs you just your deductible.
             </p>
             <p>
-              We&rsquo;ve been locally owned and operated in Edmonton since 2008. The people who
+              We&rsquo;re locally owned and operated in Edmonton, and our people have been doing
+              this work since 2008. The people who
               answer your call are the people accountable for the work — and every job comes
               with a written scope up front and a written guarantee at the end.
             </p>

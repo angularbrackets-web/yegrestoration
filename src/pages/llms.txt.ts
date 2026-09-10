@@ -34,8 +34,8 @@ export async function GET(context: APIContext) {
 Key facts:
 
 - 24/7 emergency response, on-site in Edmonton in about 60 minutes
-- Serving Edmonton and surrounding Alberta communities (St. Albert, Sherwood Park, Spruce Grove, Leduc, Fort Saskatchewan, and more) since ${BUSINESS.foundingYear}
-- IICRC-certified crews, written scopes, written guarantee
+- Serving Edmonton and surrounding Alberta communities (St. Albert, Sherwood Park, Spruce Grove, Leduc, Fort Saskatchewan, and more)
+- IICRC-certified crews with restoration experience since 2008, written scopes, written guarantee
 - Direct insurance billing — we work with all major Canadian insurers
 - Phone: ${BUSINESS.phone} · Email: ${BUSINESS.email}
 

@@ -62,7 +62,6 @@ export const localBusinessSchema = {
       description: BUSINESS.description,
       image: 'https://yegrestoration.ca/og-cover.jpg',
       logo: 'https://yegrestoration.ca/images/YEG_Restoration_Logo_RBG.png',
-      foundingDate: '2008',
       address: {
         '@type': 'PostalAddress',
         addressLocality: 'Edmonton',
