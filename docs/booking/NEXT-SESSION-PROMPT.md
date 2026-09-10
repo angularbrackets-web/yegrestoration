@@ -32,8 +32,9 @@ UNPUSHED PRODUCTION CHANGE. Know what it is before you push.**
 ## 1 · 🔴 THE ONE-LINE STATE
 
 **Both gate tickets FAILED plan review on 2026-09-09. Nothing is approved.
-Nothing is implemented. There are TWENTY-THREE blockers, and THREE of them are
-blocked on the user** *(plus four carried-forward `ROADMAP` items that are a
+Nothing is implemented. There are TWENTY-THREE blockers, of which **21 are open
+and 2 were CLOSED on 2026-09-09 by DECISION 32**, and **ONE is blocked on the
+user** *(plus four carried-forward `ROADMAP` items that are a
 different thing — §3)*. *The next job is to work the blockers, not to build.*
 
 ⚠️ **Every count on this page was RE-DERIVED from its enumeration on 2026-09-09,
@@ -70,24 +71,25 @@ was broken by the document that states it.**
 
 ---
 
-## 3 · 🙋 BLOCKED ON THE USER — **THREE fresh, plus a carried-forward bundle**
+## 3 · 🙋 BLOCKED ON THE USER — **ONE left; two closed 2026-09-09**
 
-⚠️ **Rows 1–3 are this round's blockers and gate real work. Row 4 is four
-pre-existing `ROADMAP` items and is a DIFFERENT class** — counting them together
-is what produced the wrong total above.
+🔴 **ONLY ROW 1 IS OPEN.** Rows 2 and 3 were closed by **decision 32** — the user
+said *"apply those two"* and both landed. **Row 4 is four pre-existing `ROADMAP`
+items and is a DIFFERENT class**; counting them with the fresh ones is what
+produced a wrong total earlier.
 
 | # | Item | Where |
 | --- | --- | --- |
 | **1** | 🔴 **`A-R8-5` IS FALSE.** The user said *"no such bookings exist"*; **`#37` is a named, real, paying customer in that population** — booked through the web 2026-08-23, a week after terms reached production. **`O-1` is RE-OPENED.** *Three ways out are written in `§Q-1`: run the `SELECT`, name `#37` as an exception with a Resend guard, or leave it recorded as asserted with a named counterexample* | `BK-55.md` `§Q-1` |
-| **2** | 🔴 **The travel-fee trigger is FALSE copy.** It says *"outside our service area"*; the fee bills **beyond 30 km** and the site advertises Leduc, Fort Saskatchewan and *"anywhere in Alberta"*. **Proposed:** *"If you're beyond about 30 km from us, a travel fee may apply."* ⛔ **NOT APPLIED** | `BK-53.md` `§U-2` `CB1` |
-| **3** | 🔴 **The payment-link claim is FALSE copy**, in the box a customer must TICK. Interac and on-site are schema-level methods with **twenty Interac payments on record**. **Proposed:** *"We never take money without telling you the amount first, and we always tell you how to pay it."* ⛔ **NOT APPLIED** | `BK-53.md` `§U-2` `CB2` |
+| ~~2~~ | ✅ **CLOSED — DECISION 32, 2026-09-09.** The travel-fee trigger now reads *"If you're beyond about 30 km from us…"*, landed at all three destinations. ⚠️ **Its CONTROL is still owed — `§U-4` `U1b`** | `BK-53.md` `§V-1` |
+| ~~3~~ | ✅ **CLOSED — DECISION 32, 2026-09-09.** The terms box now reads *"…and we always tell you how to pay it."* | `BK-53.md` `§V-2` |
 | **4** | `ROADMAP` human-blocked items **5**, **7**, **9a/9b** — unchanged | `ROADMAP.md` |
 
 ---
 
 ## 4 · DO THIS, IN ORDER
 
-1. **Get answers to §3's items 1–3.** They change copy and scope.
+1. **Get an answer to §3's item 1** *(`#37` vs the empty-population claim)*. **Items 2 and 3 are CLOSED.**
 2. **Work `§U-4` and `§Q-6`**, landing each at its destination. 🛑 **NOT as a new
    revision layer** — that is how this ticket lost rows seven times. **If you find
    yourself writing revision 13 of BK-53, say so plainly rather than writing it.**

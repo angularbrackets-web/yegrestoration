@@ -509,6 +509,17 @@ settled everywhere else.**
 checkable and was checked.** *A user is authoritative on policy, not on what is
 in the database.*
 
+- 🆕 **Decision 32 — two APPROVED sentences were FALSE and are replaced**, user
+  2026-09-09 (*"apply those two"*). **(a)** the travel fee's trigger was *"outside
+  our service area"*; the fee bills **beyond 30 km** while the site advertises 31
+  communities, Leduc, Fort Saskatchewan and *"anywhere in Alberta"* — now
+  *"If you're beyond about 30 km from us, a travel fee may apply."*
+  **(b)** the terms box a customer must TICK claimed *"any charge is a link you
+  choose to pay"*; `interac` and `onsite` are schema-level payment methods with
+  **twenty Interac payments on record** — now *"…and we always tell you how to
+  pay it."* → `BK-53.md` `§V`. ⚠️ **Decision 26 otherwise stands.**
+  ☐ **The control for (a) is still owed** — `§U-4` `U1b`.
+
 
 Reviewers and planners: treat this section as settled. Raise it only if a ticket
 cannot be built without changing it.
