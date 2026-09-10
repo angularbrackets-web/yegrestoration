@@ -49,7 +49,7 @@
 > | 2 | ✅ **Brief the office** on the free model and their new qualifying role — **AGREED 2026-09-03** | Operational items |
 > | 3 | ✅ **Carrier's August call detail record** — **AGREED 2026-09-03**, wanted BEFORE the flip | `MEASURING-THE-FREE-CHANGEOVER.md` |
 > | 4 | ✅ **The Ads / T6 decision — ANSWERED 2026-09-05: LEAVE THE CAMPAIGN RUNNING.** Not paused, and **not** re-pointed to `/book/received/` | `BK-53.md` |
-> | 5 | **Confirm Vercel Preview env isolation** before `bk51-gated` is ever pushed to a remote | coupling block |
+> | 5 | ⛔ ~~Confirm Vercel Preview env isolation~~ ✅ **ANSWERED 2026-09-09 — AND THE ANSWER IS *NOT ISOLATED*.** 25 vars are Preview+Production with **IDENTICAL values**, incl. `DATABASE_URL`, `RESEND_API_KEY`, `ADMIN_PASSWORD`. Stripe alone is isolated. 🔴 **The item understated itself — the exposure is ANY pushed branch, not just `bk51-gated`, and two stale branches are already on the remote.** → **decision 34.** ☐ **Still user-owned:** turn Preview Deployments OFF in Vercel → Settings → Git | decision 34 |
 > | 6 | ✅ **W9 IS DONE — GA4 WORKS, 2026-09-05.** Service-account impersonation, no key file. **If it breaks again, read this row before touching anything.** ⬆️ ~~W9 GA4 re-auth — ROOT CAUSE FOUND 2026-09-05, AND IT IS TWO PROBLEMS.** The server (`~/.claude.json` → `analytics-mcp`) authenticates by **Application Default Credentials** at `~/.config/gcloud/application_default_credentials.json`. That file is dated **2026-07-07** and its token is dead → `invalid_grant`. **But it also carries NO `scopes` field**, i.e. it was minted with default ADC scopes (cloud-platform + userinfo.email) which **do not include Analytics** — so a plain re-login fixes the expiry and then fails again with a 403. ~~Both must be fixed in one command: `gcloud auth application-default login --scopes=…analytics.readonly`~~ 🔴 **THAT COMMAND IS BLOCKED. Attempted 2026-09-05 and Google refused it:** *"This app is blocked"*, with gcloud's own warning — *"The following scopes will be blocked soon for the default client ID: analytics.readonly. To use these scopes, you must provide your own client ID or use service account impersonation."* **Do not retry it.**
 **The working setup, built 2026-09-05:**
 1. ✅ **Service account `ga4-mcp@project-2671172b-3f2b-433f-9b1.iam.gserviceaccount.com` created**, and the user granted `roles/iam.serviceAccountTokenCreator` on it.
@@ -60,10 +60,10 @@
 ✅ **Already true and not the problem:** `analyticsdata.googleapis.com` **is enabled** on the project (checked), and the gcloud CLI is authed as `angularbrackets.web@gmail.com`. *(`invalid_grant` is a token failure, not a scope failure; the scope half is a second defect found while diagnosing the first, and it would have surfaced as a 403 immediately after a naive re-auth.)* Blocks W5/W6 **and** the BK-53/BK-55 service-page decision | §7 of CONVERSION |
 > | 6b | ✅ **DONE 2026-09-05 — MEASURED. The HOMEPAGE is the ad entry point (1,097 of ~1,204 paid sessions, ~92%); the four service pages take 23 between them and `/fire-smoke-damage` has zero.** GA4 property **543677881**. The *"service pages are the Ads landing pages"* premise is measured **false**. BK-53's last open item is closed | `CONVERSION` §4 |
 again later the same day; re-test rather than inherit this line.** Playwright cannot substitute — it launches a clean browser with no Google session. ⚠️ **RETRIED 2026-09-05 VIA THE BROWSER — and the manual path recorded here was WRONG.** The extension works and Ads is logged in (account **673-094-6254**), but **this account has NO "Landing pages" report** — *Insights and reports* lists Insights, Brand report, Auction insights, Search terms, When and where ads showed, Channel performance, Stores, Report editor, Dashboards, and nothing else. **PMax has asset groups, not ad groups.** `/aw/landingpages` redirects to Overview and `/aw/assetgroups` 404s; the campaigns table is not in the accessibility tree and the UI hangs on its spinner. **Remaining route: screenshot-and-click into the campaign → Asset groups. But re-authing GA4 (W9) is better AND cheaper** — it reports where traffic *went* rather than where it was *configured* to go, and PMax expands beyond its configured URLs | `BK-53.md` §7 |
-> | 7 | **W20/W21 ordering** — still open, and now load-bearing: see the conversion-work constraint recorded 2026-09-05 below | below |
+> | 7 | ✅ **W20/W21 ordering — ANSWERED 2026-09-09. THE PRICING FLIP GOES FIRST**, W20+W21 together after its window closes. → **decision 36** | decision 36 |
 > | 8 | ~~**Sherwood Park / Fort Saskatchewan** — do they owe the $150?~~ **STRUCK 2026-09-05 — THIS WAS NEVER OPEN.** Decision 8 already settled it and the user re-confirmed it verbatim: *the client decides whether to apply the travel fee when he confirms the booking; the system does not have to worry about it today.* `PREPAY-PLAN-2026-09-01.md`:259 — *"the $150 stays out of the codebase entirely. No column, no email block, no charge path."* This row plus three passages in `BK-51.md` presented a settled decision as a live user question, and it was asked of the user again on 2026-09-05 — **the answered-question-still-open trap, fourth instance** | `BK-51.md` |
-> | 9a | **Client questions — `ROADMAP` §Open questions, #6** insurance credit | this file |
-> | 9b | **Client questions — `PREPAY-PLAN-2026-09-01.md` §Blocking questions, #7** founding year + BBB/IICRC/Licensed, **#8** "Open 24 hours" vs 30 slots. ⚠️ **These are PREPAY-PLAN's numbers, not this file's** — this row previously mixed the two numberings under one pointer, so `#7`/`#8` resolved to the GST registration number and the FSA service-area list instead | `PREPAY-PLAN` |
+> | 9a | ✅ **ANSWERED 2026-09-09 — insurance billing is BOTH, per job.** Insurers do not pay Stripe invoices, so a non-Stripe path is first-class for any future invoicing tool. → **decision 37** | decision 37 |
+> | 9b | ✅ **ANSWERED 2026-09-09 — AND TWO OF THE THREE CLAIMS ARE FALSE ON THE LIVE SITE.** **#7:** the FIRM was founded **2026**; *"since 2008"* is the **founders' experience**, so the subject is what is false, not the number — **decision 38**. **IICRC Certified Firm** ✅ and **Licensed & Insured** ✅ stand; 🔴 **BBB Accredited does NOT and is live** — **decision 39**. **#8:** 24-hour **phone**, business-hours **booking** — **decision 35**. ☐ **All three fixes are OUT OF SCOPE here — Known traps, owner BK-58.** ⚠️ *Original pointer kept below because it was itself corrected once:* ⚠️ **These are PREPAY-PLAN's numbers, not this file's** — this row previously mixed the two numberings under one pointer, so `#7`/`#8` resolved to the GST registration number and the FSA service-area list instead | `PREPAY-PLAN` |
 > | 10 | ✅ **The three measurement moves — ANSWERED 2026-09-05. There will be NO success/failure targets and NO fixed review date.** Move 1 was already discharged: the "before" column in `MEASURING-THE-FREE-CHANGEOVER.md` **is** that artifact and it stands. Moves 2 and 3 are **withdrawn by the user** in favour of asking the client directly **at the end of September**. ⚠️ **That answer is QUALITATIVE and must be reported as such.** At ~1 web booking per fortnight, two weeks of post-flip data sits below the threshold the same document computes as readable — *"you can see a doubling. You cannot see a 30% change."* *"Did the phone feel busier"* is honest at this volume; *"the numbers show"* is not | `MEASURING-THE-FREE-CHANGEOVER.md` |
 > | 11 | ✅ **THE CANCELLATION-NOTICE EXPECTATION — ANSWERED 2026-09-05 by delegation. `BK-53.md` decision 27: NO stated notice expectation.** The old line existed because a late cancellation cost a refund; under decision 17 nothing is forfeited, so the rule loses its consequence, not just its home — and adding a new customer-facing rule in the pricing-flip deploy is the second funnel change decision 18 refused. ⚠️ **NOT a decision that the client does not want one. ASK THE CLIENT AT THE END OF SEPTEMBER, with the qualitative check-in in item 10** — it was raised in plan review round 3 and dropped by four consecutive revisions | `BK-53.md` decision 27 |
 >
@@ -520,6 +520,79 @@ in the database.*
   pay it."* → `BK-53.md` `§V`. ⚠️ **Decision 26 otherwise stands.**
   ☐ **The control for (a) is still owed** — `§U-4` `U1b`.
 
+- 🆕 **Decision 33 — `#37` is answered by a GUARD, not by the claim.** User,
+  2026-09-09: *"Add the safety guard."* 🔴 **`A-R8-5` IS STRUCK — it is false, and
+  `#37` is its named counterexample.** `O-1` closes as follows: **the Resend path
+  must REFUSE any row whose `terms_acked_at` is non-NULL and precedes the terms
+  cutover**, so the office cannot send free-era terms to a paid-era customer.
+  ⚠️ **This re-introduces a need for the cutover instant that `§P-0` deleted
+  (`TERMS_ERA_CUTOFF`).** Decision 30's collapse of the RENDER is untouched; what
+  returns is a REFUSAL, on a different surface. → `BK-55.md` `§Q-1`.
+  **Decision 31's premise is now formally withdrawn; the decision is superseded,
+  not overturned — the user chose a third route neither side had proposed.**
+
+- 🆕 **Decision 34 — PREVIEW DEPLOYS ARE TURNED OFF.** 🔴 **`🙋` index item 5 is
+  ANSWERED, and the answer is NOT ISOLATED.** Measured 2026-09-09 with
+  `vercel env ls preview` plus a hash comparison of `vercel env pull` for both
+  targets. **Twenty-five variables are scoped to Preview AND Production, and the
+  values are IDENTICAL, not merely same-named** — including **`DATABASE_URL`**
+  (a Preview build reads and writes REAL customer bookings), **`RESEND_API_KEY`**
+  (a Preview build can send REAL email to REAL customers), **`ADMIN_PASSWORD`**,
+  **`BLOB_READ_WRITE_TOKEN`**, **`CRON_SECRET`** and **`BOOKING_DRAFT_SECRET`**.
+  ✅ **Stripe is the ONE isolated surface** — no `STRIPE_SECRET_KEY` and no
+  `STRIPE_WEBHOOK_SECRET` is scoped to Preview at all.
+  ⚠️ **THE ITEM UNDERSTATED ITSELF.** It was framed as a precondition on pushing
+  `bk51-gated`; the exposure belongs to **ANY branch pushed to the remote**, and
+  **two stale branches are already there** (`booking/p1-foundation`,
+  `deploy-2-prepay`). User: *"Turn Preview deploys off."*
+  ☐ **OPERATIONAL, USER-OWNED, NOT YET DONE** — Vercel → project `yegrestoration`
+  → Settings → Git → disable Preview Deployments. **Until it is done the hazard is
+  live.** *Turning previews off does not unscope the variables; if previews are
+  ever re-enabled the exposure returns unchanged.*
+
+- 🆕 **Decision 35 — the hours claim: 24-HOUR PHONE, BUSINESS-HOURS BOOKING.**
+  User, 2026-09-09. The phone is answered any time for emergencies; **assessments
+  are only bookable in the 30-slot grid** (11:30–15:30, Fridays closed).
+  🔴 **Both claims are live and the site does NOT distinguish them**, so
+  *"Open 24 hours"* currently reads as a promise about booking. **PREPAY-PLAN
+  blocking question 8 is ANSWERED.** → Known traps, owner **BK-58**.
+
+- 🆕 **Decision 36 — the pricing flip ships BEFORE W20/W21.** User, 2026-09-09,
+  accepting the recommendation. Reasons recorded so the order is not re-litigated:
+  BK-53/BK-55 are already deep in review; **W21 strikes the word *"free"* from the
+  ads in the same week the SITE is moving TO free**, which would manufacture the
+  very ad-versus-page gap W20/W21 exist to close; and the one-funnel-change-per-week
+  constraint makes the second mover wait regardless, so the order should favour
+  work in flight. **`🙋` index item 7 is ANSWERED.**
+
+- 🆕 **Decision 37 — insurance billing is BOTH, per job.** User, 2026-09-09. Some
+  jobs are billed to the insurer directly, some to the customer. ⚠️ **Insurers do
+  not pay Stripe invoices**, so any future quoting or invoicing tool must carry a
+  **non-Stripe path as a first-class case, not a fallback.** **`🙋` index item 9a
+  and decision 14's open half are ANSWERED.** *No BK-53/BK-55 work depends on it.*
+
+- 🆕 **Decision 38 — 🔴 *"SINCE 2008"* IS FALSE AS THE SITE STATES IT.** User,
+  2026-09-09: *"this firm's founding year is 2026, but founders have experience
+  since 2008."* **The FIRM was founded 2026. 2008 is the FOUNDERS' experience.**
+  The site asserts it of the firm in **19 places plus `foundingDate` in structured
+  data**, which tells Google an 18-year-old entity exists. ⚠️ **The fix is NOT a
+  year swap** — *"Since 2008"* becomes false whichever year is substituted, because
+  the false part is the SUBJECT, not the number. **A true form exists**
+  (*"founders with experience since 2008"*), and `foundingDate` should be
+  **deleted rather than corrected**, per the pre-existing do-regardless item 4.
+  **PREPAY-PLAN blocking question 7, first half, is ANSWERED.** → Known traps,
+  owner **BK-58**.
+
+- 🆕 **Decision 39 — two badges stand, ONE DOES NOT.** User, 2026-09-09.
+  ✅ **IICRC Certified Firm** and ✅ **Licensed & Insured** are substantiated.
+  🔴 **BBB Accredited IS NOT, and it is LIVE on the site today.** **PREPAY-PLAN
+  blocking question 7, second half, is ANSWERED.** ⚠️ **Substantiated is not the
+  same as evidenced** — nothing in this repo carries an IICRC registration number
+  or a licence number, and decision 38 is precisely what an unevidenced claim
+  looks like when it is finally checked. **Ask the client for both numbers when
+  BK-58 is written.** → Known traps, owner **BK-58**.
+
+
 
 Reviewers and planners: treat this section as settled. Raise it only if a ticket
 cannot be built without changing it.
@@ -568,6 +641,47 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 - `blackout_dates` PK column is `day`, not `date`.
 
 ## Known traps
+
+### 🆕 🔴 FOUR TRUST CLAIMS ARE LIVE ON THE SITE AND AT LEAST TWO ARE FALSE
+
+**Severity: HIGH for the first two, MEDIUM for the last two. LIVE IN PRODUCTION
+RIGHT NOW. Owner: BK-58 (not yet written). ⛔ NOT FIXED HERE** — out of scope for
+BK-53/BK-55 per `CLAUDE.md`, and each is a funnel-affecting copy change that the
+one-change-per-week constraint governs.
+
+*Surfaced 2026-09-09 by decisions 38 and 39, which ANSWERED `PREPAY-PLAN`
+blocking question 7 after it had sat open since 2026-09-01. **Nothing found these
+before, because nobody had asked the client.** Every count below was taken from
+`src/` on 2026-09-09 by grepping the CLAIM, not the constant.*
+
+| Claim | Where | Verdict |
+| --- | --- | --- |
+| 🔴 **"Since 2008"** | **11 hits, 5 files** — `TrustStrip.astro:6`, `StatsBar.astro:5`, `services.ts:25` (`foundingYear`), `services.ts:30`, `seo.ts:65` (**`foundingDate`, structured data**), `about.astro:11`, `:13`, `:111`, `:152`, `:169`, `:193` | **FALSE OF THE FIRM.** Decision 38: the firm was founded **2026**; 2008 is the **founders' experience** |
+| 🔴 **"BBB Accredited"** | **5 hits, 3 files** — `Footer.astro:31`, `TrustStrip.astro:4`, `about.astro:52`, `:53`, `:152` | **NOT SUBSTANTIATED.** Decision 39. An unearned third-party accreditation claim |
+| ⚠️ **"Open 24/7 — including holidays"** | **1 hit** — `ContactSection.astro:177`, **under a `Hours` label** | **FALSE AS PLACED.** Decision 35: 24-hour **phone**, 30-slot business-hours **booking**. 🔴 *The GBP hours setting says the same thing and is OUTSIDE this repo* |
+| ⚠️ **"Direct insurance billing"** | **18 hits**, incl. `HeroSection.astro:54` *"**we bill your insurance directly**"* | **OVERCLAIM, not plainly false.** Decision 37: billing is **both, per job.** As a *capability* it is true; `HeroSection:54` states it of **your** claim, unconditionally |
+
+🔴 **THE FIX FOR "SINCE 2008" IS NOT A YEAR SWAP.** The false element is the
+**SUBJECT**, not the number — *"Serving Edmonton Since &lt;any year&gt;"* is false of a
+2026 firm at every value. A true form exists (*"founders with experience since
+2008"*). **`seo.ts:65`'s `foundingDate` should be DELETED, not corrected**, per
+the pre-existing `PREPAY-PLAN` do-regardless item 4.
+
+⚠️ **`StatsBar.astro:5` carries the claim TWICE** — `label` says *"since 2008"*
+and `value` says **`18` `yrs`**. A grep for `2008` catches it only because the
+label happens to be adjacent. **A derived restatement of a claim is a second
+instance of it**, and this is `CLAUDE.md`'s copy-inventory trap in miniature.
+
+⚠️ **THE "19 PLACES" FIGURE IN `PREPAY-PLAN` DOES NOT RECONCILE WITH THIS TABLE
+AND BOTH MAY BE RIGHT.** It reads *"15 source sites + 18 built files + `/llms.txt`"*;
+`src/` holds **11**, and **`llms.txt.ts` carries no 2008 claim at all today**.
+Built files multiply source hits, so the two are not the same unit. 🔴 **BK-58 must
+re-count against `dist/` AFTER `npm run build`, not inherit either number.**
+
+☑️ **ASK THE CLIENT FOR THE IICRC REGISTRATION NUMBER AND THE LICENCE NUMBER.**
+Decision 39 substantiates both badges on the user's word. **Nothing in this repo
+evidences either**, and decision 38 is exactly what an unevidenced claim looks
+like the first time somebody checks it.
 
 ### 🆕 `verify-cutover.ts` run ALONE leaves a SENTINEL build in `dist/`
 
