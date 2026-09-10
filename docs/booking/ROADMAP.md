@@ -20,7 +20,12 @@
 > — the same rule this file applies to deploy status.
 >
 
-> ## 📌 START HERE — `docs/booking/HANDOFF-2026-09-05.md`, **and read its LAST
+> ## 📌 START HERE — **`docs/booking/NEXT-SESSION-PROMPT.md`**, and RUN ITS §0 CHECKS FIRST
+>
+> 🔴 **CORRECTED 2026-09-10.** ⛔ ~~`docs/booking/HANDOFF-2026-09-05.md`~~ **is HISTORY and is STALE IN FOUR PLACES** — it still says `§P-1` re-derives *"23 cases"* (it is **26**), that `O-1` is *"blocked on the user"* (decision 33 answered it), that **W23–W25** are the missing tooling (they are reschedule / mark-completed / receipts — **none is a status correction**), and that the *"next free number is BK-58"* (**BK-58 shipped; next free is BK-59**).
+> ⚠️ ***A traceability audit found that this file — the repo's own entry point — pointed a fresh session at the stale document.*** **Read `NEXT-SESSION-PROMPT.md`. Use the 09-05 handoff only for history, and re-verify anything you take from it.**
+>
+> *(Kept, for the reason the old pointer gave:)* **read its LAST
 > numbered section, not a section number quoted here**
 > The session-close handoff for 2026-09-05. ⚠️ **It GROWS: §9 was appended the
 > same day, §10 the next. A pointer naming a section number goes stale the moment
@@ -49,7 +54,7 @@
 > | 2 | ✅ **Brief the office** on the free model and their new qualifying role — **AGREED 2026-09-03** | Operational items |
 > | 3 | ✅ **Carrier's August call detail record** — **AGREED 2026-09-03**, wanted BEFORE the flip | `MEASURING-THE-FREE-CHANGEOVER.md` |
 > | 4 | ✅ **The Ads / T6 decision — ANSWERED 2026-09-05: LEAVE THE CAMPAIGN RUNNING.** Not paused, and **not** re-pointed to `/book/received/` | `BK-53.md` |
-> | 5 | ⛔ ~~Confirm Vercel Preview env isolation~~ ✅ **ANSWERED 2026-09-09 — AND THE ANSWER IS *NOT ISOLATED*.** 25 vars are Preview+Production with **IDENTICAL values**, incl. `DATABASE_URL`, `RESEND_API_KEY`, `ADMIN_PASSWORD`. Stripe alone is isolated. 🔴 **The item understated itself — the exposure is ANY pushed branch, not just `bk51-gated`, and two stale branches are already on the remote.** → **decision 34.** ☐ **Still user-owned:** turn Preview Deployments OFF in Vercel → Settings → Git | decision 34 |
+> | 5 | ⛔ ~~Confirm Vercel Preview env isolation~~ ✅ **ANSWERED 2026-09-09 — AND THE ANSWER IS *NOT ISOLATED*.** 25 vars are Preview+Production with **IDENTICAL values**, incl. `DATABASE_URL`, `RESEND_API_KEY`, `ADMIN_PASSWORD`. Stripe alone is isolated. 🔴 **The item understated itself — the exposure is ANY pushed branch, not just `bk51-gated`, and two stale branches are already on the remote.** → **decision 34.** ⇄ **DONE BY THE USER 2026-09-10 — PENDING AN ARTIFACT.** 🔴 ⛔ ~~turn Preview Deployments OFF in Vercel → Settings → Git~~ **WRONG PAGE, AND NO SUCH TOGGLE EXISTS.** ✅ **Settings → Build and Deployment → Ignored Build Step → *"Only build production"*.** ⚠️ ***THIS ROW WAS THE THIRD COPY OF THAT INSTRUCTION AND THE ONLY ONE THE CORRECTION MISSED*** — found 2026-09-10 by a traceability audit, ~525 lines above decision 34's own correction **in this same file** | decision 34 |
 > | 6 | ✅ **W9 IS DONE — GA4 WORKS, 2026-09-05.** Service-account impersonation, no key file. **If it breaks again, read this row before touching anything.** ⬆️ ~~W9 GA4 re-auth — ROOT CAUSE FOUND 2026-09-05, AND IT IS TWO PROBLEMS.** The server (`~/.claude.json` → `analytics-mcp`) authenticates by **Application Default Credentials** at `~/.config/gcloud/application_default_credentials.json`. That file is dated **2026-07-07** and its token is dead → `invalid_grant`. **But it also carries NO `scopes` field**, i.e. it was minted with default ADC scopes (cloud-platform + userinfo.email) which **do not include Analytics** — so a plain re-login fixes the expiry and then fails again with a 403. ~~Both must be fixed in one command: `gcloud auth application-default login --scopes=…analytics.readonly`~~ 🔴 **THAT COMMAND IS BLOCKED. Attempted 2026-09-05 and Google refused it:** *"This app is blocked"*, with gcloud's own warning — *"The following scopes will be blocked soon for the default client ID: analytics.readonly. To use these scopes, you must provide your own client ID or use service account impersonation."* **Do not retry it.**
 **The working setup, built 2026-09-05:**
 1. ✅ **Service account `ga4-mcp@project-2671172b-3f2b-433f-9b1.iam.gserviceaccount.com` created**, and the user granted `roles/iam.serviceAccountTokenCreator` on it.
@@ -65,6 +70,8 @@ again later the same day; re-test rather than inherit this line.** Playwright ca
 > | 9a | ✅ **ANSWERED 2026-09-09 — insurance billing is BOTH, per job.** Insurers do not pay Stripe invoices, so a non-Stripe path is first-class for any future invoicing tool. → **decision 37** | decision 37 |
 > | 9b | ✅ **ANSWERED 2026-09-09 — AND TWO OF THE THREE CLAIMS ARE FALSE ON THE LIVE SITE.** **#7:** the FIRM was founded **2026**; *"since 2008"* is the **founders' experience**, so the subject is what is false, not the number — **decision 38**. **IICRC Certified Firm** ✅ and **Licensed & Insured** ✅ stand; 🔴 **BBB Accredited does NOT and is live** — **decision 39**. **#8:** 24-hour **phone**, business-hours **booking** — **decision 35**. ☐ **All three fixes are OUT OF SCOPE here — Known traps, owner BK-58.** ⚠️ *Original pointer kept below because it was itself corrected once:* ⚠️ **These are PREPAY-PLAN's numbers, not this file's** — this row previously mixed the two numberings under one pointer, so `#7`/`#8` resolved to the GST registration number and the FSA service-area list instead | `PREPAY-PLAN` |
 > | 10 | ✅ **The three measurement moves — ANSWERED 2026-09-05. There will be NO success/failure targets and NO fixed review date.** Move 1 was already discharged: the "before" column in `MEASURING-THE-FREE-CHANGEOVER.md` **is** that artifact and it stands. Moves 2 and 3 are **withdrawn by the user** in favour of asking the client directly **at the end of September**. ⚠️ **That answer is QUALITATIVE and must be reported as such.** At ~1 web booking per fortnight, two weeks of post-flip data sits below the threshold the same document computes as readable — *"you can see a doubling. You cannot see a 30% change."* *"Did the phone feel busier"* is honest at this volume; *"the numbers show"* is not | `MEASURING-THE-FREE-CHANGEOVER.md` |
+> | 🆕 **12** | ☑️ **ASK THE CLIENT FOR THE IICRC REGISTRATION NUMBER AND THE LICENCE NUMBER.** 🔴 **Decision 39 substantiates both badges ON THE USER'S WORD and NOTHING in this repo evidences either — and they are LIVE on 17 of 17 pages.** ⚠️ ***Decision 38 is exactly what an unevidenced claim looks like the first time somebody checks it.*** *Added 2026-09-10 by a traceability audit: this ask existed only inside a CLOSED trap entry and a SHIPPED ticket, so nothing surfaced it* | decision 39; `BK-58.md` `§4` |
+> | 🆕 **13** | ⚠️ **`Direct insurance billing` — 18 sites, incl. `HeroSection.astro:54`'s *"we bill **your** insurance directly"*.** Decision 37: billing is **BOTH, per job** — so as a CAPABILITY it is true and as an unconditional promise it is an **overclaim**. 🔴 **Needs a judgement, then a ticket. Owner: BK-59, NOT YET WRITTEN** | Known traps row 4 |
 > | 11 | ✅ **THE CANCELLATION-NOTICE EXPECTATION — ANSWERED 2026-09-05 by delegation. `BK-53.md` decision 27: NO stated notice expectation.** The old line existed because a late cancellation cost a refund; under decision 17 nothing is forfeited, so the rule loses its consequence, not just its home — and adding a new customer-facing rule in the pricing-flip deploy is the second funnel change decision 18 refused. ⚠️ **NOT a decision that the client does not want one. ASK THE CLIENT AT THE END OF SEPTEMBER, with the qualitative check-in in item 10** — it was raised in plan review round 3 and dropped by four consecutive revisions | `BK-53.md` decision 27 |
 >
 > **📏 The measurement plan is `docs/booking/MEASURING-THE-FREE-CHANGEOVER.md`** —
@@ -189,7 +196,7 @@ again later the same day; re-test rather than inherit this line.** Playwright ca
 > ## 🔢 THE NUMBERING, because there are eight schemes and none is self-explaining
 > | Scheme | What it is | Files? |
 > | --- | --- | --- |
-> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** Highest is **BK-57**; **next free is BK-58.** ⚠️ **BK-57 opened 2026-09-09 for the decision-20 copy defect and is NOT a gate ticket — decision 24's "no third gate ticket" is unchanged.** *(BK-52/53 drafted 2026-09-02; **BK-54, BK-55 and BK-56 opened 2026-09-05** by decision 24's split and decision 25.)* | ✅ |
+> | **BK-nn** | **Real tickets.** `docs/booking/tickets/BK-nn.md`, each with the lifecycle `Status:` line CLAUDE.md governs. **The canonical record.** ⛔ ~~Highest is **BK-57**; next free is BK-58.~~ 🔴 **HIGHEST IS BK-58; NEXT FREE IS BK-59** *(corrected 2026-09-10 — BK-58 shipped and this line did not move)*. ⚠️ **BK-57 opened 2026-09-09 for the decision-20 copy defect and is NOT a gate ticket — decision 24's "no third gate ticket" is unchanged.** *(BK-52/53 drafted 2026-09-02; **BK-54, BK-55 and BK-56 opened 2026-09-05** by decision 24's split and decision 25.)* | ✅ |
 > | **T1–T11** | Plan-internal ticket *ideas* in `PREPAY-PLAN`. Prose bullets nobody is obliged to update. **T2 and T10 are STRUCK. T13 never existed.** | ❌ |
 > | **W0–W27** | A separate work list in `CONVERSION` §7. | ❌ |
 > | **Task 1–7** | Subtasks *inside* BK-23 only. | ❌ |
@@ -503,7 +510,7 @@ settled everywhere else.**
   booked through the web **2026-08-23**, a week after the terms column reached
   production on **2026-08-16**; the public door cannot submit without ticking
   terms and ticking stamps the column. **`#37` is a real customer, job completed,
-  paid twice.** → `BK-55.md` `§Q-1`. **Blocked on the user.**
+  paid twice.** → `BK-55.md` `§Q-1`. ⛔ ~~**Blocked on the user.**~~ 🔴 **SUPERSEDED BY DECISION 33, 2026-09-10 — the user chose a GUARD. NOT blocked on the user.** *This line outlived its own supersession by a day.*
 
 ⚠️ **The decision is the user's and stands until they revisit it. The PREMISE is
 checkable and was checked.** *A user is authoritative on policy, not on what is
@@ -794,7 +801,7 @@ indefinitely** — it is the message inbox, not an archive. Migration 004 made
 ### ✅ ⛔ ~~FOUR TRUST CLAIMS ARE LIVE ON THE SITE AND AT LEAST TWO ARE FALSE~~ — **CLOSED 2026-09-10 BY BK-58 (`0c058ae`), VERIFIED LIVE** *(row 4, the `Direct Insurance Billing` overclaim, is the ONE part still open and is unowned)*
 
 **Severity: HIGH for the first two, MEDIUM for the last two. LIVE IN PRODUCTION
-RIGHT NOW. Owner: BK-58 (not yet written). ⛔ NOT FIXED HERE** — out of scope for
+⛔ ~~RIGHT NOW. Owner: BK-58 (not yet written).~~ 🔴 **ROWS 1–3 ARE FIXED, DEPLOYED AND VERIFIED LIVE (BK-58, 2026-09-10). ROW 4 IS THE ONLY PART STILL OPEN AND IT IS UNOWNED — see below.** ⚠️ ***This body said "LIVE IN PRODUCTION RIGHT NOW" and "not yet written" while its own heading said CLOSED — the heading and the body disagreed for a day.*** ⛔ NOT FIXED HERE** — was out of scope for
 BK-53/BK-55 per `CLAUDE.md`, and each is a funnel-affecting copy change that the
 one-change-per-week constraint governs.
 
@@ -808,7 +815,7 @@ before, because nobody had asked the client.** Every count below was taken from
 | 🔴 **"Since 2008"** | **11 hits, 5 files** — `TrustStrip.astro:6`, `StatsBar.astro:5`, `services.ts:25` (`foundingYear`), `services.ts:30`, `seo.ts:65` (**`foundingDate`, structured data**), `about.astro:11`, `:13`, `:111`, `:152`, `:169`, `:193` | **FALSE OF THE FIRM.** Decision 38: the firm was founded **2026**; 2008 is the **founders' experience** |
 | 🔴 **"BBB Accredited"** | **5 hits, 3 files** — `Footer.astro:31`, `TrustStrip.astro:4`, `about.astro:52`, `:53`, `:152` | **NOT SUBSTANTIATED.** Decision 39. An unearned third-party accreditation claim |
 | ⚠️ **"Open 24/7 — including holidays"** | **1 hit** — `ContactSection.astro:177`, **under a `Hours` label** | **FALSE AS PLACED.** Decision 35: 24-hour **phone**, 30-slot business-hours **booking**. 🔴 *The GBP hours setting says the same thing and is OUTSIDE this repo* |
-| ⚠️ **"Direct insurance billing"** | **18 hits**, incl. `HeroSection.astro:54` *"**we bill your insurance directly**"* | **OVERCLAIM, not plainly false.** Decision 37: billing is **both, per job.** As a *capability* it is true; `HeroSection:54` states it of **your** claim, unconditionally |
+| ⚠️ **"Direct insurance billing"** 🔴 **← THE ONE ROW STILL OPEN. Owner: BK-59, NOT YET WRITTEN** *(assigned 2026-09-10 — `CLAUDE.md` requires severity AND an owning ticket, and this had severity and no owner)* | **18 hits**, incl. `HeroSection.astro:54` *"**we bill your insurance directly**"* | **OVERCLAIM, not plainly false.** Decision 37: billing is **both, per job.** As a *capability* it is true; `HeroSection:54` states it of **your** claim, unconditionally |
 
 🔴 **THE FIX FOR "SINCE 2008" IS NOT A YEAR SWAP.** The false element is the
 **SUBJECT**, not the number — *"Serving Edmonton Since &lt;any year&gt;"* is false of a
