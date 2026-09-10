@@ -1,14 +1,15 @@
 Continuing yeg-restoration-v4, booking area.
 
-*(Rewritten 2026-09-09 at session close, replacing the version written the same
-morning. **Plan review has now RUN on both tickets and both FAILED it.**)*
+*(Rewritten 2026-09-09 at the close of the SECOND session that day, replacing the
+version written earlier the same day. **The user answered every question that was
+blocked on them. Nine decisions landed — 33 through 41.**)*
 
 ---
 
 ## 0 · RUN THESE FOUR FIRST
 
 ```sh
-git log --oneline -1                    # expect the session-close commit or later
+git log --oneline -1                    # expect 035150f or later
 git log --oneline main..bk51-gated      # expect 10
 git ls-remote --heads origin            # MUST list exactly 3: main,
                                         # booking/p1-foundation, deploy-2-prepay
@@ -22,170 +23,165 @@ identical to a grep that never ran and reads as *"safe, not pushed."*
 production code. **NEVER push it anywhere, including as a backup** — use
 `git bundle create ../bk51-gated.bundle bk51-gated`.
 
-⚠️ **`git push origin main` IS the deploy.** 🔴 **The fourth check is NOT
-"must be empty" any more.** BK-57 was deployed on 2026-09-09, so `main` and
-`origin/main` are in sync. **Read it as: anything non-docs it lists is an
-UNPUSHED PRODUCTION CHANGE. Know what it is before you push.**
+🔴 **`git push origin main` IS the deploy. `main` IS AHEAD OF `origin/main` BY
+SIX DOCS-ONLY COMMITS AND HAS NOT BEEN PUSHED.** The fourth check should print
+NOTHING; anything non-docs it lists is an UNPUSHED PRODUCTION CHANGE.
 
 ---
 
 ## 1 · 🔴 THE ONE-LINE STATE
 
-**Both gate tickets FAILED plan review on 2026-09-09. Nothing is approved.
-Nothing is implemented. There are TWENTY-THREE blockers, of which **21 are open
-and 2 were CLOSED on 2026-09-09 by DECISION 32**, and **ONE is blocked on the
-user** *(plus four carried-forward `ROADMAP` items that are a
-different thing — §3)*. *The next job is to work the blockers, not to build.*
+**Both gate tickets still FAIL plan review. Nothing is approved, nothing is
+implemented.** ✅ **But NOTHING IS BLOCKED ON THE USER ANY MORE** — every open
+question was put to them and answered on 2026-09-09.
 
-⚠️ **Every count on this page was RE-DERIVED from its enumeration on 2026-09-09,
-after a cold read caught a wrong one.** ⛔ ~~twenty-five~~ ~~fourteen~~ — *the
-error was written from a number rather than a list and reached four documents.*
-🔴 **Re-count anything you are about to act on. This project's own rule, and it
-was broken by the document that states it.**
+⚠️ **Every count below is SCRIPTED from its own list, not asserted.** Re-derive
+before acting: `awk`/`grep` the section, do not trust this number.
+*(The previous version of this page carried a wrong total that reached four
+documents, and its own strikethrough claim — "BK-53.md's twelve hits" — was also
+wrong: there are **sixteen**, in eight pairs, and that was true before anyone
+touched the file this session.)*
 
 | | |
 | --- | --- |
-| **BK-53** | ⛔ **NOT APPROVED.** **11** blockers — `GB1`–`GB6` *(gate)* + `CB1`–`CB5` *(copy)*. Owed list: **`§U-4`** |
-| **BK-55** | ⛔ **NOT APPROVED.** **12** blockers — `QB1`–`QB5` *(rule-rewrite)* + `QG1`–`QG7` *(gate)*. Owed list: **`§Q-6`** |
-| **BK-57** | ✅ **DEPLOYED AND VERIFIED 2026-09-09** (`699b099`). Closed |
+| **BK-53** | ⛔ **NOT APPROVED.** `§U-4` is **19 rows: 9 done · 3 partial · 2 escalated · 5 open** *(open: `U1b` `U3` `U6` `U7` `U18`)* |
+| **BK-55** | ⛔ **NOT APPROVED.** `§Q-6` is **16 rows: 1 done · 15 open**, PLUS **`§R-5`'s ten NEW items (`R1`–`R10`)** created by decision 33 |
+| **BK-57** | ✅ DEPLOYED AND VERIFIED (`699b099`). Closed |
 | **BK-51** | unchanged — reviewed, `bk51-gated` only, never pushed |
+| 🆕 **BK-58** | ⛔ **NOT WRITTEN.** Four live trust claims, at least two FALSE in production — ROADMAP Known traps |
 
 ---
 
-## 2 · READ, IN THIS ORDER
+## 2 · 🆕 THE NINE DECISIONS — all 2026-09-09, all in `ROADMAP.md`
 
-1. **`HANDOFF-2026-09-05.md`'s LAST section** —
-   `grep -n '^# 14 ·' docs/booking/HANDOFF-2026-09-05.md`.
-2. **`head -25`** of **`BK-53.md`** and **`BK-55.md`**. 🔴 **Never read a revision
-   number from `ROADMAP.md`.**
-3. 🔴 **`BK-53.md`'s `§U`** — `grep -n '^## §U-0' docs/booking/tickets/BK-53.md`.
-   **The plan review. `§U-4` is the owed list.**
-4. 🔴 **`BK-55.md`'s `§Q`** — `grep -n '^## §Q-0' docs/booking/tickets/BK-55.md`.
-   **`§Q-6` is the owed list.**
-5. **Only then** `BK-53.md`'s `## THE SPEC` (S1–S8) and `BK-55.md`'s `§P`.
-   ⚠️ **`THE SPEC` is what the review says is BROKEN. Read `§U` first or you will
-   implement the defects.**
-
-⚠️ **BK-53 and BK-55 do NOT exist in usable form on `bk51-gated`.** Read from
-`main`. 🔴 **AND A WORKTREE IS NOT `main`** — see §6.
+| # | What |
+| --- | --- |
+| **33** | **`#37` is answered by a GUARD, not a claim about the population. `A-R8-5` is STRUCK.** → `BK-55.md` `§R` |
+| **34** | 🔴 **PREVIEW DEPLOYS ARE TO BE TURNED OFF.** Preview is **NOT isolated** — 25 vars shared with Production at **identical values**, incl. `DATABASE_URL` and `RESEND_API_KEY`. ☐ **USER-OWNED, NOT YET DONE** |
+| **35** | 24-hour **phone**, business-hours **booking** → BK-58 |
+| **36** | **The pricing flip ships BEFORE W20/W21** |
+| **37** | Insurance billing is **BOTH, per job** — insurers do not pay Stripe invoices |
+| **38** | 🔴 ***"Since 2008" IS FALSE.*** The FIRM was founded **2026** → BK-58 |
+| **39** | IICRC ✅ · Licensed & Insured ✅ · 🔴 **BBB Accredited NOT substantiated, and LIVE** → BK-58 |
+| **40** | **The guard's predicate is the ACK TIMESTAMP. A money proxy was recommended, measured, and WITHDRAWN.** Three protections are part of the decision |
+| **41** | **No customer follow-up** for the paid-era population |
 
 ---
 
-## 3 · 🙋 BLOCKED ON THE USER — **ONE left; two closed 2026-09-09**
+## 3 · 🙋 BLOCKED ON THE USER — **ONE, and it is operational**
 
-🔴 **ONLY ROW 1 IS OPEN.** Rows 2 and 3 were closed by **decision 32** — the user
-said *"apply those two"* and both landed. **Row 4 is four pre-existing `ROADMAP`
-items and is a DIFFERENT class**; counting them with the fresh ones is what
-produced a wrong total earlier.
+| # | Item |
+| --- | --- |
+| **1** | ☐ **Turn Preview Deployments OFF** — Vercel → `yegrestoration` → Settings → Git. **Decision 34. Until it is done, any pushed branch gets a deploy that reads and writes the REAL database and can email REAL customers.** ⚠️ *Turning previews off does not unscope the variables* |
 
-| # | Item | Where |
-| --- | --- | --- |
-| **1** | 🔴 **`A-R8-5` IS FALSE.** The user said *"no such bookings exist"*; **`#37` is a named, real, paying customer in that population** — booked through the web 2026-08-23, a week after terms reached production. **`O-1` is RE-OPENED.** *Three ways out are written in `§Q-1`: run the `SELECT`, name `#37` as an exception with a Resend guard, or leave it recorded as asserted with a named counterexample* | `BK-55.md` `§Q-1` |
-| ~~2~~ | ✅ **CLOSED — DECISION 32, 2026-09-09.** The travel-fee trigger now reads *"If you're beyond about 30 km from us…"*, landed at all three destinations. ⚠️ **Its CONTROL is still owed — `§U-4` `U1b`** | `BK-53.md` `§V-1` |
-| ~~3~~ | ✅ **CLOSED — DECISION 32, 2026-09-09.** The terms box now reads *"…and we always tell you how to pay it."* | `BK-53.md` `§V-2` |
-| **4** | `ROADMAP` human-blocked items **5**, **7**, **9a/9b** — unchanged | `ROADMAP.md` |
+✅ **ROADMAP human-blocked items 5, 7, 9a and 9b are all ANSWERED.** Only item 1
+*(`#36`'s `charge.refunded` resend, deprioritised by the user)* is still parked.
 
 ---
 
 ## 4 · DO THIS, IN ORDER
 
-1. **Get an answer to §3's item 1** *(`#37` vs the empty-population claim)*. **Items 2 and 3 are CLOSED.**
-2. **Work `§U-4` and `§Q-6`**, landing each at its destination. 🛑 **NOT as a new
-   revision layer** — that is how this ticket lost rows seven times. **If you find
-   yourself writing revision 13 of BK-53, say so plainly rather than writing it.**
-3. **Re-review** — the blockers are substantial enough that a fresh pass is owed,
-   not a self-check.
-4. **Only then implement**, on `bk51-gated`: BK-55's two commits (counter first),
-   then BK-53's, then **one adversarial pass at the TIP over the union**, then
-   gates, then implementation review, then **one push**.
-
-🔴 **Before that final push, REBASE.** See §5.
+1. **Work `§U-4`'s five open rows and `§Q-6`'s fifteen**, plus **`§R-5`'s ten**.
+   🛑 **Land each at its DESTINATION, never as a new revision layer.**
+2. ⚠️ **`U13` IS NOT DISCHARGEABLE AT PLAN STAGE and must not be ticked.** It
+   needs the SHIPPED extractor. *See `S3a`.*
+3. **Re-review** — fresh agents, never forks.
+4. **Only then implement**, on `bk51-gated`: BK-55's two commits, then BK-53's,
+   then **one adversarial pass at the TIP over the union**, then gates, then
+   implementation review, then **one push**. 🔴 **REBASE FIRST — see §6.**
 
 ---
 
-## 5 · 🛑 `bk51-gated` IS NOW STALE RELATIVE TO PRODUCTION
+## 5 · 🔴 THE THREE FINDINGS THAT CHANGE THE WORK
 
-**The non-docs divergence between `main` and `bk51-gated` went from SIX to EIGHT
-on 2026-09-09, and every brief in this repo older than that says six. RE-COUNT.**
+- 🔴 **BK-53 TURNS `verify-cutover.ts` RED IN 36 PLACES, AND FOUR MORE GO
+  VACUOUSLY GREEN.** It deletes seven constants that script asserts the presence
+  and ORDER of. **The four that go green are `never in the message-form arm`
+  negatives — they pass once the constant is gone.** Blast radius is **FOUR
+  scripts**. `CLAUDE.md`/BK-44 governs: **rewrite the arms, never loosen the
+  rule.** *(`S5a`. And `U11` found a 37th in `verify-cutover.ts:594-598` that
+  `S5a` does not count.)*
+- 🔴 **`S3`'s MEASURED CONSTANTS DO NOT RE-DERIVE.** A second instrument
+  reproduces **four of six rows EXACTLY** (`metaDesc`, `ogDesc`, `title`,
+  `llms.txt`) and **neither headline constant**: `MAX_UNIT` **273 → 222** *(273
+  appears nowhere)*, `MIN_UNITS` **63 → 189**. ***They are properties of the
+  EXTRACTOR, not of the site.*** *(`S3a`.)*
+- 🔴 **THE GUARD'S CHOKE POINT IS `planForAppointment`
+  (`booking-admin-notify.ts:164`), NOT `resend.ts`.** **THREE production surfaces
+  reach the terms block from an existing row** and the ROADMAP's own Known-trap
+  entry names ONE. *Two independent agents found the second surface separately.*
+  ⚠️ **And the harm needs NO new tooling — `editorMaySetStatus` permits
+  `declined → confirmed` today.** *(`§R-3`.)*
 
-- **SIX are BK-51's own work:** `scripts/verify-booking-admin-db.ts`,
-  `scripts/verify-booking-review.ts`, `src/lib/booking-payment.ts`,
-  `src/lib/booking-review.ts`, `src/pages/admin/appointments/[id].astro`,
-  `src/pages/api/admin/appointments/review.ts`.
-- 🔴 **TWO are files the branch is merely BEHIND on:** `src/data/services.ts`,
-  `src/pages/insurance-claims.astro`. **The branch has NEVER touched either** —
-  check with
-  `git diff --quiet $(git merge-base main bk51-gated)..bk51-gated -- <file>`.
+---
+
+## 6 · 🛑 `bk51-gated` IS STALE RELATIVE TO PRODUCTION
+
+**EIGHT non-docs files differ. SIX are BK-51's own work; TWO are files the branch
+is merely BEHIND on** — `src/data/services.ts`, `src/pages/insurance-claims.astro`.
+Check with `git diff --quiet $(git merge-base main bk51-gated)..bk51-gated -- <file>`.
 
 ⚠️ **So `bk51-gated` still carries the three sentences BK-57 REMOVED from the live
-site. Merging or cherry-picking it without rebasing would REVERT a shipped
-customer-facing fix, and NO GATE WOULD NOTICE** — `verify-cutover.ts` passed with
-those sentences live for weeks.
+site. Merging without rebasing would REVERT a shipped customer-facing fix, and NO
+GATE WOULD NOTICE.**
 
 ---
 
-## 6 · BRIEFING FRESH AGENTS — every line here was paid for
+## 7 · BRIEFING FRESH AGENTS — every line was paid for
 
-- **Target branch is `bk51-gated`, not `main`. NEVER push. Do not check it out** —
-  read it with `git show bk51-gated:<path>`.
-- **EIGHT non-docs files differ; nineteen total, eleven docs.** *(§5.)*
-- 🔴 **A bare `review.ts:NNN` means `src/pages/api/admin/appointments/review.ts`**
-  (905 lines on the branch, 829 on `main`), **NOT `src/lib/booking-review.ts`**
-  (171 on `main`, 209 on the branch, **no line 246**). *Four briefings got this
-  wrong.*
-- 🔴 **A bare `resend.ts` means `src/pages/api/admin/appointments/resend.ts`.
-  There is no `src/lib/resend.ts`.**
-- **`booking-email.ts`, `booking-copy.ts`, `resend.ts` and
-  `verify-booking-email.ts` are NOT divergent.** **`booking-payment.ts` IS** —
-  `:1597` on the branch is `:1567` on `main`.
-- 🔴 **GIVE AGENTS THE FILE VIA `git show main:<path>`, AND SAY SO.** Two worktree
-  agents on 2026-09-09 were **32 and 34 commits stale** — one read a BK-53 with no
-  `THE SPEC` at all, the other a 135-line BK-55 revision-1 stub. **Source was
-  byte-identical, which is what makes it invisible.**
-- 🔴 **Score on (exit code, summary line), NEVER a `✗` count.** ⚠️ **Measured:
-  in `verify-booking-email.ts` a CRASH and an ordinary FAILURE are BOTH exit 1**,
-  so **the ABSENCE of a summary line is the crash signal.** `G0` is a
-  prerequisite for red-first row 12 meaning anything.
+- **Target branch is `bk51-gated`. NEVER push. Do not check it out** — read with
+  `git show bk51-gated:<path>`. **Read DOCS with `git show main:<path>` AND SAY
+  SO** — two worktree agents were 32 and 34 commits stale while source was
+  byte-identical.
+- 🔴 **A bare `review.ts` is `src/pages/api/admin/appointments/review.ts`**, NOT
+  `src/lib/booking-review.ts`. **A bare `resend.ts` is
+  `src/pages/api/admin/appointments/resend.ts`; there is no `src/lib/resend.ts`.**
+- 🔴 **CITE POSITIONS INSIDE TICKETS BY STRING, NEVER BY LINE.** `§R`, `§S2a`,
+  `§S2b`, `§S3a`–`§S3c` and `§S5a` were all inserted above text they cite.
+- 🔴 **Score on (exit code, summary line), NEVER a `✗` count.** A crash and a
+  failure are BOTH exit 1; **the ABSENCE of a summary line is the crash signal.**
 - 🔴 **Assert the break LANDED. Restore from a `cp` FILE BACKUP, never
   `git checkout --`.**
 - **If a claim in the brief is false, that is a finding.** *Briefs here have been
-  wrong at least seven times, including one written the same day.*
+  wrong at least eight times, including two written the same day.*
 
 ---
 
-## 7 · RULES THIS PROJECT PAID FOR
+## 8 · RULES THIS PROJECT PAID FOR
 
 - 🔴 **A NEGATIVE CHECK WITH NO POSITIVE TWIN PASSES ON AN EMPTY DOCUMENT.**
-  **Four instances in one day**: a pin measured vacuous; a check satisfiable by
-  deleting every instance of the claim; a live probe that read *"claim removed"*
-  off a **301 redirect stub**; and four owed shape families given a
-  *body-non-empty* twin that proves the fixture rendered and not that the shapes
-  still match anything.
-- 🔴 **READ THE LIST BESIDE THE NUMBER.** On 2026-09-09 alone: a wrong exclusion
-  count propagated into a fix, a review's own tally did not reconcile with its own
-  table, and a check returned five hits of which none belonged to the ticket.
-- 🔴 **AFTER A RULE REWRITE, RE-DERIVE EVERY ENUMERATED CASE.** BK-55 did this and
-  still dropped **thirteen** — including four an earlier round had dropped once
-  and written itself a note about.
+  🆕 **Measured again this session: four of `verify-cutover.ts`'s pins convert
+  from load-bearing to vacuous the moment BK-53 deletes their subject — silently,
+  inside an edit that reddens 36 others.**
+- 🔴 **READ THE LIST BESIDE THE NUMBER.** 🆕 **Three more this session: the
+  strikethrough claim of "twelve" (it is sixteen); `HANDOFF`'s "`§P-1` re-derives
+  ALL 23 cases" (it is twenty-six); and `§R-2`'s own summary line, which said
+  "twelve of 31" and did not reconcile with the table beneath it.** *The fix that
+  works is to SCRIPT the count over the table's own last column.*
+- 🔴 🆕 **AN UNFILLED PLACEHOLDER CAN CHANGE ITS FAILURE DIRECTION WHEN ITS
+  CONSUMER CHANGES.** `new Date('2026-__-__T00:00:00Z')` is `Invalid Date`, every
+  `<` against it is `false`. Under the RENDER use that was the intended arm —
+  which is why it sat unfilled and nobody noticed. Under the GUARD use the
+  identical value makes the refusal **never fire, silently, exit 0.**
+  ***The same value that failed BENIGN now fails OPEN.***
+- 🔴 🆕 **A DURABLE COLUMN AND A PROXY FOR IT ARE NOT INTERCHANGEABLE.** A money
+  predicate looked strictly better than a timestamp one — until a column audit
+  showed **re-approval wipes `paid_at`, `payment_method`, `paid_amount_cents` and
+  `payment_reference` in one statement**, on exactly the path that produces the
+  harm. **`terms_acked_at` is written once and cleared nowhere.** *Audit
+  durability before choosing a discriminator.*
+- 🔴 🆕 **A RULE REWRITE CAN LEAVE A ROW'S VERDICT INTACT AND ITS REASON FALSE.**
+  Six of `§R-2`'s 31 rows are that shape. **They read *"no"* at a glance and are
+  the rows nobody re-checks.** *Specimen: `A13`, still moot, for a reason that is
+  now false.*
+- 🔴 🆕 **A DISPOSITION CAN BE CLOSED ON AN ANSWER TO A DIFFERENT QUESTION.**
+  `T9` was closed on `§T-4`, which measured extraction and bans; the owed thing
+  was a LANDMARK row. **`S6` carried two rows that disagreed for days.**
 - 🔴 **GREP THE DESTINATION AFTER ANY SCRIPTED EDIT.** ✅ Assert-then-write-once
-  works: two batches raised on a bad anchor and **wrote nothing**, and the
-  destination greps proved it.
-- 🔴 **A DISPOSITION TABLE IS A PROMISSORY NOTE.** A trap marked ✅ ACCEPTED was in
-  no file for weeks.
+  works and was used for every edit this session.
 - **`npm run build` before measuring against `dist/`** — `verify-cutover.ts` run
   alone leaves a sentinel and says so on exit.
-- 🔴 **HALF OF EACH ROUND'S FINDINGS ARE IN THE PREVIOUS ROUND'S FIX.** Three of
-  BK-53's six gate blockers are defects in corrections landed the same morning.
-  **Expect this. It is not a reason to stop reviewing.**
-- 🔴 🆕 **A SECTION THAT QUOTES LINE NUMBERS BECOMES SELF-FALSIFYING THE MOMENT
-  IT IS INSERTED ABOVE THEM.** Writing `§U` and `§Q` pushed everything they cite
-  down by **~400 lines**, so **every intra-ticket line number in both is stale by
-  construction** — true when measured, false as shipped. **Both carry a banner
-  saying so. GREP THE QUOTED STRING; never go to the line.** *(`src/` and
-  `scripts/` citations are unaffected and were verified exact.)* **When you cite
-  a position inside a document you are also editing, cite a STRING.**
-- ⚠️ 🆕 **The strikethrough scan must use `FNR`, not `NR`.** Across multiple
-  files `NR` is cumulative and reports line numbers that do not exist:
+- ⚠️ **Strikethrough scan uses `FNR`, not `NR`:**
   `awk '{n=gsub(/~~/,"~~"); if(n%2==1) print FILENAME": "FNR}' docs/booking/tickets/*.md`.
-  **`BK-53.md`'s twelve hits are all legitimate multi-line blocks** — verified
-  pair by pair. **`BK-55.md` and `BK-57.md` must be ZERO.**
+  **`BK-53.md` = 18 odd lines, NINE pairs, all legitimate. `BK-55.md` = TWO, ONE
+  pair, legitimate — it is no longer zero. `BK-57.md` must be ZERO.**
