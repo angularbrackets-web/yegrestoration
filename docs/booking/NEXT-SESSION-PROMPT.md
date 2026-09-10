@@ -94,13 +94,22 @@ touched the file this session.)*
 
 ## 5 · 🔴 THE THREE FINDINGS THAT CHANGE THE WORK
 
-- 🔴 **BK-53 TURNS `verify-cutover.ts` RED IN 36 PLACES, AND FOUR MORE GO
-  VACUOUSLY GREEN.** It deletes seven constants that script asserts the presence
-  and ORDER of. **The four that go green are `never in the message-form arm`
-  negatives — they pass once the constant is gone.** Blast radius is **FOUR
-  scripts**. `CLAUDE.md`/BK-44 governs: **rewrite the arms, never loosen the
-  rule.** *(`S5a`. And `U11` found a 37th in `verify-cutover.ts:594-598` that
-  `S5a` does not count.)*
+- 🔴 **BK-53 TURNS `verify-cutover.ts` RED IN 36 PLACES — AND THE COUNT IS THE
+  LEAST IMPORTANT THING ABOUT IT.** ✅ **ADJUDICATED ARM BY ARM 2026-09-10 —
+  `§S5b`.** 🔴 ***ONLY FOUR ARMS ARE STALE ON THEIR MERITS. The rest assert
+  properties the FREE model still has and must be REWRITTEN, never deleted*** —
+  which is the opposite of what *"36 red assertions"* invites.
+  ⛔ ~~four go vacuously green~~ 🔴 **FIVE** *(the fifth, `:584-588`, was in no
+  table until the adjudication: `outroAt` becomes `-1` and a conjunct turns into a
+  tautology)*. 🔴 **AND 36 IS THE WRONG NUMBER FOR THE TICKET** — five further
+  arms are reddened or vacuated, of which **FOUR are INVERTED** from *"never say
+  free"* to *"say free, WITH the qualifier"*, and those four are ***a larger and
+  riskier rewrite than all 36 put together.*** **Owed: `U19`–`U23`.**
+  ⚠️ **One arm is LOAD-BEARING BEYOND ITS SUBJECT** — `:616-618` carries the only
+  assertion that the tier control is TWO-WAY bound. **Deleting it loses coverage
+  with nothing to do with the surcharge.**
+  🔴 **`verify-booking-ics.ts` — 60 affected assertions — IS UNOWNED.** Decision
+  24's table names it nowhere.
 - 🔴 **`S3`'s MEASURED CONSTANTS DO NOT RE-DERIVE.** A second instrument
   reproduces **four of six rows EXACTLY** (`metaDesc`, `ogDesc`, `title`,
   `llms.txt`) and **neither headline constant**: `MAX_UNIT` **273 → 222** *(273
