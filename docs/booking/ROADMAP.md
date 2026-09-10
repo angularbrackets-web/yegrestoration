@@ -783,6 +783,29 @@ AND BOTH MAY BE RIGHT.** It reads *"15 source sites + 18 built files + `/llms.tx
 Built files multiply source hits, so the two are not the same unit. 🔴 **BK-58 must
 re-count against `dist/` AFTER `npm run build`, not inherit either number.**
 
+🔴 🆕 **MEASURED AGAINST `dist/` 2026-09-09, AFTER `npm run build` — AND THE
+SOURCE COUNTS ABOVE UNDERSTATE THE REACH BY AN ORDER OF MAGNITUDE.**
+
+| Claim, as it reaches a browser | Occurrences | Pages |
+| --- | --- | --- |
+| **`2008` in ANY grammar** | **57** | 🔴 **17 of 17** |
+| the PHRASE *"Since 2008"* | 10 | 5 of 17 |
+| 🔴 **`"foundingDate": "2008"` in JSON-LD** | **17** | 🔴 **17 of 17 — EVERY PAGE** |
+| **`BBB Accredited`** | **23** | 🔴 **17 of 17 — EVERY PAGE** |
+
+🔴 **THE CLAIM HAS TWO GRAMMARS AND ONLY ONE OF THEM IS PROSE.** A grep for the
+sentence *"Since 2008"* finds **five** pages. **The structured-data assertion
+`foundingDate` is on ALL SEVENTEEN**, because `seo.ts` emits it site-wide — **and
+that is the copy the SEARCH ENGINE reads.** ***A human auditing the rendered text
+would clear twelve pages that are making the claim to Google.***
+⚠️ **`BBB Accredited` is site-wide for the same structural reason** — it is in
+`Footer.astro`, which every page renders. **Neither is a five-file edit.**
+
+⚠️ **A LIVE `curl` OF THE HOMEPAGE FINDS ZERO *"Since 2008"* AND IS NOT EVIDENCE
+OF ABSENCE** — that page carries the claim as `foundingDate` only. *Measured, and
+briefly misread that way while writing this entry.* ***Probe `dist/` after a
+build, both grammars, or the probe reports the wrong answer.***
+
 ☑️ **ASK THE CLIENT FOR THE IICRC REGISTRATION NUMBER AND THE LICENCE NUMBER.**
 Decision 39 substantiates both badges on the user's word. **Nothing in this repo
 evidences either**, and decision 38 is exactly what an unevidenced claim looks
