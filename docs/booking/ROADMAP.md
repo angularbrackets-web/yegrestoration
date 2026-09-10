@@ -587,10 +587,22 @@ in the database.*
   `bk51-gated`; the exposure belongs to **ANY branch pushed to the remote**, and
   **two stale branches are already there** (`booking/p1-foundation`,
   `deploy-2-prepay`). User: *"Turn Preview deploys off."*
-  ☐ **OPERATIONAL, USER-OWNED, NOT YET DONE** — Vercel → project `yegrestoration`
-  → Settings → Git → disable Preview Deployments. **Until it is done the hazard is
-  live.** *Turning previews off does not unscope the variables; if previews are
-  ever re-enabled the exposure returns unchanged.*
+  ☐ **OPERATIONAL, USER-OWNED, NOT YET DONE.** 🔴 **CORRECTED 2026-09-10 AGAINST
+  THE DOCS — ⛔ ~~Settings → Git → disable Preview Deployments~~ IS WRONG ON BOTH
+  COUNTS: wrong page, and NO SUCH TOGGLE EXISTS.** Vercel's own words: *"Vercel
+  for GitHub will **deploy every push by default**."*
+  ✅ **THE SUPPORTED MECHANISM:** Vercel → `yegrestoration` → **Settings → Build
+  and Deployment → Ignored Build Step → *"Only build production"*** — a built-in
+  dropdown choice, nothing to write. It runs a command whose **exit `0` ABORTS
+  the build and exit `1` CONTINUES** it.
+  ⚠️ **TWO LIMITS, BOTH LOAD-BEARING:** **(1)** the deployment is still **created
+  and then CANCELED**, and *"canceled builds are counted as full deployments…
+  [and] still count towards your deployment quotas"* — nothing is SERVED, which
+  is the protection, but it is not the same as no deployment existing.
+  **(2)** 🔴 **it does NOT unscope the variables.** `DATABASE_URL` and
+  `RESEND_API_KEY` stay attached to Preview; **flip the setting back and the
+  exposure returns unchanged.** *The permanent fix is separate Preview values,
+  which the user declined for now.*
 
 - 🆕 🔴 **Decision 40 — THE GUARD'S PREDICATE IS THE ACK TIMESTAMP, AND A MONEY
   PROXY IS REJECTED WITH EVIDENCE.** User, 2026-09-09, after the money route was

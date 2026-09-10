@@ -72,7 +72,7 @@ touched the file this session.)*
 
 | # | Item |
 | --- | --- |
-| **1** | ☐ **Turn Preview Deployments OFF** — Vercel → `yegrestoration` → Settings → Git. **Decision 34. Until it is done, any pushed branch gets a deploy that reads and writes the REAL database and can email REAL customers.** ⚠️ *Turning previews off does not unscope the variables* |
+| **1** | ☐ **STOP PREVIEW BUILDS** — Vercel → `yegrestoration` → **Settings → Build and Deployment → Ignored Build Step → *"Only build production"***. 🔴 **⛔ ~~Settings → Git~~ — WRONG PAGE, corrected 2026-09-10 against the docs. THERE IS NO ON/OFF TOGGLE FOR PREVIEWS**; *"Vercel for GitHub will deploy every push by default"* and the Ignored Build Step is the supported mechanism *(exit `0` aborts, exit `1` continues)*. **Decision 34. Until it is done, any pushed branch gets a deploy that reads and writes the REAL database and can email REAL customers.** ⚠️ **TWO LIMITS:** the deployment is still **created then CANCELED** and **counts toward the deployment quota**; and it **does NOT unscope the variables** — flip the setting back and the exposure returns unchanged |
 
 ✅ **ROADMAP human-blocked items 5, 7, 9a and 9b are all ANSWERED.** Only item 1
 *(`#36`'s `charge.refunded` resend, deprioritised by the user)* is still parked.
