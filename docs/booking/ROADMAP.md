@@ -525,6 +525,48 @@ in the database.*
   `#37` is its named counterexample.** `O-1` closes as follows: **the Resend path
   must REFUSE any row whose `terms_acked_at` is non-NULL and precedes the terms
   cutover**, so the office cannot send free-era terms to a paid-era customer.
+
+  🔴 🆕 **THE WORD *"RESEND"* IN THE LINE ABOVE UNDER-SCOPES IT BY TWO SURFACES.**
+  *Found 2026-09-09 by a delivery-path sweep, same day the decision was written.*
+  **The terms block is built in exactly ONE function — `customerConfirmation()`
+  (`src/lib/booking-email.ts:374`, rendered at `:522-533` html and `:604-611`
+  text) — and THREE production surfaces reach it from an EXISTING row:**
+  **(1)** the Resend button (`src/pages/api/admin/appointments/resend.ts:106`),
+  **(2)** the Stripe webhook's `markPaid` → `sendConfirmation`
+  (`src/lib/booking-payment.ts:1567`), and **(3)** the office's Interac
+  mark-paid and the $0 approve arm, which **share `markPaid`** and are therefore
+  the same code path. ⚠️ **A guard placed only where the ROADMAP's own Known-trap
+  entry points — it names `resend.ts` alone — leaves TWO surfaces open.**
+  ***This is `CLAUDE.md`'s copy-inventory trap in its DELIVERY-PATH form: the
+  claim was inventoried where it is RENDERED, not everywhere it is SENT.***
+
+  ✅ **ONE GUARD SUFFICES AND THE CHOKE POINT ALREADY EXISTS:
+  `planForAppointment` — `src/lib/booking-admin-notify.ts:164`.** It is the only
+  mapper into `planBookingNotifications` that takes an existing `Appointment`;
+  the other two callers take a `BookingPayload` and are the CREATION paths, which
+  are correctly out of scope. **`terms_acked_at` is already in hand there** —
+  `resend.ts:68-81` selects `a.*` and `markPaid`'s UPDATE uses `RETURNING *` — so
+  **no new query is needed.** *If the choke point is rejected, the minimum is TWO
+  guards, not three.*
+
+  🔴 **AND THE HARM NEEDS NO NEW TOOLING — `§Q-1` AND THIS ENTRY BOTH SAID IT DID.**
+  ⛔ ~~W23–W25 are the missing tooling~~ — **those are reschedule, mark-completed
+  and receipts (`ROADMAP.md:1315-1316`); NONE of them is a status correction.**
+  **`editorMaySetStatus` (`src/lib/booking-status.ts:343`) permits `declined →
+  confirmed` TODAY**, because `confirmed` is editor-owned and the invite-crossing
+  check needs only `paid_at` non-NULL — **and `#37` paid twice.** One save on the
+  existing status dropdown (`admin/appointments/[id].astro:1870`) lights the
+  Resend button. **The exposure is live now, not on a future ticket.**
+
+  ⚠️ **TWO REFUSAL-SEMANTICS CONSEQUENCES, both to be stated in the ticket, not
+  discovered in review:** a `throw` at the choke point reaches `resend.ts`'s outer
+  `catch` (`:120`) and flashes `email=failed`, **indistinguishable from a Resend
+  outage** — so a pre-check beside the existing guard at `resend.ts:94` is owed
+  for the MESSAGE, with the throw kept as the enforcement. And on the payment
+  side the throw is swallowed by `sendConfirmation`'s `catch`
+  (`booking-payment.ts:1589`), so a re-approved paid-era row **is confirmed, gets
+  the OFFICE ICS, and gets NO customer message at all.** *Safe in the intended
+  direction; still a behaviour change.*
   ⚠️ **This re-introduces a need for the cutover instant that `§P-0` deleted
   (`TERMS_ERA_CUTOFF`).** Decision 30's collapse of the RENDER is untouched; what
   returns is a REFUSAL, on a different surface. → `BK-55.md` `§Q-1`.
